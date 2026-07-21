@@ -1,0 +1,25 @@
+{
+  "name": "@mr-maliang/longexperiment",
+  "version": "0.2.0",
+  "description": "Long-running experiment workflows compiled to MalaClaw",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "bin": { "longexperiment": "dist/compat-cli.js" },
+  "files": ["dist/", "configs/", "docs/", "templates/", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js dist/compat-cli.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@mr-maliang/research-protocol": "^0.2.0",
+    "commander": "^12.1.0",
+    "yaml": "^2.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.0"
+  }
+}

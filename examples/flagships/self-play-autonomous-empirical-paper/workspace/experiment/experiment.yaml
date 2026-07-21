@@ -1,0 +1,62 @@
+version: 1
+project:
+  id: self-play-autonomous-empirical
+  name: Self-Play Autonomous Empirical Paper
+  mode: computational_experiment
+profile: from_scratch
+authoring:
+  mode: agentic
+  language: python
+  entrypoint: maliang_runner.py
+  max_revision_rounds: 3
+  max_files: 40
+  max_file_bytes: 100000
+  require_tests: true
+  require_literature_context: true
+hypothesis: A literature-grounded self-play intervention can improve held-out exact-match performance over a fixed no-self-play baseline under a small-model compute budget.
+research_question: Which bounded self-play mechanism remains beneficial under fixed prompts, evaluator, model revision, and held-out arithmetic tasks?
+inputs:
+  code: []
+  benchmarks:
+    - id: arithmetic-bench
+      source: https://github.com/openai/grade-school-math
+      revision: 3101c7d5072418e28b9008a6636bde82a006892c
+      license: MIT
+      materialize: git
+  models:
+    - id: pilot-model
+      source: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+      revision: 7ae557604adf67be50417f59c2c2f167def9a775
+      materialize: external
+evaluation:
+  primary_metric: exact_match
+  direction: maximize
+  baseline_id: no-self-play
+  control: fixed model revision, prompts, evaluator, training-token budget, arithmetic split, and hardware class
+  seeds: [11, 23, 47]
+  statistical_test: paired bootstrap confidence interval
+  heldout_split: heldout
+suite:
+  id: self-play-autonomous-study
+  max_rounds: 3
+  studies:
+    - id: primary
+      kind: training_ablation
+      depends_on: []
+      acceptance_criteria:
+        - execute baseline and agent-authored self-play method for every declared seed
+        - use the fixed held-out evaluator and report paired uncertainty
+      conditions: [no-self-play, agent-self-play]
+runner:
+  kind: command
+execution:
+  max_trials: 8
+  max_active_run_minutes: 1440
+  max_recorded_tokens: 2500000
+  max_parallel_trials: 1
+  requires_design_approval: true
+  requires_revision_approval: true
+  candidate_worktrees: []
+  enabled_optional_actions: []
+outputs:
+  longwrite_workspace: ../writing

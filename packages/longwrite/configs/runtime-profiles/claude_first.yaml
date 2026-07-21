@@ -1,0 +1,48 @@
+id: claude_first
+version: 1
+name: Claude First
+description: >
+  Keep the LLM-owned workflow in Claude Code, using its advisor tier for
+  planning/revision and its reviewer/executor tiers where configured.
+agent_runtime: claude-code
+workflow:
+  runtime_policy:
+    primary: claude-code
+    on_rate_limit: backoff
+    on_quota_exhausted: pause
+    on_budget_exceeded: require_approval
+  model_tiers:
+    advisor:
+      runtime: claude-code
+      model: claude-fable-5
+      max_cost_usd: 2
+      requires_budget_approval: true
+    executor:
+      runtime: claude-code
+      model: claude-sonnet-5
+      max_cost_usd: 1
+    reviewer:
+      runtime: claude-code
+      model: claude-sonnet-5
+      max_cost_usd: 1
+  stage_model_tiers:
+    intake: advisor
+    premise: advisor
+    reader_profile: advisor
+    outline: advisor
+    world_bible: advisor
+    character_bible: advisor
+    plot_outline: advisor
+    table_of_contents: advisor
+    chapter_contracts: advisor
+    continuity_review: reviewer
+    style_pass: reviewer
+    technical_review: reviewer
+    feedback_review: reviewer
+    review: reviewer
+    revise: advisor
+    edit: executor
+  step_model_tiers:
+    draft: executor
+    continuity_check: reviewer
+    code_validate: executor

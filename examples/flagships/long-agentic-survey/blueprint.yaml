@@ -1,0 +1,48 @@
+version: 1
+id: long-agentic-survey
+template: paper.survey
+components: [writing]
+topic: Long-horizon memory and planning in LLM agents
+base_mode: packages/longwrite/configs/modes/auto_research_agentic.yaml
+init_passthrough:
+  research_provider: multi
+  research_workflow_profile: deep
+  research_writing_strategy: llm_sections
+  target_length_words: 24000
+  citation_style: author_year
+  output_formats: [markdown, pdf]
+  taxonomy:
+    - memory architectures
+    - planning and task decomposition
+    - tool use and environment feedback
+    - long-term memory safety
+    - evaluation and benchmarks
+init_args:
+  - --research-provider
+  - multi
+  - --research-workflow-profile
+  - deep
+  - --research-writing-strategy
+  - llm_sections
+  - --target-length-words
+  - "24000"
+  - --citation-style
+  - author_year
+  - --output-format
+  - markdown
+  - pdf
+  - --taxonomy
+  - memory architectures
+  - planning and task decomposition
+  - tool use and environment feedback
+  - long-term memory safety
+  - evaluation and benchmarks
+required_setup:
+  - Node.js 22 or newer
+  - MalaClaw and an authenticated Codex or Claude runtime
+  - LaTeX/PDF tooling for the final PDF
+expected_artifacts:
+  - writing/paper/main.pdf
+  - writing/reports/run-provenance.json
+  - writing/reports/review-scorecard.json
+  - writing/evidence/chunks.jsonl

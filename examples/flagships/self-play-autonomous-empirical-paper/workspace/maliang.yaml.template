@@ -1,0 +1,18 @@
+version: 1
+project:
+  id: self-play-agentic-paper
+  template: paper.empirical
+research:
+  paperKind: empirical
+  evidenceProfile: literature
+  experimentSource: run
+  experimentAuthoring: agentic
+components:
+  experiment:
+    workspace: experiment
+  writing:
+    workspace: writing
+handoff:
+  mode: run_then_import
+  state: awaiting_experiment
+  manifest_path: experiment/results/experiment-manifest.json

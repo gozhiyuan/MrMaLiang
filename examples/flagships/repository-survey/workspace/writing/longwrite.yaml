@@ -1,0 +1,92 @@
+version: 1
+project:
+  id: writing
+  name: writing
+  artifact_type: research_paper
+  mode: auto_research_agentic
+  authors: []
+research:
+  provider: multi
+  paper_kind: survey
+  paper_profile: repository_study
+  workflow_profile: standard
+  topic: System architecture and research workflow design
+  target_candidates: 240
+  query_budget: 30
+  taxonomy: []
+  codebases:
+    - id: repo-your-repository
+      source: https://github.com/your-org/your-repository.git
+      ref: HEAD
+      title: your-repository
+      role: primary_artifact
+  codebase_discovery:
+    enabled: false
+    provider: github
+    query_budget: 10
+    max_candidates: 40
+    max_readme_fetches: 12
+    max_selected: 8
+    require_license: true
+    include_archived: false
+    languages: []
+  source_policy:
+    min_recent_ratio: 0.4
+    min_verified_ratio: 0.8
+    max_arxiv_only_ratio: 0.6
+    require_live_urls: true
+  release_gates:
+    min_cited_sources: 12
+    min_citations_per_page: 0
+    min_cited_within_one_year_ratio: 0
+    min_accepted_cited_ratio: 0
+    max_cited_arxiv_only_ratio: 1
+    min_citation_depths_per_section: { A: 0, B: 1, C: 1 }
+    min_cited_ab_sources_per_taxonomy_cell: 0
+  experiment: { enabled: false, results_path: experiments/results.json, min_trials: 3 }
+  fulltext: { max_core_sources: 40, allow_pdf_download: true }
+  semantic_screen:
+    enabled: true
+    max_candidates: 100
+    min_candidates_per_taxonomy_cell: 3
+    max_evidence_sources: 32
+    min_supported_claims_for_a: 2
+    min_supported_claims_for_b: 1
+  outline_review: { enabled: true, max_rounds: 2, approval_mode: auto }
+  verification: { max_sources: 30 }
+  corpus_gates:
+    min_candidates: 50
+    min_sources_per_taxonomy_cell: 0
+    min_core_sources: 6
+    min_recent_ratio: 0.1
+    min_source_type_diversity: 1
+  writing_strategy: llm_sections
+  retrieval: { backend: sqlite_fts, embedding_model: text-embedding-3-small }
+writing:
+  target_length_words: 10000
+  reference_links: []
+  reference_files: []
+  output_formats: [markdown, pdf]
+publication:
+  target: arxiv
+  anonymous: false
+  required_sections: []
+  document_class_options: []
+  presentation:
+    citation_style: author_year
+    show_production_statistics: false
+    disclosure:
+      enabled: true
+      ai_use: LongWrite's agentic research workflow supported literature research, drafting, review, and figure planning.
+      provenance: { enabled: true, include_longwrite: true, include_malaclaw: true, include_runtime_models: true }
+figures:
+  quality_gates:
+    min_figures: 3
+    min_tables: 3
+    min_comparative_tables: 1
+    min_verified_metadata_plots: 1
+    max_nanobanana_illustrations: 1
+    require_insight_statements: true
+run_limits: { max_unit_minutes: 30, max_active_run_minutes: 1440, max_recorded_tokens: 10000000, on_limit: pause }
+execution: { stage_overrides: {} }
+review: { cadence: manual, time: "08:00", interval_hours: 4, batch_approvals: false }

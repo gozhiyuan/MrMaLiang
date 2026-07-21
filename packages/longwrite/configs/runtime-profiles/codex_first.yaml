@@ -1,0 +1,46 @@
+id: codex_first
+version: 1
+name: Codex First
+description: >
+  Use Claude as a high-judgment advisor for strategy, outline, review, and
+  routing, while routing bulk execution and file-editing work to Codex.
+agent_runtime: codex
+workflow:
+  runtime_policy:
+    primary: codex
+    on_rate_limit: backoff
+    on_quota_exhausted: pause
+    on_budget_exceeded: require_approval
+  model_tiers:
+    advisor:
+      runtime: claude-code
+      model: claude-fable-5
+      max_cost_usd: 2
+      requires_budget_approval: true
+    reviewer:
+      runtime: claude-code
+      model: claude-sonnet-5
+      max_cost_usd: 1
+    executor:
+      runtime: codex
+  stage_model_tiers:
+    intake: advisor
+    premise: advisor
+    reader_profile: advisor
+    outline: advisor
+    world_bible: advisor
+    character_bible: advisor
+    plot_outline: advisor
+    table_of_contents: advisor
+    chapter_contracts: advisor
+    continuity_review: reviewer
+    style_pass: reviewer
+    technical_review: reviewer
+    feedback_review: reviewer
+    review: reviewer
+    revise: advisor
+    edit: executor
+  step_model_tiers:
+    draft: executor
+    continuity_check: reviewer
+    code_validate: executor

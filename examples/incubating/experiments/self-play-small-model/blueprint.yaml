@@ -1,0 +1,17 @@
+version: 1
+id: self-play-small-model
+template: experiment.self-play-small-model
+components: [experiment]
+source_config: packages/longexperiment/configs/flagships/self_play_small_model.yaml
+required_setup:
+  - Node.js 22 or newer
+  - reviewed LONGEXPERIMENT_SELF_PLAY_COMMAND executor
+  - pinned model revision, prompts, evaluator, verifier-noise policy, and heldout split
+  - local or reviewed remote execution budget
+smoke_controls:
+  trials: one condition and one seed before the declared suite
+expected_artifacts:
+  - experiment/results/trials.jsonl
+  - experiment/results/experiment-manifest.json
+  - experiment/reports/experiment-audit.json
+  - experiment/reports/run-provenance.json

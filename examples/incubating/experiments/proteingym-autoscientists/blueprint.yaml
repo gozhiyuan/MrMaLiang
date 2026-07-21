@@ -1,0 +1,18 @@
+version: 1
+id: proteingym-autoscientists
+template: experiment.proteingym-autoscientists
+components: [experiment]
+source_config: packages/longexperiment/configs/flagships/proteingym_autoscientists.yaml
+required_setup:
+  - Node.js 22 or newer
+  - pinned ProteinGym and AutoScientists checkouts
+  - reviewed LONGEXPERIMENT_AUTOSCIENTISTS_COMMAND launcher
+  - benchmark/data permissions and heldout assay protocol
+  - independently approved model, API, and optional GPU budget
+smoke_controls:
+  trials: one assay and one seed before the declared heldout protocol
+expected_artifacts:
+  - experiment/results/trials.jsonl
+  - experiment/results/experiment-manifest.json
+  - experiment/reports/experiment-audit.json
+  - experiment/reports/run-provenance.json

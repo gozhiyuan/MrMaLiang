@@ -1,0 +1,700 @@
+id: auto_research_agentic
+version: 1
+name: AutoResearch Agentic
+description: >
+  The default evidence-aware research-paper workflow. Bounded LLM planning
+  selects source-grounded analytical artifacts and allowlisted remediation
+  actions; scripts enforce provenance, evidence, rendering, and release gates.
+artifact_type: research_paper
+default_workflow_profile: deep
+default_runtime:
+  executor: malaclaw
+  agent_runtime: codex
+default_agents:
+  - research-lead
+  - source-curator
+  - analyst
+  - outline-architect
+  - chapter-writer
+  - skeptical-reviewer
+  - editor
+  - artifact-builder
+artifacts:
+  required:
+    - project_brief.md
+    - outline.md
+    - sources/raw_results.jsonl
+    - sources/deduped_sources.jsonl
+    - sources/scored_sources.jsonl
+    - sources/classified_sources.jsonl
+    - sources/citation_plan.jsonl
+    - sources/source-identities.jsonl
+    - reports/corpus-gates.json
+    - reports/survey-contract.json
+    - tables/related-work-matrix.md
+    - reviews/review-round-001.md
+  optional:
+    - sources/bibliography.bib
+    - figures/figure-plan.md
+    - figures/manifest.json
+    - figures/*.svg
+    - tables/*.md
+    - data/*.csv
+    - paper/main.tex
+    - paper/references.bib
+    - paper/sections/*.tex
+    - build/manuscript.tex
+    - build/manuscript.pdf
+workflow:
+  # The mode YAML stays portable with MalaClaw built-in validators.
+  # longwrite init injects script runtime commands for deterministic research
+  # and build work. Full/deep initialization keeps section drafting as an LLM
+  # task; an operator can explicitly select scaffold_then_revise instead.
+  stages:
+    - id: intake
+      title: Project intake
+      owner: research-lead
+      outputs:
+        - project_brief.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: search_planner
+      title: Search planning
+      owner: source-curator
+      inputs:
+        - project_brief.md
+      outputs:
+        # Validated plan; deterministic recall executes its query variants.
+        - sources/search-plan.json
+      instructions:
+        - "Write strict JSON matching {\"version\":1,\"topic\":\"...\",\"query_variants\":[...],\"taxonomy_cells\":[{\"cell\":\"...\",\"query_variants\":[\"...\",\"...\",\"...\"]}],\"exclusion_terms\":[],\"venue_priorities\":[],\"source_types\":[...]}. Preserve every project taxonomy coverage cell verbatim as a taxonomy_cells[].cell; each cell must have at least 3 distinct query variants."
+        - "Cover method families, evaluation/benchmark terms, prior surveys, and application variants. Prefer queries that can retrieve both recent and foundational work."
+      validators:
+        - required_output_exists
+
+    - id: recall
+      title: Literature recall
+      owner: source-curator
+      inputs:
+        - project_brief.md
+      tools:
+        - web_search
+        - arxiv_search
+        - dblp_lookup
+      outputs:
+        - sources/raw_results.jsonl
+        - sources/deduped_sources.jsonl
+        - sources/reference-seeds.json
+        - reports/reference-seeds.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: snowball_recall
+      title: Citation-network expansion
+      owner: source-curator
+      inputs:
+        - sources/deduped_sources.jsonl
+      outputs:
+        - sources/snowball_results.jsonl
+        - sources/deduped_sources.jsonl
+        - reports/snowball.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: enrich
+      title: Metadata enrichment
+      owner: source-curator
+      inputs:
+        - sources/deduped_sources.jsonl
+      outputs:
+        - sources/deduped_sources.jsonl
+        - sources/metadata-upgrades.jsonl
+        - reports/metadata-enrichment.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: venue_upgrade
+      title: Venue and acceptance metadata upgrade
+      owner: source-curator
+      inputs:
+        - sources/deduped_sources.jsonl
+      outputs:
+        - sources/deduped_sources.jsonl
+        - sources/venue-upgrades.jsonl
+        - reports/venue-upgrade.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: score
+      title: Source scoring
+      owner: analyst
+      inputs:
+        - sources/deduped_sources.jsonl
+      outputs:
+        - sources/scored_sources.jsonl
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: classify
+      title: Source depth classification
+      owner: analyst
+      inputs:
+        - sources/scored_sources.jsonl
+      outputs:
+        - sources/classified_sources.jsonl
+        - sources/bibliography.bib
+        - sources/citation_plan.jsonl
+        - reports/research-tooling.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: identity_reconcile
+      title: Source identity and provenance reconciliation
+      owner: source-curator
+      inputs:
+        - sources/classified_sources.jsonl
+      outputs:
+        - sources/source-identities.jsonl
+        - reports/source-identities.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: corpus_gates
+      title: Full-mode corpus breadth gates
+      owner: analyst
+      inputs:
+        - sources/classified_sources.jsonl
+        - sources/source-identities.jsonl
+      outputs:
+        - reports/corpus-gates.json
+        - reports/corpus-gates.md
+      validators:
+        - required_output_exists
+
+    - id: fulltext
+      title: Full-text ingestion
+      owner: source-curator
+      inputs:
+        - sources/classified_sources.jsonl
+      outputs:
+        - fulltext/manifest.json
+        - reports/fulltext.md
+      validators:
+        - required_output_exists
+
+    - id: evidence_index
+      title: Evidence corpus indexing
+      owner: source-curator
+      inputs:
+        - sources/classified_sources.jsonl
+        - fulltext/manifest.json
+      outputs:
+        - evidence/chunks.jsonl
+        - evidence/index.sqlite
+        - evidence/manifest.json
+      validators:
+        - required_output_exists
+
+    - id: outline
+      title: Outline
+      owner: outline-architect
+      inputs:
+        - project_brief.md
+        - sources/classified_sources.jsonl
+      optional_inputs:
+        - feedback/outline-revision.md
+      outputs:
+        - outline.md
+        - outline.json
+      instructions:
+        - "When feedback/outline-revision.md is present, treat it as the human's requested changes for this outline revision. Implement it while preserving the evidence-first scope and emit matching outline.md and outline.json."
+        - "Every outline.json section MUST include: id, title, role, target_words, purpose, keywords (at least two strings), and source_ids. keywords are the retrieval terms used for its section evidence packet."
+        - "For a survey contract, assign exactly these role values where applicable: introduction_gap_contributions, multi_axis_taxonomy, method_family (at least two sections), related_work_differentiation, limitations_future_work, or body. Include each required role at least once, and use body only for remaining sections."
+      requires_human_approval: true
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: survey_contract
+      title: Survey reasoning contract
+      owner: analyst
+      inputs:
+        - outline.json
+        - sources/classified_sources.jsonl
+      outputs:
+        - reports/survey-contract.json
+        - reports/survey-contract.md
+        - tables/related-work-matrix.md
+      validators:
+        - required_output_exists
+
+    - id: structure_audit
+      title: Survey structure audit
+      owner: analyst
+      inputs:
+        - outline.json
+      outputs:
+        - reports/structure-audit.json
+        - reports/structure-audit.md
+      validators:
+        - required_output_exists
+
+    - id: allocate_evidence
+      title: Outline-to-evidence allocation
+      owner: source-curator
+      inputs:
+        - outline.json
+        - evidence/index.sqlite
+        - sources/classified_sources.jsonl
+      outputs:
+        - evidence/coverage.json
+        # One packet per outline section. The wildcard is intentional: the
+        # foreach writer consumes its matching packet on the next stage.
+        - evidence/section-*.json
+      validators:
+        - required_output_exists
+
+    - id: visual_plan
+      title: Plan placed figures and tables
+      owner: artifact-builder
+      inputs:
+        - outline.json
+        - evidence/coverage.json
+        - sources/classified_sources.jsonl
+      outputs:
+        - figures/placement-plan.json
+      instructions:
+        - "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes and only edges that express the survey's actual organizing relationship. In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files."
+        - "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables."
+        - "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section."
+      validators:
+        - required_output_exists
+
+    - id: draft_sections
+      title: Draft sections
+      type: foreach
+      foreach: outline.sections
+      item_name: section
+      # Codex and Claude Code currently advertise two local concurrent workers.
+      # Keep the default within that shared cap; operators may lower it further.
+      max_parallel: 2
+      steps:
+        - id: draft
+          owner: chapter-writer
+          inputs:
+            - project_brief.md
+            - outline.md
+            - outline.json
+            - sources/classified_sources.jsonl
+            - evidence/section-{{section.id}}.json
+          optional_inputs:
+            - fulltext/*.md
+          skills:
+            - project_brief.md
+            - outline.json
+            - evidence/section-{{section.id}}.json
+          instructions:
+            - "Follow the injected project brief for audience, target length, and style. Do not cite a URL/file directly from the brief: recognized scholarly links enter through authoritative reference seeds and may be cited only after they appear in the section evidence packet; all other links/files remain contextual leads. Cite factual claims only with exact packet chunk ids."
+            - "Write complete reader-facing prose for this section, aiming for its outline.json target_words allocation. Do not emit a scaffold, source inventory, or a shorter placeholder merely because later revision exists."
+            - "Do not emit Markdown pipe tables, hand-numbered Table/Figure references, or prose pretending to be a diagram. The artifact builder owns captions, labels, table layout, and rendered figures; explain the comparison or relationship in prose and let the placed artifact carry the formal reference."
+            - "Use inline `$...$` or display `$$...$$` notation only when it formalizes a sourced definition, objective, comparison, or analytical claim that materially helps the reader. Define every symbol in nearby prose; never add decorative equations or imply a theorem/experiment not supported by the evidence packet."
+            - "For research prose, cite only exact chunk ids from the injected evidence packet: [source:<source-id>:p<paragraph>]. A generic [source:<source-id>] marker is not enough for publication validation."
+            - "Do not cite a source merely because it appears in source_ids. If no packet chunk supports a factual claim, remove or qualify the claim."
+          outputs:
+            - chapters/{{section.id}}.md
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+    - id: citation_ledger
+      title: Citation evidence ledger
+      owner: analyst
+      inputs:
+        - chapters/*.md
+        - evidence/coverage.json
+      outputs:
+        - evidence/citation-ledger.jsonl
+      validators:
+        - required_output_exists
+
+    - id: evidence_audit
+      title: Audit citation evidence before review
+      owner: analyst
+      inputs:
+        - evidence/citation-ledger.jsonl
+      outputs:
+        - reports/evidence-audit.json
+        - reports/evidence-audit.md
+      validators:
+        - required_output_exists
+
+    - id: abstract
+      title: Write research-paper abstract
+      owner: editor
+      inputs:
+        - project_brief.md
+        - outline.md
+        - chapters/*.md
+      optional_inputs:
+        - evidence/coverage.json
+      skills:
+        - project_brief.md
+        - outline.md
+      instructions:
+        - "Write paper/abstract.md as 150--250 words of reader-facing survey prose: the research problem, scope and selection basis, organizing contribution, main synthesis, and principal limitation or open question. Do not mention LongWrite, agents, prompts, or workflow mechanics. Do not use citations, source markers, headings other than an optional '# Abstract', or unsupported claims."
+      outputs:
+        - paper/abstract.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    # A first real PDF is built before peer review. Reviewers must assess the
+    # rendered manuscript and placed artifacts, not just source Markdown.
+    - id: initial_build
+      title: Build review manuscript
+      owner: artifact-builder
+      inputs:
+        - chapters/*.md
+        - paper/abstract.md
+      optional_inputs:
+        - sources/bibliography.bib
+      outputs:
+        - figures/figure-plan.md
+        - figures/manifest.json
+        - figures/*.svg
+        - paper/main.tex
+        - paper/references.bib
+        - paper/sections/*.tex
+        - paper/figures/*.tex
+        - paper/tables/*.tex
+        - build/manuscript.pdf
+      validators:
+        - required_output_exists
+
+    # Establish a scored baseline before the first revision. Each quality-loop
+    # round ends in a new review, so the stop condition always evaluates the
+    # manuscript that was just rebuilt rather than its predecessor.
+    - id: baseline_review
+      title: Baseline simulated peer review
+      owner: skeptical-reviewer
+      inputs:
+        - project_brief.md
+        - outline.md
+        - outline.json
+        - chapters/*.md
+        - build/manuscript.pdf
+        - figures/manifest.json
+      optional_inputs:
+        - evidence/coverage.json
+        - evidence/citation-ledger.jsonl
+        - reports/evidence-audit.md
+        - reports/word-metrics.md
+        - feedback/user-feedback.md
+      skills:
+        - project_brief.md
+        - outline.json
+        - evidence/coverage.json
+        - evidence/citation-ledger.jsonl
+        - reports/evidence-audit.md
+        - reports/word-metrics.md
+        - feedback/user-feedback.md
+      instructions:
+        - "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations."
+        - "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation."
+        - "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler."
+        - "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
+      outputs:
+        - reviews/review-round-001.md
+        - reviews/scorecard.json
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: quality_loop
+      type: loop
+      title: Review, route, revise, and rebuild
+      # Profile compilation supplies the operational cap. Keep this portable
+      # base manifest aligned with the deep profile's five-round ceiling.
+      max_rounds: 5
+      stop_when: review_score >= 8.0
+      # Stop early when the score plateaus: further rewriting cannot reach the
+      # target without more corpus/evidence (AutoResearch's delta rule). With
+      # the bounded revision budget, expand_research gets room to fix coverage before
+      # stagnation trips; preserve the best rebuilt manuscript and continue to
+      # the downstream verification and release-validation stages.
+      stop_on_stagnation:
+        min_delta: 0.3
+        consecutive_rounds: 2
+        on_stagnation: succeed
+      # Exhausting the bounded improvement budget also preserves the manuscript
+      # and runs final reports. final_validate remains the release gate: it
+      # rejects a score below the calibrated target, even though the flow has
+      # produced the inspectable final artifacts.
+      on_exhaustion: succeed
+      stages:
+        - id: route
+          title: Route review weaknesses
+          owner: analyst
+          inputs:
+            - reviews/scorecard.json
+          outputs:
+            - reports/routing.md
+            - reports/remediation-plan.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+        - id: expand_research
+          title: Expand corpus when coverage is deficient
+          owner: source-curator
+          inputs:
+            - reports/remediation-plan.json
+            - outline.json
+          outputs:
+            - reports/research-expansion.md
+          optional_inputs:
+            - evidence/coverage.json
+          validators:
+            - required_output_exists
+
+        - id: revise
+          title: Revision
+          owner: editor
+          inputs:
+            - project_brief.md
+            - outline.json
+            - chapters/*.md
+            - reviews/review-round-001.md
+            - reports/routing.md
+          optional_inputs:
+            - paper/abstract.md
+            - evidence/section-*.json
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+            - reports/word-metrics.md
+            - fulltext/*.md
+            - feedback/user-feedback.md
+          # These are injected as bounded, workspace-local skill documents.
+          # They give the editor attributable passages and section intent,
+          # without asking it to re-fetch or invent citations.
+          skills:
+            - project_brief.md
+            - outline.json
+            - evidence/section-*.json
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+            - reports/word-metrics.md
+            - feedback/user-feedback.md
+          instructions:
+            - "Follow the injected project brief for audience, target length, and style. Do not cite a URL/file directly from the brief: recognized scholarly links enter through authoritative reference seeds and may be cited only after they appear in the section evidence packet; all other links/files remain contextual leads. Retain a factual claim only when the evidence packet supports it."
+            - "Treat outline.json target_words as a section contract. Measure the chapter set against the project total and expand every materially short section with evidence-backed analysis, comparisons, and limitations until it approaches its allocation. Do not add filler, unsupported claims, or a revision log to reader-facing prose."
+            - "Repair every cited factual claim flagged by the evidence audit. Replace generic [source:<source-id>] markers with exact chunk ids from the matching evidence packet, for example [source:<source-id>:p12]."
+            - "Before finalizing a chapter, make every [source:<source-id>:pN] marker resolve to a source in the current evidence packet and bibliography; remove or rewrite any claim whose marker cannot resolve."
+            - "Remove or explicitly qualify claims with no packet-backed evidence. Never preserve a citation merely because its metadata exists."
+            - "When feedback/user-feedback.md is present, implement its relevant requests without violating the evidence and citation requirements; describe what changed or could not safely change in reviews/revision-report.md."
+            - "Refresh paper/abstract.md when the revision materially changes scope, synthesis, or conclusions. Keep it 150--250 words, reader-facing, citation-free, and free of workflow/process language."
+            - "Do not add Markdown pipe tables, hand-numbered Table/Figure references, prose pretending to be a diagram, or delivery/placement instructions for an artifact builder. Preserve the artifact builder's labeled tables and rendered figures; revise the surrounding explanation instead."
+          outputs:
+            - chapters/*.md
+            - paper/abstract.md
+            - reviews/revision-report.md
+
+        # Revision changes chapter citation markers. Recreate the ledger before
+        # rebuilding so review and final validation inspect the current prose,
+        # never the ledger from the initial draft.
+        - id: consolidate_citations
+          title: Refresh citation evidence ledger
+          owner: analyst
+          inputs:
+            - chapters/*.md
+            - evidence/coverage.json
+          outputs:
+            - evidence/citation-ledger.jsonl
+          validators:
+            - required_output_exists
+            - jsonl_parseable
+
+        - id: evidence_audit
+          title: Audit revised citation evidence
+          owner: analyst
+          inputs:
+            - evidence/citation-ledger.jsonl
+          outputs:
+            - reports/evidence-audit.json
+            - reports/evidence-audit.md
+          validators:
+            - required_output_exists
+
+        - id: claim_judge
+          title: Double-review citation-backed sampled claims
+          owner: skeptical-reviewer
+          inputs:
+            - chapters/*.md
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+          skills:
+            - evidence/section-*.json
+            - evidence/citation-ledger.jsonl
+          instructions:
+            - "Deterministically sample substantive cited claims from every section. Use stable sample ids like claim-001."
+            - "Write reviews/claim-judgments.jsonl with TWO independent JSONL judgments per sample_id, reviewer_id values reviewer_a and reviewer_b, and fields {sample_id,reviewer_id,source_id,chapter,claim,evidence_locators,prompt_hash,model,runtime,verdict,rationale}. verdict must be entailed, partial, or unsupported."
+            - "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
+          outputs:
+            - reviews/claim-judgments.jsonl
+          validators:
+            - required_output_exists
+            - jsonl_parseable
+
+        # Models occasionally wrap otherwise valid rows in a JSON array. This
+        # syntax-only repair preserves the original and validates every row;
+        # semantic errors remain visible for the next remediation action.
+        - id: claim_judgment_repair
+          title: Normalize and validate claim-judgment contract
+          owner: analyst
+          inputs:
+            - reviews/claim-judgments.jsonl
+          outputs:
+            - reports/claim-judgment-repair.md
+          validators:
+            - required_output_exists
+
+        - id: claim_score
+          title: Score claim support gate
+          owner: analyst
+          inputs:
+            - reviews/claim-judgments.jsonl
+          outputs:
+            - reports/claim-gate.md
+            - reports/metrics.json
+          validators:
+            - required_output_exists
+
+        - id: rebuild
+          title: Rebuild manuscript
+          owner: artifact-builder
+          inputs:
+            - chapters/*.md
+            - paper/abstract.md
+          optional_inputs:
+            - sources/bibliography.bib
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+            - reports/remediation-plan.json
+          outputs:
+            - figures/figure-plan.md
+            - figures/manifest.json
+            - figures/*.svg
+            - data/*.csv
+            - tables/*.md
+            - paper/main.tex
+            - paper/sections/*.tex
+            - paper/figures/*.tex
+            - paper/tables/*.tex
+            - build/manuscript.pdf
+          validators:
+            - required_output_exists
+
+        # Score the rebuilt manuscript, not the draft that preceded revision.
+        - id: review
+          title: Simulated peer review of rebuilt manuscript
+          owner: skeptical-reviewer
+          inputs:
+            - project_brief.md
+            - outline.md
+            - outline.json
+            - chapters/*.md
+            - build/manuscript.pdf
+            - figures/manifest.json
+          optional_inputs:
+            - evidence/coverage.json
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+            - reports/word-metrics.md
+            - feedback/user-feedback.md
+          skills:
+            - project_brief.md
+            - outline.json
+            - evidence/coverage.json
+            - evidence/citation-ledger.jsonl
+            - reports/evidence-audit.md
+            - reports/word-metrics.md
+            - feedback/user-feedback.md
+          instructions:
+            - "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations."
+            - "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation."
+            - "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler."
+            - "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
+          outputs:
+            - reviews/review-round-001.md
+            - reviews/scorecard.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+    - id: verify_citations
+      title: Verify cited source URLs
+      owner: source-curator
+      inputs:
+        - chapters/*.md
+        - sources/classified_sources.jsonl
+      outputs:
+        - sources/citation-verification.jsonl
+        - reports/source-verification.md
+      validators:
+        - required_output_exists
+        - jsonl_parseable
+
+    - id: assess
+      title: Literature quality and citation verification
+      owner: analyst
+      inputs:
+        - sources/classified_sources.jsonl
+        - sources/citation_plan.jsonl
+        - chapters/*.md
+        - sources/bibliography.bib
+      outputs:
+        - reports/research-assessment.json
+        - reports/research-assessment.md
+        - sources/source_upgrade_plan.jsonl
+      validators:
+        - required_output_exists
+
+    # This is deliberately last. Citation verification is a publication gate,
+    # not a prerequisite for an intermediate quality-loop rebuild.
+    - id: final_validate
+      title: Final research validation
+      owner: artifact-builder
+      inputs:
+        - chapters/*.md
+        - evidence/citation-ledger.jsonl
+        - reports/evidence-audit.md
+        - sources/citation-verification.jsonl
+        - reports/research-assessment.json
+        - build/manuscript.pdf
+      outputs:
+        - reports/longwrite-validation.json
+        - reports/longwrite-validation.md
+      validators:
+        - required_output_exists
+
+    - id: package_submission
+      title: Package validated publication source
+      owner: artifact-builder
+      inputs:
+        - paper/main.tex
+        - paper/references.bib
+        - build/manuscript.pdf
+        - reports/longwrite-validation.json
+      outputs:
+        - build/submission/*/longwrite-submission-manifest.json
+      validators:
+        - required_output_exists

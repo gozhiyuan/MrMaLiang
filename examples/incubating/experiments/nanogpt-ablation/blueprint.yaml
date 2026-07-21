@@ -1,0 +1,19 @@
+version: 1
+id: nanogpt-ablation
+template: experiment.nanogpt-ablation
+components: [experiment]
+source_config: packages/longexperiment/configs/flagships/nanogpt_ablation.yaml
+required_setup:
+  - Node.js 22 or newer
+  - pinned nanoGPT checkout and dataset preparation
+  - approved candidate worktree revision
+  - local CUDA or a reviewed remote-job adapter
+smoke_controls:
+  environment:
+    LONGEXPERIMENT_NANOGPT_MAX_ITERS: "small positive iteration limit"
+  trials: one seed before the declared multi-seed pilot
+expected_artifacts:
+  - experiment/results/trials.jsonl
+  - experiment/results/experiment-manifest.json
+  - experiment/reports/experiment-audit.json
+  - experiment/reports/run-provenance.json

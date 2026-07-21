@@ -1,0 +1,23 @@
+{
+  "name": "mr-maliang",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Unified long-form writing and computational research workflows",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @mr-maliang/research-protocol && npm run build --workspace @mr-maliang/longexperiment && npm run build --workspace @mr-maliang/longwrite && npm run build --workspace @mr-maliang/maliang",
+    "pretest": "npm run build",
+    "test": "npm run test --workspace @mr-maliang/research-protocol && npm run test --workspace @mr-maliang/longexperiment && npm run test --workspace @mr-maliang/longwrite && npm run test --workspace @mr-maliang/maliang",
+    "test:integration": "npm run test --workspace @mr-maliang/maliang -- empirical-handoff.e2e.test.ts",
+    "maliang": "node apps/maliang/dist/cli.js",
+    "release:check": "npm test && npm run maliang -- template list"
+  }
+}

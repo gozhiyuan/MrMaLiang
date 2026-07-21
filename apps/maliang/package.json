@@ -1,0 +1,24 @@
+{
+  "name": "@mr-maliang/maliang",
+  "version": "0.2.0",
+  "description": "Unified CLI for MrMaLiang writing and experiment workflows",
+  "type": "module",
+  "bin": {
+    "maliang": "dist/cli.js"
+  },
+  "files": ["dist/", "templates/"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "pretest": "npm run build",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "yaml": "^2.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.0"
+  }
+}

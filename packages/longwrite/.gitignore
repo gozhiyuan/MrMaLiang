@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+!examples/**/build/
+!examples/**/build/**
+.DS_Store
+.env
+.env.*
+.longwrite/
+.checkpoints/
+*.log
+
+/docs/superpowers/
+/docs/reviews/

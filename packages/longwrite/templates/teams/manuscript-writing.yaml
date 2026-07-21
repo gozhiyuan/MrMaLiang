@@ -1,0 +1,60 @@
+id: manuscript-writing
+name: Manuscript Writing
+version: 1
+communication:
+  topology: star
+members:
+  - agent: research-lead
+    role: lead
+    entry_point: true
+  - agent: source-curator
+    role: specialist
+  - agent: analyst
+    role: specialist
+  - agent: outline-architect
+    role: specialist
+  - agent: chapter-writer
+    role: specialist
+  - agent: skeptical-reviewer
+    role: reviewer
+  - agent: editor
+    role: specialist
+  - agent: artifact-builder
+    role: specialist
+graph:
+  - from: research-lead
+    to: source-curator
+    relationship: delegates_to
+  - from: research-lead
+    to: analyst
+    relationship: delegates_to
+  - from: research-lead
+    to: outline-architect
+    relationship: delegates_to
+  - from: research-lead
+    to: chapter-writer
+    relationship: delegates_to
+  - from: research-lead
+    to: skeptical-reviewer
+    relationship: delegates_to
+  - from: research-lead
+    to: editor
+    relationship: delegates_to
+  - from: research-lead
+    to: artifact-builder
+    relationship: delegates_to
+  - from: chapter-writer
+    to: skeptical-reviewer
+    relationship: requests_review
+shared_memory:
+  dir: .malaclaw/memory/manuscript-writing
+  files:
+    - path: decisions.md
+      access: append-only
+      writer: "*"
+    - path: style.md
+      access: append-only
+      writer: "*"
+    - path: source-index.md
+      access: append-only
+      writer: source-curator

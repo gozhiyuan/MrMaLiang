@@ -1,0 +1,20 @@
+version: 1
+project: { id: proteingym-autoscientists, name: ProteinGym Agentic Benchmark }
+profile: public_benchmark
+hypothesis: An approved representation change improves ProteinGym fitness prediction over a pinned public baseline.
+inputs:
+  benchmarks:
+    - { id: proteingym, source: https://github.com/OATML-Markslab/ProteinGym, revision: 144fe22b07dfaeec2b366f2346203a9838a55b4c, license: MIT }
+  code:
+    - { id: autoscientists, source: https://github.com/mims-harvard/AutoScientists, revision: c71a92343b9a488ed10134be805845b9473ad18f, license: MIT }
+evaluation: { primary_metric: spearman, direction: maximize, baseline_id: pinned-proteingym-baseline, control: fixed assay split and evaluator, seeds: [11, 23, 47], statistical_test: paired bootstrap confidence interval, heldout_split: heldout-assays }
+suite:
+  id: proteingym-benchmark-improvement
+  max_rounds: 3
+  studies:
+    - { id: baseline, kind: inference_comparison, conditions: [pinned-proteingym-baseline], acceptance_criteria: [record public baseline on fixed assays] }
+    - { id: candidate, kind: training_ablation, depends_on: [baseline], conditions: [candidate], acceptance_criteria: [evaluate approved candidate against baseline] }
+    - { id: heldout, kind: heldout_evaluation, depends_on: [candidate], acceptance_criteria: [evaluate untouched heldout assays] }
+    - { id: replication, kind: inference_comparison, depends_on: [candidate], optional_action: replicate_condition, acceptance_criteria: [replicate positive candidate across seeds] }
+runner: { kind: autoscientists, repo_path: ../AutoScientists, task: task-protein-gym, launch_command: python3 templates/runners/autoscientists.py }
+execution: { max_trials: 18, max_active_run_minutes: 1440, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true }

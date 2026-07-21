@@ -1,0 +1,179 @@
+id: novel
+version: 1
+name: Novel
+description: >
+  A fiction workflow for premise development, world and character bibles, plot
+  outline, chapter drafting, continuity review, and revision.
+artifact_type: novel
+artifacts:
+  optional:
+    - build/preview.md
+    - build/highlights.md
+    - build/manuscript.pdf
+default_runtime:
+  executor: malaclaw
+  agent_runtime: codex
+default_agents:
+  - research-lead
+  - chapter-writer
+  - outline-architect
+  - skeptical-reviewer
+  - editor
+  - artifact-builder
+workflow:
+  stages:
+    - id: premise
+      title: Genre and premise
+      owner: research-lead
+      outputs:
+        - project_brief.md
+      requires_human_approval: true
+      validators:
+        - required_output_exists
+
+    - id: world_bible
+      title: World bible
+      owner: outline-architect
+      inputs:
+        - project_brief.md
+      outputs:
+        - bibles/world_bible.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: character_bible
+      title: Character bible
+      owner: outline-architect
+      inputs:
+        - project_brief.md
+        - bibles/world_bible.md
+      outputs:
+        - bibles/character_bible.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: plot_outline
+      title: Plot outline
+      owner: outline-architect
+      inputs:
+        - project_brief.md
+        - bibles/world_bible.md
+        - bibles/character_bible.md
+      outputs:
+        - outline/plot_outline.md
+        - outline/chapter_arcs.json
+        - outline.json
+      requires_human_approval: true
+      validators:
+        - required_output_exists
+
+    - id: draft_chapters
+      title: Draft chapters
+      type: foreach
+      foreach: outline.chapters
+      item_name: chapter
+      max_parallel: 4
+      steps:
+        - id: draft
+          owner: chapter-writer
+          inputs:
+            - outline/plot_outline.md
+            - bibles/world_bible.md
+            - bibles/character_bible.md
+          outputs:
+            - chapters/{{chapter.id}}.md
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+        - id: continuity_check
+          owner: skeptical-reviewer
+          inputs:
+            - chapters/{{chapter.id}}.md
+            - bibles/world_bible.md
+            - bibles/character_bible.md
+          outputs:
+            - reviews/{{chapter.id}}-continuity.md
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+    - id: continuity_review
+      title: Continuity review
+      owner: skeptical-reviewer
+      inputs:
+        - chapters/*.md
+        - bibles/world_bible.md
+        - bibles/character_bible.md
+      outputs:
+        - reviews/continuity-review.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: style_pass
+      title: Style pass
+      owner: editor
+      inputs:
+        - chapters/*.md
+        - reviews/continuity-review.md
+      outputs:
+        - reviews/style-drift.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: build
+      title: Build manuscript
+      owner: artifact-builder
+      inputs:
+        - chapters/*.md
+        - reviews/continuity-review.md
+        - reviews/style-drift.md
+      outputs:
+        - build/preview.md
+        - build/highlights.md
+        - build/manuscript.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: quality_loop
+      title: Feedback, revise, and rebuild
+      type: loop
+      max_rounds: 2
+      stop_when: review_score >= 8.0
+      stages:
+        - id: feedback_review
+          title: Feedback review and revision plan
+          owner: skeptical-reviewer
+          inputs:
+            - build/manuscript.md
+          optional_inputs:
+            - feedback/user-feedback.md
+          outputs:
+            - feedback/user-feedback.md
+            - feedback/revision-request.json
+            - reviews/revision-plan.md
+            - reports/metrics.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+        - id: revise
+          title: Revise chapters and rebuild manuscript
+          owner: editor
+          inputs:
+            - feedback/revision-request.json
+            - reviews/revision-plan.md
+            - chapters/*.md
+          outputs:
+            - reviews/revision-report.md
+            - build/preview.md
+            - build/highlights.md
+            - build/manuscript.md
+            - reports/metrics.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown

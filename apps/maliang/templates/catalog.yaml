@@ -1,0 +1,55 @@
+version: 1
+templates:
+  - id: writing.novel
+    title: Novel
+    description: LongWrite fiction workspace; no research experiment component.
+    writing: { mode: novel }
+    handoff: none
+  - id: writing.technical-book
+    title: Technical book
+    description: LongWrite technical-book workspace; no research experiment component.
+    writing: { mode: technical_book }
+    handoff: none
+  - id: paper.survey
+    title: Survey paper
+    description: Agentic literature survey with optional pinned Git repository evidence; never runs experiments.
+    writing: { mode: auto_research_agentic }
+    research: { paperKind: survey, experimentSource: none, repository: optional }
+    handoff: none
+  - id: experiment.standalone
+    title: Standalone experiment
+    description: Audited experiment suite without a manuscript.
+    experiment: {}
+    handoff: none
+  - id: experiment.nanogpt-ablation
+    title: nanoGPT ablation
+    description: Pinned nanoGPT experiment flagship.
+    experiment: { flagship: nanogpt_ablation }
+    handoff: none
+  - id: experiment.self-play-small-model
+    title: Small-model self-play
+    description: Pinned self-play experiment flagship.
+    experiment: { flagship: self_play_small_model }
+    handoff: none
+  - id: experiment.proteingym-autoscientists
+    title: ProteinGym AutoScientists
+    description: ProteinGym public-benchmark experiment through an external AutoScientists runner.
+    experiment: { flagship: proteingym_autoscientists }
+    handoff: none
+  - id: paper.empirical
+    title: Experiment paper
+    description: Run an agentic or prescribed experiment, optionally from a pinned repository, then write from verified evidence.
+    writing: { mode: auto_research_agentic }
+    experiment: { authoring: agentic }
+    research:
+      paperKind: empirical
+      experimentSource: run
+      repository: optional
+      experimentAuthoring: { default: agentic, allowed: [agentic, prescribed] }
+    handoff: run_then_import
+  - id: paper.empirical-import
+    title: Experiment import paper
+    description: Write an empirical paper from an existing audited result bundle, with optional pinned repository evidence.
+    writing: { mode: auto_research_agentic }
+    research: { paperKind: empirical, experimentSource: import, repository: optional }
+    handoff: import_existing

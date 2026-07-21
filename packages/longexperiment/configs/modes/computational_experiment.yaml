@@ -1,0 +1,6 @@
+id: computational_experiment
+version: 1
+description: >
+  Hypothesis -> design approval -> declared runner -> result audit -> report.
+  LongExperiment compiles this product contract to MalaClaw; runner internals
+  stay external and are captured through results/experiment-manifest.json.

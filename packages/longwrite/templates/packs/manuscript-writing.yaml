@@ -1,0 +1,8 @@
+id: manuscript-writing
+version: "1.0.0"
+name: Manuscript Writing
+description: Long-form research and manuscript writing team templates for LongWrite.
+teams:
+  - manuscript-writing
+compatibility:
+  node_min: "22.0.0"

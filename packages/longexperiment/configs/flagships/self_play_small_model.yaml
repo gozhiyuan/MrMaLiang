@@ -1,0 +1,22 @@
+version: 1
+project: { id: self-play-small-model, name: Self-Play Small-Model Validation }
+profile: public_benchmark
+hypothesis: "Verifier noise reduces self-play improvement before held-out performance degrades."
+inputs:
+  benchmarks:
+    - { id: arithmetic-bench, source: https://github.com/openai/grade-school-math, revision: 3101c7d5072418e28b9008a6636bde82a006892c, license: MIT }
+  models:
+    - { id: pilot-model, source: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct, revision: 7ae557604adf67be50417f59c2c2f167def9a775 }
+evaluation: { primary_metric: exact_match, direction: maximize, baseline_id: no_noise, control: "fixed prompts and evaluator", seeds: [11, 23, 47], statistical_test: "paired bootstrap confidence interval", heldout_split: heldout }
+suite:
+  id: self-play-validation
+  max_rounds: 3
+  studies:
+    - { id: inference, kind: inference_comparison, conditions: [no_noise, verifier_noise], acceptance_criteria: ["compare declared strategies at fixed difficulty"] }
+    - { id: simulation, kind: exact_simulation, depends_on: [inference], acceptance_criteria: ["validate noise trend against exact ground truth"] }
+    - { id: training, kind: training_ablation, depends_on: [simulation], acceptance_criteria: ["run noise sweep with declared seeds"] }
+    - { id: heldout, kind: heldout_evaluation, depends_on: [training], acceptance_criteria: ["report heldout metric and confidence interval"] }
+    - { id: horizon, kind: horizon_extension, depends_on: [training], optional_action: extend_horizon, acceptance_criteria: ["extend predeclared sign-change conditions"] }
+    - { id: kl, kind: parameter_ablation, depends_on: [training], optional_action: run_parameter_ablation, acceptance_criteria: ["ablate KL coefficient at fixed noise"] }
+runner: { kind: command, command: "python3 templates/runners/self_play.py" }
+execution: { max_trials: 24, max_active_run_minutes: 1440, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true }

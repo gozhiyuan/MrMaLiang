@@ -1,0 +1,14 @@
+version: 1
+project:
+  id: __WORKSPACE_ID__
+  template: paper.survey
+research:
+  paperKind: survey
+  evidenceProfile: repository
+  experimentSource: none
+components:
+  writing:
+    workspace: writing
+handoff:
+  mode: none
+  state: not_required

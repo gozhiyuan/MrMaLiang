@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "dashboard-extension/server",
+    "outDir": "dashboard-extension/dist/server",
+    "declaration": true,
+    "composite": false
+  },
+  "include": ["dashboard-extension/server/**/*.ts"]
+}

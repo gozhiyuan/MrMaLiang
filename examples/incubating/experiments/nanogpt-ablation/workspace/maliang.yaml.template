@@ -1,0 +1,10 @@
+version: 1
+project:
+  id: __WORKSPACE_ID__
+  template: experiment.nanogpt-ablation
+components:
+  experiment:
+    workspace: experiment
+handoff:
+  mode: none
+  state: not_required

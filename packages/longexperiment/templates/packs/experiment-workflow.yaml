@@ -1,0 +1,8 @@
+id: experiment-workflow
+version: "1.0.0"
+name: Experiment Workflow
+description: LongExperiment agent templates for design, execution audit, and result reporting.
+teams:
+  - experiment-workflow
+compatibility:
+  node_min: "22.0.0"

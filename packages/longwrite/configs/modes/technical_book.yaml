@@ -1,0 +1,157 @@
+id: technical_book
+version: 1
+name: Technical Book
+description: >
+  A long-form technical book workflow with table-of-contents planning, chapter
+  contracts, examples, technical review, and export checks.
+artifact_type: book
+default_runtime:
+  executor: malaclaw
+  agent_runtime: codex
+default_agents:
+  - research-lead
+  - outline-architect
+  - chapter-writer
+  - skeptical-reviewer
+  - editor
+  - artifact-builder
+workflow:
+  stages:
+    - id: reader_profile
+      title: Reader profile and scope
+      owner: research-lead
+      outputs:
+        - reader_profile.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: table_of_contents
+      title: Table of contents
+      owner: outline-architect
+      inputs:
+        - reader_profile.md
+      outputs:
+        - outline/toc.md
+        - outline.json
+      requires_human_approval: true
+      validators:
+        - required_output_exists
+
+    - id: chapter_contracts
+      title: Chapter contracts
+      owner: outline-architect
+      inputs:
+        - outline/toc.md
+        - outline.json
+      outputs:
+        - outline/chapter_contracts.json
+      validators:
+        - required_output_exists
+
+    - id: draft_chapters
+      title: Draft chapters
+      type: foreach
+      foreach: outline.chapters
+      item_name: chapter
+      max_parallel: 4
+      steps:
+        - id: draft
+          owner: chapter-writer
+          inputs:
+            - outline/toc.md
+            - outline/chapter_contracts.json
+          outputs:
+            - chapters/{{chapter.id}}.md
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+    - id: build_examples
+      title: Build examples
+      owner: artifact-builder
+      inputs:
+        - chapters/*.md
+        - outline/chapter_contracts.json
+      outputs:
+        - examples/*.js
+        - reports/examples.md
+        - reports/code-validation.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: technical_review
+      title: Technical review
+      owner: skeptical-reviewer
+      inputs:
+        - chapters/*.md
+        - reports/examples.md
+      outputs:
+        - reviews/consistency-review.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: edit
+      title: Style edit
+      owner: editor
+      inputs:
+        - chapters/*.md
+        - reviews/consistency-review.md
+      outputs:
+        - reports/edit-report.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: export
+      title: Export
+      owner: artifact-builder
+      inputs:
+        - chapters/*.md
+        - reports/code-validation.md
+        - reviews/consistency-review.md
+      outputs:
+        - build/manuscript.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+
+    - id: quality_loop
+      title: Feedback, revise, and rebuild
+      type: loop
+      max_rounds: 2
+      stop_when: review_score >= 8.0
+      stages:
+        - id: feedback_review
+          title: Feedback review and revision plan
+          owner: skeptical-reviewer
+          inputs:
+            - build/manuscript.md
+          optional_inputs:
+            - feedback/user-feedback.md
+          outputs:
+            - feedback/user-feedback.md
+            - feedback/revision-request.json
+            - reviews/revision-plan.md
+            - reports/metrics.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+
+        - id: revise
+          title: Revise chapters and rebuild manuscript
+          owner: editor
+          inputs:
+            - feedback/revision-request.json
+            - reviews/revision-plan.md
+            - chapters/*.md
+            - examples/*.js
+          outputs:
+            - reviews/revision-report.md
+            - build/manuscript.md
+            - reports/metrics.json
+          validators:
+            - required_output_exists
+            - non_empty_markdown

@@ -1,0 +1,25 @@
+id: experiment-workflow
+name: Experiment Workflow
+version: 1
+communication:
+  topology: star
+members:
+  - agent: experiment-lead
+    role: lead
+    entry_point: true
+  - agent: methodologist
+    role: specialist
+  - agent: result-auditor
+    role: reviewer
+  - agent: experiment-reporter
+    role: specialist
+graph:
+  - from: experiment-lead
+    to: methodologist
+    relationship: delegates_to
+  - from: experiment-lead
+    to: result-auditor
+    relationship: delegates_to
+  - from: experiment-lead
+    to: experiment-reporter
+    relationship: delegates_to

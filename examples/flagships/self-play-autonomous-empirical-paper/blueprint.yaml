@@ -1,0 +1,41 @@
+version: 1
+id: self-play-autonomous-empirical-paper
+template: paper.empirical
+components: [experiment, writing]
+topic: Budgeted autonomous discovery of a small-model self-play intervention
+hypothesis: A literature-grounded self-play intervention can improve held-out exact-match performance under fixed small-model controls.
+experiment_template: self_play_autonomous_empirical
+experiment_authoring: agentic
+base_modes:
+  writing: packages/longwrite/configs/modes/auto_research_agentic.yaml
+  experiment: packages/longexperiment/configs/flagships/self_play_autonomous_empirical.yaml
+init_args:
+  - --research-provider
+  - multi
+  - --research-workflow-profile
+  - standard
+  - --research-writing-strategy
+  - llm_sections
+  - --target-length-words
+  - "14000"
+  - --citation-style
+  - author_year
+  - --output-format
+  - markdown
+  - pdf
+  - --taxonomy
+  - self-play and self-improvement mechanisms
+  - verifier noise and reward reliability
+  - held-out reasoning evaluation
+required_setup:
+  - Node.js 22 or newer
+  - MalaClaw and an authenticated Codex or Claude runtime
+  - Python, model/data access, and the PDF toolchain
+  - dedicated reviewed local CPU/CUDA worker or container before generated-code execution
+expected_artifacts:
+  - experiment/agent/validated-proposal.json
+  - experiment/agent/candidate/manifest.json
+  - experiment/results/experiment-manifest.json
+  - writing/evidence/experiment-packets.json
+  - writing/paper/main.pdf
+  - writing/reports/run-provenance.json

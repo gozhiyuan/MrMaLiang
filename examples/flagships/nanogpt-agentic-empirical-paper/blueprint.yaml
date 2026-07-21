@@ -1,0 +1,42 @@
+version: 1
+id: nanogpt-agentic-empirical-paper
+template: paper.empirical
+components: [experiment, writing]
+topic: Literature-grounded agentic experimentation on nanoGPT under a fixed compute budget
+hypothesis: A literature-grounded agent-authored nanoGPT intervention can be evaluated reproducibly against a pinned baseline.
+repositories:
+  - https://github.com/karpathy/nanoGPT.git
+experiment_template: nanogpt_agentic_empirical
+experiment_authoring: agentic
+base_modes:
+  writing: packages/longwrite/configs/modes/auto_research_agentic.yaml
+  experiment: packages/longexperiment/configs/flagships/nanogpt_agentic_empirical.yaml
+init_args:
+  - --research-provider
+  - multi
+  - --research-workflow-profile
+  - standard
+  - --research-writing-strategy
+  - llm_sections
+  - --target-length-words
+  - "14000"
+  - --citation-style
+  - author_year
+  - --output-format
+  - markdown
+  - pdf
+  - --taxonomy
+  - small-language-model training interventions
+  - controlled neural scaling experiments
+  - reproducibility and compute-normalized evaluation
+required_setup:
+  - Node.js 22 or newer
+  - MalaClaw and an authenticated Codex or Claude runtime
+  - Python, PyTorch, Git, and the PDF toolchain
+  - dedicated reviewed local CPU/CUDA worker or container before generated-code execution
+expected_artifacts:
+  - experiment/results/experiment-manifest.json
+  - writing/evidence/experiment-packets.json
+  - writing/codebases/manifest.json
+  - writing/paper/main.pdf
+  - writing/reports/run-provenance.json

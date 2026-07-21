@@ -1,0 +1,45 @@
+{
+  "name": "@mr-maliang/longwrite",
+  "version": "0.2.0",
+  "description": "Long-form writing agent workflows on the MalaClaw flow engine",
+  "type": "module",
+  "license": "MIT",
+  "author": "gozhiyuan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gozhiyuan/MrMaLiang.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "longwrite": "dist/compat-cli.js"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "configs/",
+    "templates/",
+    "dashboard-extension/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.dashboard-extension.server.json && chmod +x dist/cli.js dist/compat-cli.js",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mr-maliang/research-protocol": "^0.2.0",
+    "@clack/prompts": "^1.7.0",
+    "commander": "^12.1.0",
+    "marked": "^15.0.7",
+    "yaml": "^2.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.0"
+  }
+}
