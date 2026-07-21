@@ -191,7 +191,7 @@ and PDF tooling. It does not need a GPU or Modal.
 
 ## Dashboard configuration
 
-The LongWrite dashboard exposes **Repository evidence** in both workspace
+The MrMaLiang dashboard exposes **Repository evidence** in both workspace
 creation and the durable `longwrite.yaml` editor. One Git URL or local Git path
 per line automatically selects `repository_study`; an empty field selects
 `literature_survey`. The dashboard creation path always sets `paper_kind:

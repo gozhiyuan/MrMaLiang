@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/longexperiment",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Long-running experiment workflows compiled to MalaClaw",
   "type": "module",
   "license": "MIT",

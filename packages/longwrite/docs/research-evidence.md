@@ -7,7 +7,8 @@ lexical index, not opaque agent memory.
 ```text
 query plan -> multi-provider recall -> citation graph expansion -> metadata fusion
   -> source identity reconciliation -> LQS/provisional classify
-  -> (agentic live mode: abstract screen -> full text cache -> source evidence -> final A/B depth -> corpus gates)
+  -> (agentic live mode: abstract screen -> full text cache -> source evidence -> final A/B depth
+      -> corpus assessment -> bounded evidence recovery when a gate fails -> hard corpus gate)
   -> evidence index -> outline -> (agentic live mode: audit -> critique -> revise -> re-audit) -> human approval
   -> section evidence packets -> draft -> citation ledger
   -> review -> targeted expansion -> revise -> double-review claim gate
@@ -108,6 +109,14 @@ and requires source-level, excerpt-validated evidence packets before a
 metadata-provisional A/B source can retain final A/B depth. This keeps C-level
 contextual coverage broad without pretending every recalled reference has
 been read deeply.
+
+If the evidence-backed corpus gate fails before outlining, the workflow does
+not silently lower its target or continue with a thin bibliography. It records
+the failed metric, runs at most two recovery rounds, and in each round asks the
+LLM for one schema-validated `targeted_research_expansion` plan. Scripts then
+recall, enrich, score, re-screen, fetch full text, validate packets, and
+re-measure the same gate. The final gate remains hard: an unrecovered deficit
+stops the flow with the report rather than producing an under-evidenced paper.
 
 Before drafting, the live agentic workflow runs a separate bounded outline
 loop: deterministic survey/structure audits → LLM critique grounded in source

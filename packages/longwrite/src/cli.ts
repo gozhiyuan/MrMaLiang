@@ -269,11 +269,11 @@ program
 
 program
   .command("dashboard")
-  .description("Register the LongWrite dashboard extension and start the MalaClaw dashboard")
+  .description("Register the MrMaLiang dashboard extension and start the MalaClaw dashboard")
   .option("--port <port>", "Dashboard server port")
   .option("--host <host>", "Dashboard bind host")
   .option("--auth-token <token>", "Bearer token for dashboard API authentication")
-  .option("--install-only", "Only register the LongWrite dashboard extension; do not start the server")
+  .option("--install-only", "Only register the MrMaLiang dashboard extension; do not start the server")
   .action(async (opts) => {
     const { runDashboard } = await import("./commands/dashboard.js");
     await runDashboard(opts);
@@ -709,9 +709,18 @@ research
 research
   .command("corpus-gates <workspace>")
   .description("Fail closed when full-mode retrieval breadth, core-source, freshness, diversity, or taxonomy gates are not met")
-  .action(async (workspace) => {
+  .option("--advisory", "Write the report and metrics without failing; intended only inside the bounded pre-outline recovery loop")
+  .action(async (workspace, opts) => {
     const { runResearchCorpusGates } = await import("./commands/research.js");
-    await runResearchCorpusGates(workspace);
+    await runResearchCorpusGates(workspace, { advisory: opts.advisory === true });
+  });
+
+research
+  .command("repair-corpus-recovery-plan <workspace>")
+  .description("Validate a bounded, corpus-gate-grounded evidence recovery plan")
+  .action(async (workspace) => {
+    const { runResearchRepairCorpusRecoveryPlan } = await import("./commands/research.js");
+    await runResearchRepairCorpusRecoveryPlan(workspace);
   });
 
 research

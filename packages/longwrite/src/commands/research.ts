@@ -426,15 +426,43 @@ async function seedProviderAdvisory(workspaceDir: string): Promise<boolean> {
   }
 }
 
-export async function runResearchCorpusGates(workspaceDir: string): Promise<void> {
+async function writeCorpusGateMetrics(workspaceDir: string, report: {
+  pass: boolean;
+  core_source_count: number;
+  source_count: number;
+  recent_ratio: number;
+  source_type_count: number;
+}): Promise<string> {
+  const metricsPath = path.join(workspaceDir, "reports", "metrics.json");
+  let metrics: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await fs.readFile(metricsPath, "utf-8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metrics = parsed as Record<string, unknown>;
+  } catch {
+    // A malformed or absent prior scorecard must not hide a fresh deterministic
+    // corpus measurement. Later scoring stages own their additional metrics.
+  }
+  Object.assign(metrics, {
+    corpus_gate_pass: report.pass ? 1 : 0,
+    corpus_core_sources: report.core_source_count,
+    corpus_source_count: report.source_count,
+    corpus_recent_ratio: report.recent_ratio,
+    corpus_source_type_count: report.source_type_count,
+  });
+  await fs.mkdir(path.dirname(metricsPath), { recursive: true });
+  await fs.writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf-8");
+  return "reports/metrics.json";
+}
+
+export async function runResearchCorpusGates(workspaceDir: string, opts: { advisory?: boolean } = {}): Promise<void> {
   const resolved = path.resolve(workspaceDir);
   const { evaluateCorpusGates, writeCorpusGateReport } = await import("../lib/research/corpus-gates.js");
   const report = await evaluateCorpusGates(resolved);
-  const written = await writeCorpusGateReport(resolved, report);
+  const written = [...await writeCorpusGateReport(resolved, report), await writeCorpusGateMetrics(resolved, report)];
   console.log(`Corpus gates: ${report.pass ? "pass" : "fail"}`);
   for (const finding of report.findings) console.log(`  [${finding.pass ? "pass" : "fail"}] ${finding.detail}`);
   for (const file of written) console.log(`  + ${file}`);
-  if (!report.pass) {
+  if (!report.pass && !opts.advisory) {
     // The seed provider is an offline development fixture; its tiny fixed
     // corpus can never meet breadth gates. Enforce for live providers only —
     // matching fulltext/expand, which also no-op on seed. Dry runs prove
@@ -444,6 +472,56 @@ export async function runResearchCorpusGates(workspaceDir: string): Promise<void
       return;
     }
     process.exitCode = 1;
+  }
+}
+
+/** Validate the narrow pre-outline recovery plan.  It may select exactly one
+ * allowlisted research expansion and must be grounded in the currently failed
+ * deterministic corpus findings; the script never invents a remediation. */
+export async function runResearchRepairCorpusRecoveryPlan(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const target = path.join(resolved, "reports", "corpus-recovery-plan.json");
+  const reportPath = path.join(resolved, "reports", "corpus-recovery-plan-repair.md");
+  const config = await loadProjectConfig(resolved);
+  try {
+    const raw = await fs.readFile(target, "utf-8");
+    const trimmed = raw.trim();
+    const fenced = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
+    const plan = AgenticActionPlan.parse(JSON.parse((fenced?.[1] ?? trimmed).trim()));
+    const corpus = JSON.parse(await fs.readFile(path.join(resolved, "reports", "corpus-gates.json"), "utf-8")) as {
+      pass?: boolean;
+      findings?: Array<{ id?: string; pass?: boolean }>;
+    };
+    const failedIds = new Set((corpus.findings ?? []).filter((finding) => finding.pass === false).map((finding) => finding.id).filter((id): id is string => Boolean(id)));
+    if (corpus.pass || failedIds.size === 0) throw new Error("a recovery plan is valid only while a corpus gate is failing");
+    if (plan.actions.length !== 1 || plan.actions[0]?.tool !== "targeted_research_expansion") {
+      throw new Error("select exactly one targeted_research_expansion action");
+    }
+    const action = plan.actions[0]!;
+    if (action.finding_ids.some((id) => !failedIds.has(id))) {
+      throw new Error("recovery action may reference only currently failed corpus-gate finding IDs");
+    }
+    if (!action.acceptance_criteria.some((criterion) =>
+      criterion.metric === "core_sources" && criterion.target >= config.research.corpus_gates.min_core_sources,
+    )) {
+      throw new Error(`recovery action requires core_sources >= ${config.research.corpus_gates.min_core_sources}`);
+    }
+    await fs.writeFile(target, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, [
+      "# Corpus evidence recovery-plan validation", "", "- Status: pass",
+      `- Failed findings addressed: ${action.finding_ids.join(", ")}`,
+      `- Required core sources: ${config.research.corpus_gates.min_core_sources}`,
+      "- Dispatch: one bounded targeted_research_expansion action", "",
+    ].join("\n"), "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, [
+      "# Corpus evidence recovery-plan validation", "", "- Status: failed", `- Detail: ${detail}`,
+      "- Required repair: write exactly one AgenticActionPlan JSON object with one targeted_research_expansion action, using only currently failed corpus-gate finding IDs and core_sources as a measurable acceptance criterion.", "",
+    ].join("\n"), "utf-8");
+    throw new Error("reports/corpus-recovery-plan.json: invalid bounded corpus recovery plan; see reports/corpus-recovery-plan-repair.md");
   }
 }
 

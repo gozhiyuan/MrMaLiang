@@ -70,6 +70,27 @@ const MAX_CURRENT_ARTIFACT_BYTES = 500_000;
 
 type CurrentArtifact = { path: string; kind: "pdf" | "text" };
 
+export type ResolvedWritingWorkspace = {
+  /** The directory selected by the operator in the dashboard. */
+  requestedDir: string;
+  /** The LongWrite component directory that owns longwrite.yaml. */
+  workspaceDir: string;
+  /** The enclosing MrMaLiang research-program directory, when present. */
+  parentWorkspace: string | null;
+};
+
+export type BrowseFolder = {
+  name: string;
+  path: string;
+  kind: "folder" | "maliang_workspace" | "writing_workspace";
+};
+
+export type BrowseFoldersResult = {
+  path: string;
+  parent: string | null;
+  folders: BrowseFolder[];
+};
+
 function isCurrentArtifactPath(value: string): boolean {
   return value === "build/manuscript.pdf"
     || value === "build/manuscript.tex"
@@ -214,6 +235,94 @@ function requireDir(dir: unknown): string {
   return dir;
 }
 
+async function pathExists(value: string): Promise<boolean> {
+  try {
+    await fs.access(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+/**
+ * Resolve both supported dashboard selections:
+ *
+ * - a component directory containing longwrite.yaml (legacy/direct use), or
+ * - a MrMaLiang program directory containing maliang.yaml + writing/.
+ *
+ * The UI keeps the operator-selected directory so all commands and displayed
+ * paths stay at the public MrMaLiang level, while component operations use the
+ * resolved LongWrite directory internally.
+ */
+export async function resolveWritingWorkspace(dir: unknown): Promise<ResolvedWritingWorkspace> {
+  const requestedDir = requireDir(dir);
+  if (await pathExists(path.join(requestedDir, "longwrite.yaml"))) {
+    return { requestedDir, workspaceDir: requestedDir, parentWorkspace: await maliangParent(requestedDir) };
+  }
+
+  const project = await readYamlIfExists(path.join(requestedDir, "maliang.yaml"));
+  const writing = asRecord(asRecord(project?.components).writing);
+  const configuredWorkspace = asString(writing.workspace) ?? "writing";
+  const workspaceDir = path.resolve(requestedDir, configuredWorkspace);
+  if (await pathExists(path.join(workspaceDir, "longwrite.yaml"))) {
+    return { requestedDir, workspaceDir, parentWorkspace: requestedDir };
+  }
+  return { requestedDir, workspaceDir: requestedDir, parentWorkspace: null };
+}
+
+/**
+ * Directory discovery is deliberately narrow: it only enumerates directories
+ * below a chosen root (the local account home by default), never file content.
+ * That makes the dashboard picker useful without becoming a general file-read
+ * API capable of exposing .env files or arbitrary project documents.
+ */
+export async function browseWorkspaceFolders(dir?: unknown, rootDir = os.homedir()): Promise<BrowseFoldersResult> {
+  const root = await fs.realpath(path.resolve(rootDir));
+  const requested = dir === undefined || dir === null || dir === "" ? root : requireDir(dir);
+  let selected: string;
+  try {
+    selected = await fs.realpath(requested);
+  } catch {
+    throw Object.assign(new Error(`directory not found: ${requested}`), { statusCode: 404 });
+  }
+  if (!isWithin(root, selected)) {
+    throw Object.assign(new Error("folder browsing is limited to the configured local workspace root"), { statusCode: 403 });
+  }
+
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(selected, { withFileTypes: true });
+  } catch (err) {
+    throw Object.assign(new Error(`cannot read directory: ${err instanceof Error ? err.message : String(err)}`), { statusCode: 400 });
+  }
+  const directories = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 250);
+  const folders = await Promise.all(directories.map(async (entry): Promise<BrowseFolder> => {
+    const child = path.join(selected, entry.name);
+    const [isProgram, isWriting] = await Promise.all([
+      pathExists(path.join(child, "maliang.yaml")),
+      pathExists(path.join(child, "longwrite.yaml")),
+    ]);
+    return {
+      name: entry.name,
+      path: child,
+      kind: isProgram ? "maliang_workspace" : isWriting ? "writing_workspace" : "folder",
+    };
+  }));
+  return {
+    path: selected,
+    parent: selected === root ? null : path.dirname(selected),
+    folders,
+  };
+}
+
 function asRecord(value: unknown): YamlRecord {
   return typeof value === "object" && value !== null ? (value as YamlRecord) : {};
 }
@@ -232,6 +341,33 @@ function asBoolean(value: unknown): boolean {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+/** Inputs that define the evidence program, rather than ordinary presentation
+ * or runtime preferences. Once source work has begun, changing any of these
+ * would make the existing corpus and review state misleading. */
+export function evidenceProgramFingerprint(value: unknown): string {
+  const config = asRecord(value);
+  const research = asRecord(config.research);
+  const writing = asRecord(config.writing);
+  const codebases = Array.isArray(research.codebases)
+    ? research.codebases.map(asRecord).map((entry) => ({
+      id: asString(entry.id) ?? "",
+      source: asString(entry.source) ?? "",
+      ref: asString(entry.ref) ?? "HEAD",
+      role: asString(entry.role) ?? "",
+    }))
+    : [];
+  return JSON.stringify({
+    topic: asString(research.topic) ?? "",
+    codebases,
+    referenceLinks: asStringArray(writing.reference_links),
+  });
+}
+
+function hasStartedFlow(flow: unknown): boolean {
+  const status = asString(asRecord(flow).status);
+  return status !== undefined && status !== "not_started";
 }
 
 function asAuthors(value: unknown): Array<{ name: string; email?: string }> {
@@ -605,8 +741,8 @@ function spawnLongWriteRun(workspaceDir: string, parentWorkspace: string | null,
 export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   return async (app: FastifyLike) => {
   app.get("/api/longwrite", async (req, reply) => {
-    const workspaceDir = requireDir((req.query as { dir?: string }).dir);
-    const parentWorkspace = await maliangParent(workspaceDir);
+    const resolvedWorkspace = await resolveWritingWorkspace((req.query as { dir?: string }).dir);
+    const { workspaceDir, parentWorkspace } = resolvedWorkspace;
     const longwrite = await readYamlIfExists(path.join(workspaceDir, "longwrite.yaml"));
     if (!longwrite) return reply.status(404).send({ error: "longwrite.yaml not found" });
 
@@ -636,6 +772,8 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
     return {
       dir: workspaceDir,
+      requestedDir: resolvedWorkspace.requestedDir,
+      parentWorkspace,
       config: longwrite,
       project: {
         id: asString(project.id),
@@ -712,12 +850,24 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
     };
   });
 
+  app.get("/api/longwrite/folders", async (req, reply) => {
+    try {
+      return await browseWorkspaceFolders((req.query as { dir?: string }).dir);
+    } catch (err) {
+      const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+        ? Number((err as { statusCode?: number }).statusCode)
+        : 500;
+      return reply.status(Number.isFinite(statusCode) ? statusCode : 500)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.post("/api/longwrite/init", async (req, reply) => {
     const body = (req.body ?? {}) as Parameters<typeof initArgs>[0];
     try {
       const { targetDir, componentDir, args } = initArgs(body);
       const result = await runMaliang(args, path.dirname(targetDir));
-      return { ok: true, dir: componentDir, ...result };
+      return { ok: true, dir: targetDir, componentDir, ...result };
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -725,7 +875,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/approve", async (req, reply) => {
     const { dir, approvalId, batch } = (req.body ?? {}) as { dir?: string; approvalId?: string; batch?: boolean };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     try {
       const state = batch ? await host.approveAllFlow(workspaceDir) : await host.approveFlow(workspaceDir, approvalId ?? "");
       return { ok: true, state };
@@ -739,7 +889,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   // arbitrary workspace-file reader (which could disclose .env or credentials).
   app.get("/api/longwrite/approval-artifact", async (req, reply) => {
     const query = req.query as { dir?: string; path?: string };
-    const workspaceDir = requireDir(query.dir);
+    const { workspaceDir } = await resolveWritingWorkspace(query.dir);
     const requested = query.path;
     if (typeof requested !== "string" || requested.length === 0 || path.isAbsolute(requested) || requested.includes("\0")) {
       return reply.status(400).send({ error: "path must be a non-empty workspace-relative approval artifact" });
@@ -775,7 +925,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   // exposing credentials, arbitrary notes, or .malaclaw state files.
   app.get("/api/longwrite/current-artifact", async (req, reply) => {
     const query = req.query as { dir?: string; path?: string };
-    const workspaceDir = requireDir(query.dir);
+    const { workspaceDir } = await resolveWritingWorkspace(query.dir);
     const requested = query.path;
     if (typeof requested !== "string" || !isCurrentArtifactPath(requested)) {
       return reply.status(400).send({ error: "path is not an approved current-manuscript artifact" });
@@ -802,7 +952,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/packet", async (req, reply) => {
     const { dir } = (req.body ?? {}) as { dir?: string };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     try {
       const result = await runLongWrite(["report", "packet", workspaceDir], workspaceDir);
       return { ok: true, ...result, artifact: "reports/human-review-packet.md" };
@@ -813,7 +963,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/feedback", async (req, reply) => {
     const { dir, message } = (req.body ?? {}) as { dir?: string; message?: string };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     if (typeof message !== "string" || message.trim().length === 0) {
       return reply.status(400).send({ error: "message must be a non-empty string" });
     }
@@ -827,7 +977,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/outline/revise", async (req, reply) => {
     const { dir, message } = (req.body ?? {}) as { dir?: string; message?: string };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     if (typeof message !== "string" || message.trim().length === 0) {
       return reply.status(400).send({ error: "message must be a non-empty string" });
     }
@@ -848,12 +998,12 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/run", async (req, reply) => {
     const { dir, runtime, reset } = (req.body ?? {}) as { dir?: string; runtime?: string; reset?: boolean };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir, parentWorkspace } = await resolveWritingWorkspace(dir);
     if (runtime !== undefined && (typeof runtime !== "string" || runtime.trim().length === 0)) {
       return reply.status(400).send({ error: "runtime must be a non-empty string" });
     }
     try {
-      const record = spawnLongWriteRun(workspaceDir, await maliangParent(workspaceDir), { runtime: runtime?.trim(), reset: reset === true });
+      const record = spawnLongWriteRun(workspaceDir, parentWorkspace, { runtime: runtime?.trim(), reset: reset === true });
       return { ok: true, operation: record };
     } catch (err) {
       const statusCode = typeof err === "object" && err !== null && "statusCode" in err
@@ -866,7 +1016,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/retry", async (req, reply) => {
     const { dir } = (req.body ?? {}) as { dir?: string };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     try {
       const result = await runLongWrite(["retry", workspaceDir], workspaceDir);
       return { ok: true, ...result };
@@ -876,7 +1026,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   });
 
   app.get("/api/longwrite/roles", async (req, reply) => {
-    const workspaceDir = requireDir((req.query as { dir?: string }).dir);
+    const { workspaceDir } = await resolveWritingWorkspace((req.query as { dir?: string }).dir);
     const rolesDir = path.join(workspaceDir, "roles");
     let entries: string[] = [];
     try {
@@ -896,7 +1046,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/roles", async (req, reply) => {
     const { dir, owner, content } = (req.body ?? {}) as { dir?: string; owner?: string; content?: string };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     if (!owner || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(owner)) {
       return reply.status(400).send({ error: "owner must be a safe slug" });
     }
@@ -911,11 +1061,19 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/config", async (req, reply) => {
     const { dir, config } = (req.body ?? {}) as { dir?: string; config?: ProjectConfig };
-    const workspaceDir = requireDir(dir);
+    const { workspaceDir } = await resolveWritingWorkspace(dir);
     if (typeof config !== "object" || config === null || Array.isArray(config)) {
       return reply.status(400).send({ error: "config must be an object" });
     }
     try {
+      const current = await readYamlIfExists(path.join(workspaceDir, "longwrite.yaml"));
+      let flow: unknown = null;
+      try { flow = await host.loadFlowState(workspaceDir); } catch { /* no state means the evidence program is still editable */ }
+      if (current && hasStartedFlow(flow) && evidenceProgramFingerprint(current) !== evidenceProgramFingerprint(config)) {
+        return reply.status(409).send({
+          error: "topic, repository inputs, and reference links are locked after source work begins; create a fresh workspace for a new evidence program",
+        });
+      }
       await validateProjectConfig(config);
       const target = path.join(workspaceDir, "longwrite.yaml");
       await fs.writeFile(target, stringifyYaml(config), "utf-8");
@@ -928,7 +1086,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   // After HAND-EDITS to longwrite.yaml: regenerate the compiled files.
   app.post("/api/longwrite/sync", async (req, reply) => {
-    const workspaceDir = requireDir(((req.body ?? {}) as { dir?: string }).dir);
+    const { workspaceDir } = await resolveWritingWorkspace(((req.body ?? {}) as { dir?: string }).dir);
     try {
       const result = await runLongWrite(["sync", workspaceDir], workspaceDir);
       return { ok: true, output: [result.stdout, result.stderr].filter(Boolean).join("\n") };
@@ -941,7 +1099,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   // running anything. malaclaw validate is best-effort (needs the CLI on
   // PATH or MALACLAW_BIN).
   app.post("/api/longwrite/validate", async (req, reply) => {
-    const workspaceDir = requireDir(((req.body ?? {}) as { dir?: string }).dir);
+    const { workspaceDir } = await resolveWritingWorkspace(((req.body ?? {}) as { dir?: string }).dir);
     const findings: string[] = [];
     let ok = true;
     try {
@@ -978,7 +1136,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
 
   app.post("/api/longwrite/workflow/stage", async (req, reply) => {
     const body = (req.body ?? {}) as StagePatch;
-    const workspaceDir = requireDir(body.dir);
+    const { workspaceDir } = await resolveWritingWorkspace(body.dir);
     if (typeof body.stageId !== "string" || body.stageId.trim().length === 0) {
       return reply.status(400).send({ error: "stageId must be a non-empty string" });
     }

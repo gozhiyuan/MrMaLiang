@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 type LongWriteResponse = {
   dir: string;
+  requestedDir: string;
+  parentWorkspace: string | null;
   config: ProjectConfig;
   project: { id?: string; name?: string; mode?: string; artifactType?: string; runtimeProfile?: string; authors: Array<{ name: string; email?: string }> };
   research: {
@@ -77,6 +79,16 @@ type LongWriteResponse = {
     stderr: string;
   } | null;
   commands: { status: string; run: string; approve: string; sync: string; words: string; packet: string; feedback: string };
+};
+
+type FolderBrowserResponse = {
+  path: string;
+  parent: string | null;
+  folders: Array<{
+    name: string;
+    path: string;
+    kind: "folder" | "maliang_workspace" | "writing_workspace";
+  }>;
 };
 
 type ProjectConfig = {
@@ -195,9 +207,9 @@ function useLongWrite(dir: string) {
   });
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, style }: { title: string; children: React.ReactNode; style?: CSSProperties }) {
   return (
-    <div style={{ border: "1px solid #30363d", borderRadius: 6, padding: 12 }}>
+    <div style={{ border: "1px solid #30363d", borderRadius: 6, padding: 12, ...style }}>
       <h4 style={{ color: "#f0f6fc", margin: "0 0 8px" }}>{title}</h4>
       {children}
     </div>
@@ -253,18 +265,25 @@ function codebaseId(source: string, index: number, used: Set<string>): string {
   return id;
 }
 
+function formatCodebasesForEditor(codebases: NonNullable<ProjectConfig["research"]>["codebases"] = []): string {
+  return (codebases ?? []).map((entry) => `${entry.source}${entry.ref && entry.ref !== "HEAD" ? ` | ${entry.ref}` : ""}`).join("\n");
+}
+
 function codebasesFromText(value: string, existing: NonNullable<ProjectConfig["research"]>["codebases"] = []) {
-  const sources = value.split("\n").map((line) => line.trim()).filter(Boolean);
+  const sources = value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [rawSource, ...rawRef] = line.split("|");
+    return { source: rawSource.trim(), ref: rawRef.join("|").trim() || undefined };
+  }).filter((entry) => entry.source.length > 0);
   const bySource = new Map((existing ?? []).map((entry) => [entry.source, entry]));
   const used = new Set<string>();
-  return sources.map((source, index) => {
+  return sources.map(({ source, ref }, index) => {
     const previous = bySource.get(source);
     const id = previous?.id && !used.has(previous.id) ? previous.id : codebaseId(source, index, used);
     used.add(id);
     return {
       id,
       source,
-      ref: previous?.ref ?? "HEAD",
+      ref: ref ?? previous?.ref ?? "HEAD",
       title: previous?.title,
       role: previous?.role ?? (index === 0 ? "primary_artifact" as const : "supplementary_artifact" as const),
     };
@@ -370,8 +389,10 @@ function RolesSection({ dir }: { dir: string }) {
 }
 
 export function LongWrite() {
-  const [dir, setDir] = useState(() => localStorage.getItem("longwrite-dir") ?? "");
+  const [dir, setDir] = useState(() => localStorage.getItem("maliang-workspace-dir") ?? localStorage.getItem("longwrite-dir") ?? "");
   const [input, setInput] = useState(dir);
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseDir, setBrowseDir] = useState("");
   const [operationMessage, setOperationMessage] = useState<string | null>(null);
   const [runtimeOverride, setRuntimeOverride] = useState("");
   const [draftConfig, setDraftConfig] = useState<ProjectConfig | null>(null);
@@ -423,6 +444,12 @@ export function LongWrite() {
   });
   const queryClient = useQueryClient();
   const { data, error, isLoading } = useLongWrite(dir);
+  const folderBrowser = useQuery<FolderBrowserResponse>({
+    queryKey: ["maliang-workspace-folders", browseDir],
+    queryFn: () => getJson(`/api/longwrite/folders${browseDir ? `?dir=${encodeURIComponent(browseDir)}` : ""}`),
+    enabled: browseOpen,
+    retry: false,
+  });
 
   useEffect(() => {
     if (data?.config) setDraftConfig(data.config);
@@ -464,7 +491,7 @@ export function LongWrite() {
     mutationFn: (body: { runtime?: string; reset?: boolean }) =>
       postJson<{ ok: boolean; operation: LongWriteResponse["operation"] }>("/api/longwrite/run", { dir, ...body }),
     onSuccess: (_, body) => {
-      setOperationMessage(body.reset ? "Started LongWrite reset run." : "Started LongWrite run.");
+      setOperationMessage(body.reset ? "Started MrMaLiang reset run." : "Started MrMaLiang run.");
       queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
     },
     onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
@@ -593,9 +620,8 @@ export function LongWrite() {
         batchApprovals: draft.batchApprovals,
       }),
     onSuccess: (result) => {
-      setOperationMessage(`Created LongWrite workspace at ${result.dir}.`);
-      localStorage.setItem("longwrite-dir", result.dir);
-      localStorage.setItem("malaclaw-flow-dir", result.dir);
+      setOperationMessage(`Created MrMaLiang workspace at ${result.dir}.`);
+      localStorage.setItem("maliang-workspace-dir", result.dir);
       setInput(result.dir);
       setDir(result.dir);
       queryClient.invalidateQueries({ queryKey: ["longwrite", result.dir] });
@@ -604,13 +630,26 @@ export function LongWrite() {
   });
 
   const load = () => {
-    localStorage.setItem("longwrite-dir", input);
-    localStorage.setItem("malaclaw-flow-dir", input);
+    localStorage.setItem("maliang-workspace-dir", input);
     setDir(input);
   };
 
   const openFlow = () => {
-    localStorage.setItem("malaclaw-flow-dir", dir);
+    // MalaClaw owns the component-local malaclaw.yaml. Keep that detail out
+    // of the public MrMaLiang workspace selector.
+    localStorage.setItem("malaclaw-flow-dir", data?.dir ?? dir);
+  };
+
+  const openSelectedFolder = (selectedDir: string) => {
+    localStorage.setItem("maliang-workspace-dir", selectedDir);
+    setInput(selectedDir);
+    setDir(selectedDir);
+    setBrowseOpen(false);
+  };
+
+  const showFolderBrowser = () => {
+    setBrowseDir(dir || "");
+    setBrowseOpen(true);
   };
 
   const flowUnits = data?.flow ? Object.values(data.flow.units) : [];
@@ -626,6 +665,10 @@ export function LongWrite() {
   const runActive = data?.operation?.running === true
     || data?.flow?.status === "running"
     || runningUnitKeys.length > 0;
+  // Topic, pinned repositories, and reference seeds define the evidence
+  // program. They are freely editable before the first run, but the UI does
+  // not invite an operator to silently change them after corpus work begins.
+  const foundationInputsEditable = data?.flow === null || data?.flow?.status === "not_started";
   const selectedStage = data?.workflow.stages.find((stage) => stage.id === selectedStageId) ?? data?.workflow.stages[0];
 
   const patchConfig = (patch: (current: ProjectConfig) => ProjectConfig) => {
@@ -645,6 +688,14 @@ export function LongWrite() {
     background: "#0d1117",
     color: "#c9d1d9",
   };
+  const secondaryButtonStyle: CSSProperties = {
+    padding: "6px 10px",
+    borderRadius: 6,
+    border: "1px solid #30363d",
+    background: "#21262d",
+    color: "#fff",
+    cursor: "pointer",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 1120 }}>
@@ -653,7 +704,7 @@ export function LongWrite() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && load()}
-          placeholder="/absolute/path/to/longwrite-workspace"
+          placeholder="Select a MrMaLiang workspace (or writing component)"
           style={{
             flex: 1,
             padding: "6px 10px",
@@ -673,10 +724,38 @@ export function LongWrite() {
           color: "#fff",
           cursor: "pointer",
         }}>Open</button>
+        <button onClick={showFolderBrowser} style={secondaryButtonStyle}>Browse folders</button>
       </div>
 
-      {!dir && <div style={{ color: "#8b949e" }}>Enter a LongWrite workspace directory.</div>}
-      {isLoading && dir && <div style={{ color: "#8b949e" }}>Loading LongWrite workspace...</div>}
+      {browseOpen && (
+        <Section title="Browse local MrMaLiang workspaces">
+          {folderBrowser.isLoading && <div style={{ color: "#8b949e" }}>Loading folders…</div>}
+          {folderBrowser.error && <div style={{ color: "#f85149" }}>{String(folderBrowser.error)}</div>}
+          {folderBrowser.data && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontFamily: "monospace", fontSize: 12, overflowWrap: "anywhere", color: "#c9d1d9" }}>{folderBrowser.data.path}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => openSelectedFolder(folderBrowser.data.path)} style={secondaryButtonStyle}>Open this folder</button>
+                {folderBrowser.data.parent && <button onClick={() => setBrowseDir(folderBrowser.data!.parent!)} style={secondaryButtonStyle}>Up one folder</button>}
+                <button onClick={() => setBrowseOpen(false)} style={secondaryButtonStyle}>Close</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+                {folderBrowser.data.folders.map((folder) => (
+                  <button key={folder.path} onClick={() => setBrowseDir(folder.path)} style={{ ...secondaryButtonStyle, textAlign: "left" }}>
+                    <div style={{ fontWeight: 600 }}>{folder.kind === "maliang_workspace" ? "◆ " : folder.kind === "writing_workspace" ? "◇ " : "▸ "}{folder.name}</div>
+                    <div style={{ fontSize: 11, color: "#8b949e", marginTop: 3 }}>
+                      {folder.kind === "maliang_workspace" ? "MrMaLiang workspace" : folder.kind === "writing_workspace" ? "Writing component" : "Folder"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
+
+      {!dir && <div style={{ color: "#8b949e" }}>Choose a MrMaLiang workspace directory.</div>}
+      {isLoading && dir && <div style={{ color: "#8b949e" }}>Loading MrMaLiang workspace...</div>}
       {error != null && <div style={{ color: "#f85149" }}>Error: {String(error)}</div>}
       {operationMessage && <div style={{ color: operationMessage.includes("failed") || operationMessage.includes("not found") ? "#f85149" : "#8b949e" }}>{operationMessage}</div>}
 
@@ -832,8 +911,8 @@ export function LongWrite() {
       </Section>
 
       {data && (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, order: 1 }}>
             <Section title="Project">
               <div style={{ color: "#c9d1d9", lineHeight: 1.7 }}>
                 <div>{smallLabel("name")} {data.project.name ?? data.project.id ?? "unknown"}</div>
@@ -844,6 +923,12 @@ export function LongWrite() {
                 <div>{smallLabel("provider")} {data.research.provider ?? "not set"}</div>
                 <div>{smallLabel("paper evidence")} {data.research.paperProfile ?? "literature_survey"}</div>
                 <div>{smallLabel("repositories")} {data.research.codebases.length || "none"}</div>
+                {data.research.codebases.map((codebase) => (
+                  <div key={codebase.id} style={{ paddingLeft: 8, fontSize: 12, overflowWrap: "anywhere" }}>
+                    {codebase.source} <span style={{ color: "#8b949e" }}>({codebase.ref})</span>
+                  </div>
+                ))}
+                <div>{smallLabel("reference links")} {data.writing.referenceLinks.length || "none"}</div>
                 <div>{smallLabel("GitHub discovery")} {data.research.codebaseDiscovery?.enabled ? `enabled (${data.research.codebaseDiscovery.maxSelected ?? 8} max)` : "disabled"}</div>
                 <div>{smallLabel("research target")} {data.research.targetCandidates ?? 100} candidates / {data.research.queryBudget ?? 24} queries</div>
                 <div>{smallLabel("audience")} {data.writing.audience ?? "not set"}</div>
@@ -910,7 +995,7 @@ export function LongWrite() {
             </Section>
           </div>
 
-          <Section title="Operations">
+          <Section title="Operations" style={{ order: 3 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <select
                 value={runtimeOverride || data.workflow.runtime || "codex"}
@@ -1101,7 +1186,7 @@ export function LongWrite() {
             )}
           </Section>
 
-          <Section title="Current Manuscript and Adaptive Artifacts">
+          <Section title="Current Manuscript and Adaptive Artifacts" style={{ order: 4 }}>
             <div style={{ color: "#8b949e", fontSize: 13, lineHeight: 1.5 }}>
               Inspect the latest manuscript and, in agentic mode, the validated action plan, dispatcher record, and any operator clarification. A running review may still be scoring an earlier build; use the PDF build report and the next review round to confirm the current state.
             </div>
@@ -1144,7 +1229,7 @@ export function LongWrite() {
             )}
           </Section>
 
-          <Section title="Workflow Graph">
+          <Section title="Workflow Graph" style={{ order: 5 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
               <button
                 onClick={() => yamlTools.mutate("validate")}
@@ -1321,7 +1406,7 @@ export function LongWrite() {
             </div>
           </Section>
 
-          <Section title="Feedback">
+          <Section title="Feedback" style={{ order: 6 }}>
             <div style={{ color: "#8b949e", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
               Saves an operator request for the next quality-loop review and revision. Saving does not restart or interrupt a running flow; after a paused or completed flow, click Run to continue it.
             </div>
@@ -1358,7 +1443,10 @@ export function LongWrite() {
           </Section>
 
           {draftConfig && (
-            <Section title="Config">
+            <Section title="Research brief & configuration — edit before first run" style={{ order: 2 }}>
+              <div style={{ color: "#8b949e", fontSize: 12, marginBottom: 10, lineHeight: 1.45 }}>
+                Set the research brief, evidence scope, manuscript targets, and run guardrails here before starting Operations. Saving updates <code>writing/longwrite.yaml</code> and regenerates derived workflow files. {foundationInputsEditable ? "Topic, repositories, and reference seeds are still editable because this flow has not started." : "Topic, repositories, and reference seeds are locked after corpus work begins; create a new workspace or deliberately reset before changing them."}
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
                 <label style={{ color: "#8b949e", fontSize: 12 }}>
                   Project name
@@ -1386,6 +1474,7 @@ export function LongWrite() {
                   Topic
                   <input
                     value={draftConfig.research?.topic ?? ""}
+                    disabled={!foundationInputsEditable || saveConfig.isPending}
                     onChange={(e) => patchConfig((c) => ({ ...c, research: { provider: c.research?.provider ?? "seed", ...c.research, topic: e.target.value } }))}
                     style={{
                       display: "block", width: "100%", boxSizing: "border-box", marginTop: 4,
@@ -1583,8 +1672,9 @@ export function LongWrite() {
                   Repository evidence
                   <textarea
                     rows={3}
-                    value={(draftConfig.research?.codebases ?? []).map((entry) => entry.source).join("\n")}
-                    placeholder="One Git URL or local Git path per line. Leave empty for a literature survey."
+                    value={formatCodebasesForEditor(draftConfig.research?.codebases)}
+                    disabled={!foundationInputsEditable || saveConfig.isPending}
+                    placeholder="One Git URL or local Git path per line; append | ref to pin a requested branch/tag/commit. Leave empty for a literature survey."
                     onChange={(e) => patchConfig((c) => {
                       const codebases = codebasesFromText(e.target.value, c.research?.codebases);
                       return {
@@ -1632,7 +1722,7 @@ export function LongWrite() {
                       ["max_readme_fetches", "README fetches", 0, 40],
                       ["max_selected", "Selected", 1, 10],
                     ] as const).map(([key, label, min, max]) => <label key={key}>{label}<input type="number" min={min} max={max} value={draftConfig.research?.codebase_discovery?.[key] ?? min} onChange={(e) => patchConfig((c) => ({ ...c, research: { ...c.research, codebase_discovery: { provider: "github", enabled: true, query_budget: 10, max_candidates: 40, max_readme_fetches: 12, max_selected: 8, require_license: true, include_archived: false, languages: [], ...c.research?.codebase_discovery, [key]: Number(e.target.value) } } }))} style={inputStyle} /></label>)}
-                    <label>Languages<input value={(draftConfig.research?.codebase_discovery?.languages ?? []).join(", ")} onChange={(e) => patchConfig((c) => ({ ...c, research: { ...c.research, codebase_discovery: { provider: "github", enabled: true, query_budget: 10, max_candidates: 40, max_readme_fetches: 12, max_selected: 8, require_license: true, include_archived: false, languages: [], ...c.research?.codebase_discovery, languages: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) } } }))} style={inputStyle} /></label>
+                    <label>Languages<input value={(draftConfig.research?.codebase_discovery?.languages ?? []).join(", ")} onChange={(e) => patchConfig((c) => ({ ...c, research: { ...c.research, codebase_discovery: { provider: "github", enabled: true, query_budget: 10, max_candidates: 40, max_readme_fetches: 12, max_selected: 8, require_license: true, include_archived: false, ...c.research?.codebase_discovery, languages: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) } } }))} style={inputStyle} /></label>
                   </div>}
                 </div>
                 <label style={{ color: "#8b949e", fontSize: 12 }}>
@@ -1843,6 +1933,7 @@ export function LongWrite() {
                   Reference links
                   <textarea
                     value={(draftConfig.writing?.reference_links ?? []).join("\n")}
+                    disabled={!foundationInputsEditable || saveConfig.isPending}
                     onChange={(e) => patchConfig((c) => ({
                       ...c,
                       writing: {
@@ -1958,7 +2049,7 @@ export function LongWrite() {
             </Section>
           )}
 
-          <Section title="Commands">
+          <Section title="Commands" style={{ order: 7 }}>
             <div style={{ display: "grid", gap: 8 }}>
               <Command value={data.commands.status} />
               <Command value={data.commands.run} />
@@ -1970,7 +2061,7 @@ export function LongWrite() {
             </div>
           </Section>
 
-          <Section title="Stages">
+          <Section title="Stages" style={{ order: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ color: "#8b949e", textAlign: "left" }}>
@@ -2004,7 +2095,7 @@ export function LongWrite() {
             </table>
           </Section>
 
-          <Section title="Recent logs">
+          <Section title="Recent logs" style={{ order: 9 }}>
             {data.operation?.stdout || data.operation?.stderr ? (
               <details open={data.operation.running} style={{ marginBottom: 8 }}>
                 <summary style={{ color: "#58a6ff", cursor: "pointer", fontFamily: "monospace", fontSize: 13 }}>
@@ -2050,7 +2141,7 @@ export function LongWrite() {
               </div>
             )}
           </Section>
-        </>
+        </div>
       )}
     </div>
   );

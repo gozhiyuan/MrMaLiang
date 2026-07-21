@@ -77,8 +77,12 @@ flowchart TB
   fts --> sourceevidence["[LLM] Source evidence packets<br/>exact local excerpts"]
   hybrid --> sourceevidence
   sourceevidence --> depth["[script] Finalize A/B depth"]
-  depth --> gates["[script] Final depth + corpus gates"]
-  gates --> outline["[LLM · outline-architect]<br/>Evidence-aware outline"]
+  depth --> gates["[script] Corpus assessment"]
+  gates --> recovery{"Core evidence gate passes?"}
+  recovery -- "no · max 2 rounds" --> recoverplan["[LLM + scripts] Bounded targeted recovery:<br/>expand → re-screen → full text → packets"]
+  recoverplan --> gates
+  recovery -- yes --> hardgate["[script] Final hard corpus gate"]
+  hardgate --> outline["[LLM · outline-architect]<br/>Evidence-aware outline"]
   outline --> outlineaudit["[script] Survey + structure audits"]
   outlineaudit --> outlinecritique["[LLM · skeptical-reviewer]<br/>Outline critique from source packets"]
   outlinecritique --> outlinerevise["[LLM · outline-architect]<br/>Outline revision"]
@@ -851,7 +855,7 @@ maliang writing sync llm-memory-agentic
 maliang writing validate config llm-memory-agentic
 ```
 
-The LongWrite dashboard exposes the same project controls: select the
+The MrMaLiang dashboard exposes the same project controls: select the
 workspace, open the LongWrite configuration panel, adjust the research
 profile/candidates/query budget/taxonomy/target words/run limits, and choose
 **Save config**. Saving writes `longwrite.yaml` and synchronizes

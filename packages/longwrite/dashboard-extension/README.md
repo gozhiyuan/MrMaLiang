@@ -1,19 +1,19 @@
-# LongWrite Dashboard Extension
+# MrMaLiang Dashboard Extension
 
-This directory contains the LongWrite-owned dashboard extension source consumed
+This directory contains the MrMaLiang dashboard extension source consumed
 by the MalaClaw dashboard host.
 
 ```text
 client/
-  LongWrite.tsx      # LongWrite workspace UI
+  LongWrite.tsx      # MrMaLiang workspace UI
   index.tsx          # client extension metadata
 
 server/
   manifest.ts        # server-side extension metadata
 ```
 
-The MalaClaw dashboard owns the extension host and generic workflow UI. LongWrite
-owns this product-specific UI: workspace creation, `longwrite.yaml` editing,
+The MalaClaw dashboard owns the extension host and generic workflow UI.
+MrMaLiang owns this product-specific UI: workspace creation, `longwrite.yaml` editing,
 research provider settings, writing style/reference inputs, feedback capture,
 and LongWrite-specific command hints. Research-paper creation is survey-only in
 this component surface: an optional repository input selects the
@@ -22,8 +22,12 @@ schema-validated architecture and comparison stages. The creation/editor forms
 also expose bounded GitHub discovery budgets; selected repositories are
 canonicalized and Git-pinned before drafting. It never executes repository
 code or implicitly starts an experiment. Workspace creation calls the public
-`maliang init` facade and opens the resulting `writing/` component; normal Run
-actions call the parent `maliang run` lifecycle when `maliang.yaml` is present.
+`maliang init` facade. The selector accepts either a public MrMaLiang program
+directory (containing `maliang.yaml`) or a direct writing component; program
+directories resolve to `writing/` internally. Use **Browse folders** to navigate
+folders below the local account home instead of pasting a path. It lists folders
+only and never exposes workspace files or credentials. Normal Run actions call
+the parent `maliang run` lifecycle when `maliang.yaml` is present.
 
 Build LongWrite before loading the server extension:
 

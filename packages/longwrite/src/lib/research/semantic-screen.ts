@@ -162,7 +162,9 @@ export async function repairSemanticScreen(workspaceDir: string): Promise<{ norm
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, ["# Semantic-screen contract repair", "", "- Status: pass", `- Valid screenings: ${screen.screenings.length}`, `- Full-text priorities: ${screen.screenings.filter((item) => item.fulltext_priority).length}`, `- Envelope normalized: ${normalized ? "yes" : "no"}`, ""].join("\n"), "utf-8");
   } catch (error) {
-    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    const detail = error instanceof z.ZodError
+      ? error.issues.slice(0, 8).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+      : error instanceof Error ? error.message.split("\n")[0] : String(error);
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, ["# Semantic-screen contract repair", "", "- Status: failed", `- Detail: ${detail}`, "- Required repair: write one JSON object that only screens sources in sources/semantic-screening-candidates.json.", ""].join("\n"), "utf-8");
     throw new Error(`${SEMANTIC_SCREEN_PATH}: invalid semantic-screen contract; see reports/semantic-screen-repair.md`);

@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/longwrite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Long-form writing agent workflows on the MalaClaw flow engine",
   "type": "module",
   "license": "MIT",

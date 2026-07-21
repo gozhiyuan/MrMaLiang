@@ -4,7 +4,7 @@ export const longWriteDashboardServerExtensionManifest = {
   workspaceConfigFile: "longwrite.yaml",
   cliEnv: ["MALACLAW_LONGWRITE_BIN", "LONGWRITE_BIN"],
   cliBin: "longwrite",
-  description: "LongWrite writing-workspace dashboard extension.",
+  description: "MrMaLiang research-workspace dashboard extension.",
 };
 
 export type LongWriteDashboardServerExtensionManifest = typeof longWriteDashboardServerExtensionManifest;

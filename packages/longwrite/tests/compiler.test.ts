@@ -172,7 +172,7 @@ describe("compileModeToManifest", () => {
       researchProvider: "multi",
       researchPolicy: {
         targetCandidates: 400, queryBudget: 50, taxonomy: ["memory", "planning"], fulltextMaxSources: 100,
-        allowPdfDownload: true, verificationMaxSources: 100, writingStrategy: "scaffold_then_revise",
+        allowPdfDownload: true, verificationMaxSources: 100, writingStrategy: "scaffold_then_revise", semanticScreenEnabled: true,
       },
     });
     const workflow = manifest.workflow as { mode: string; stages: Array<Record<string, unknown>> };
@@ -187,6 +187,18 @@ describe("compileModeToManifest", () => {
     expect(workflow.stages.find((stage) => stage.id === "corpus_gates")?.command).toMatchObject({
       args: expect.arrayContaining(["research", "corpus-gates", "."]),
     });
+    const recovery = workflow.stages.find((stage) => stage.id === "corpus_evidence_recovery_loop") as
+      | { type?: string; max_rounds?: number; stop_when?: string; on_exhaustion?: string; stages?: Array<Record<string, unknown>> }
+      | undefined;
+    expect(recovery?.type).toBe("loop");
+    expect(recovery?.max_rounds).toBe(2);
+    expect(recovery?.stop_when).toBe("corpus_gate_pass >= 1");
+    expect(recovery?.on_exhaustion).toBe("fail");
+    const recoveryPlan = recovery?.stages?.find((stage) => stage.id === "corpus_recovery_plan") as
+      | { when?: string; validator_commands?: Array<{ args: string[] }> }
+      | undefined;
+    expect(recoveryPlan?.when).toBe("corpus_gate_pass < 1");
+    expect(recoveryPlan?.validator_commands?.[0]?.args).toEqual(expect.arrayContaining(["research", "repair-corpus-recovery-plan", "."]));
     expect(workflow.stages.find((stage) => stage.id === "survey_contract")?.command).toMatchObject({
       args: expect.arrayContaining(["research", "survey-contract", "."]),
     });
@@ -304,11 +316,17 @@ describe("compileModeToManifest", () => {
     expect(workflow.mode).toBe("auto_research_agentic");
     const ids = workflow.stages.map((stage) => stage.id);
     expect(ids).toEqual(expect.arrayContaining([
-      "semantic_candidate_select", "semantic_screen", "semantic_screen_repair",
+      "semantic_candidate_select", "semantic_screen",
       "source_evidence_candidate_select", "source_evidence_extract", "source_evidence_repair", "finalize_evidence_depth",
     ]));
     expect(ids.indexOf("corpus_gates")).toBeGreaterThan(ids.indexOf("finalize_evidence_depth"));
     expect(workflow.stages.find((stage) => stage.id === "semantic_screen")?.outputs).toEqual(["sources/semantic-screening.json"]);
+    expect(workflow.stages.find((stage) => stage.id === "semantic_screen")?.validator_commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ args: expect.arrayContaining(["research", "repair-semantic-screen", "."]) }),
+    ]));
+    expect(workflow.stages.find((stage) => stage.id === "semantic_screen")?.instructions).toEqual(expect.arrayContaining([
+      expect.stringContaining("chapter_role is protagonist, comparison, background, or exclude"),
+    ]));
     expect(workflow.stages.find((stage) => stage.id === "finalize_evidence_depth")?.command).toMatchObject({
       args: expect.arrayContaining(["research", "finalize-evidence-depth", "."]),
     });
@@ -327,12 +345,12 @@ describe("compileModeToManifest", () => {
     expect(initialDraft.steps.find((step) => step.id === "draft")?.inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
     const loop = workflow.stages.find((stage) => stage.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
     expect(loop.stages.slice(0, 6).map((stage) => stage.id)).toEqual(["artifact_plan", "artifact_plan_repair", "action_plan", "action_plan_repair", "action_plan_split", "research_action_dispatch"]);
-    expect(loop.stages.slice(6, 16).map((stage) => stage.id)).toEqual([
-      "quality_semantic_screen", "quality_semantic_screen_repair", "quality_fulltext_refresh",
+    expect(loop.stages.slice(6, 15).map((stage) => stage.id)).toEqual([
+      "quality_semantic_screen", "quality_fulltext_refresh",
       "quality_evidence_index_refresh", "quality_source_evidence_candidate_select", "quality_source_evidence_extract",
       "quality_source_evidence_repair", "quality_finalize_evidence_depth", "quality_corpus_gates", "quality_allocate_evidence",
     ]);
-    expect(loop.stages.slice(16, 21).map((stage) => stage.id)).toEqual([
+    expect(loop.stages.slice(15, 20).map((stage) => stage.id)).toEqual([
       "outline_action_dispatch",
       "quality_outline_survey_contract", "quality_outline_structure_audit",
       "quality_outline_reopen_validate", "quality_reallocate_outline_evidence",

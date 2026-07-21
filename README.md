@@ -17,6 +17,32 @@ MrMaLiang coordinates two internal components:
 runtime. It owns durable flow state, approvals, retries, quotas, and worker
 execution. MrMaLiang owns the research-specific evidence and handoff contracts.
 
+## A small origin story
+
+The name comes from **Shen Bi Ma Liang** (神笔马良), the Chinese folk tale about
+Ma Liang and a magic brush whose drawings can become real. Here, Ma Liang has
+grown up into **MrMaLiang**: instead of drawing objects into existence, he uses
+bounded, evidence-first agent workflows to help turn a research brief into a
+long survey, repository study, controlled experiment, or book-length draft.
+
+The magic is deliberately constrained. A useful figure still needs verified
+metadata or evidence; a scholarly claim still needs a traceable source; and an
+empirical result still needs audited trials. MrMaLiang helps with the long,
+iterative craft of writing without pretending that evidence or scientific
+results can be conjured from nothing.
+
+## Development and recommended runtime
+
+MrMaLiang is developed with **OpenAI Codex 5.6 models**. For live flagship
+runs, we recommend the local `codex` runtime with an active Codex subscription:
+it is the most exercised configuration for the agentic planning, drafting, and
+review stages in this repository. Complete the local Codex CLI login before
+running `maliang preflight … --runtime codex`.
+
+Codex is recommended, not mandatory. MalaClaw can also use a supported
+Claude/Claude Code runtime, and the offline `seed` + `dry-run` combination is
+available for a no-quota smoke test.
+
 ## What to use it for
 
 | Goal | Start with | Uses |
@@ -163,7 +189,10 @@ Required for all workflows:
 
 Required for a real survey or manuscript run:
 
-- An authenticated `codex` or `claude`/`claude-code` runtime
+- **Recommended:** an authenticated `codex` runtime with an active Codex
+  subscription. It is the primary live-run configuration used to develop this
+  repository.
+- Alternatively, an authenticated `claude`/`claude-code` runtime
 - A LaTeX engine (`tectonic` or `latexmk`) for final PDF output
 - `pdftotext`, Mermaid CLI, and Matplotlib only when their selected evidence or
   figure features require them
@@ -349,7 +378,8 @@ maliang run <workspace> --runtime codex
 ### Optional dashboard
 
 The MalaClaw dashboard can create and edit survey workspaces through the
-LongWrite extension. Its **Repository evidence** field accepts one Git URL or
+**MrMaLiang** tab. It accepts a parent MrMaLiang workspace and offers **Browse
+folders** for local selection. Its **Repository evidence** field accepts one Git URL or
 local Git path per line. A non-empty field selects the repository-study
 evidence profile; it does not execute the repository or start an experiment.
 

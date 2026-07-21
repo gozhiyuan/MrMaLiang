@@ -59,14 +59,16 @@ and `command:` needs `declared_command_tool`. The full table is in
 
 ## 3. Start the dashboard (optional)
 
-LongWrite can register its dashboard extension and start the MalaClaw dashboard
-host in one command:
+MrMaLiang can register its dashboard extension and start the MalaClaw dashboard
+host in one command. The tab is named **MrMaLiang** and accepts a parent
+MrMaLiang workspace; use **Browse folders** rather than pasting the internal
+`writing/` path:
 
 ```bash
 maliang writing dashboard                    # http://127.0.0.1:3456
 ```
 
-This writes/updates `~/.malaclaw/dashboard.yaml` with the LongWrite extension
+This writes/updates `~/.malaclaw/dashboard.yaml` with the MrMaLiang extension
 path for the current install, preserves any other dashboard extensions, then
 launches `malaclaw dashboard`. To register the extension without starting the
 server:
@@ -216,7 +218,7 @@ so all length and style metrics count characters.
 ## Dashboard editing model
 
 Config, personas (`roles/`), durable top-level stage overrides, and run limits are
-editable in the LongWrite tab. Workflow **structure** (stages, loops,
+editable in the MrMaLiang tab. Workflow **structure** (stages, loops,
 validators) is edited in YAML: prefer `longwrite.yaml` + the "Sync from
 longwrite.yaml" button; hand edits to compiled `malaclaw.yaml` are
 advanced-mode and sync regenerates over them. Use "Validate YAML" after
@@ -240,6 +242,6 @@ fail-fast validation and refuses cleanly on structural drift.
 
 Read [`../CONTRIBUTING.md`](../CONTRIBUTING.md). Contribute writing modes,
 runtime profiles, research providers, validators, manuscript builders,
-scorecards, examples, and the LongWrite dashboard tab here. Contribute generic
+scorecards, examples, and the MrMaLiang dashboard tab here. Contribute generic
 workflow engine, worker runtime, approval, retry, state, and dashboard-host
 behavior to MalaClaw.

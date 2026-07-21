@@ -73,7 +73,7 @@ export async function ensureLongWriteDashboardExtensionRegistered(
     try {
       await fs.access(extensionPath);
     } catch {
-      throw new Error(`LongWrite dashboard extension not found at ${extensionPath}. Run \`npm run build\` in the MrMaLiang checkout, or reinstall the longwrite package.`);
+      throw new Error(`MrMaLiang dashboard extension not found at ${extensionPath}. Run \`npm run build\` in the MrMaLiang checkout, or reinstall the maliang package.`);
     }
   }
 
@@ -107,7 +107,7 @@ export async function ensureLongWriteDashboardExtensionRegistered(
 
 export async function runDashboard(opts: DashboardOptions): Promise<void> {
   const registration = await ensureLongWriteDashboardExtensionRegistered();
-  console.log(`${registration.added ? "Registered" : "Found"} LongWrite dashboard extension: ${registration.extensionPath}`);
+  console.log(`${registration.added ? "Registered" : "Found"} MrMaLiang dashboard extension: ${registration.extensionPath}`);
   console.log(`Dashboard config: ${registration.configPath}`);
 
   if (opts.installOnly) return;

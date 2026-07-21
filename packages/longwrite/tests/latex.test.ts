@@ -216,7 +216,7 @@ describe("citation mapping", () => {
     expect(main).toContain("\\usepackage[round,authoryear]{natbib}");
     expect(main).toContain("\\bibliographystyle{plainnat}");
     expect(main).toContain("AI tools used: LongWrite");
-    expect(main).toContain("Execution provenance: LongWrite 0.2.0");
+    expect(main).toMatch(/Execution provenance: LongWrite \d+\.\d+\.\d+/);
     expect(main).toContain("codex | gpt-5 (1 unit)");
     expect(main).toContain("Cited sources & 1");
   });
