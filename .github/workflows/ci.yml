@@ -9,11 +9,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the compatible MalaClaw runtime
+        uses: actions/checkout@v4
+        with:
+          repository: gozhiyuan/MalaClaw
+          ref: 29abaf5c16899e548a35e8e1552d090a6220f00c
+          path: .dependencies/MalaClaw
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Build MalaClaw runtime
+        run: |
+          npm ci --prefix .dependencies/MalaClaw
+          npm run build --prefix .dependencies/MalaClaw
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - name: Test MrMaLiang with its pinned MalaClaw runtime
+        run: npm test
+        env:
+          MALACLAW_SOURCE_DIR: ${{ github.workspace }}/.dependencies/MalaClaw
       - run: npm run maliang -- template list
