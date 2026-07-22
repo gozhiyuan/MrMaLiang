@@ -762,6 +762,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     visualPlan.instructions = [
       ...((visualPlan.instructions as string[] | undefined) ?? []),
       "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
+      "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph.",
     ];
     const draftSections = next.stages.find((stage) => stage.id === "draft_sections");
     if (draftSections && Array.isArray(draftSections.steps)) {
@@ -867,12 +868,29 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     max_actions: 3,
     outputs: ["reports/action-dispatch.json"],
   };
+  // Records whether a targeted_research_expansion was actually dispatched this
+  // round, as the numeric metric `research_expansion_dispatched`. The evidence
+  // refresh block below is gated on it so the runtime SKIPS those stages when
+  // no expansion ran — instead of asking a model to "preserve" an unchanged
+  // declared output, which the freshness check rejects as stale and which
+  // wastes a full model turn per round before self-healing on retry.
+  const dispatchMetrics = {
+    id: "quality_dispatch_metrics",
+    title: "Record whether an evidence expansion was dispatched this round",
+    owner: "source-curator",
+    inputs: ["reports/action-dispatch-research.json"],
+    outputs: ["reports/metrics.json"],
+    validators: ["required_output_exists"],
+    runtime: "script",
+    command: longwriteCommand(["research", "dispatch-metrics", "."]),
+  };
   // A selected expansion changes the candidate corpus after the initial
   // semantic/full-text bridge has completed.  Replay that bridge inside each
   // bounded quality round so review-driven recall cannot leave new sources
-  // metadata-only.  When no expansion was selected, the LLM stages preserve
-  // the existing valid artifacts; the script stages are idempotent refreshes.
-  const evidenceRefreshStages: Array<Record<string, unknown>> = policy?.semanticScreenEnabled && provider !== "seed" ? [
+  // metadata-only.  Every stage is gated on research_expansion_dispatched: when
+  // no expansion was dispatched the whole block is skipped, so the LLM stages
+  // only ever run when they genuinely must produce a fresh artifact.
+  const evidenceRefreshStages: Array<Record<string, unknown>> = (policy?.semanticScreenEnabled && provider !== "seed" ? [
     {
       id: "quality_semantic_screen",
       title: "Refresh abstract screening after a selected evidence expansion",
@@ -881,7 +899,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       optional_inputs: ["sources/semantic-screening.json", "reports/research-expansion.md"],
       skills: ["reports/action-dispatch-research.json", "sources/semantic-screening-candidates.json", "sources/semantic-screening.json", "reports/research-expansion.md"],
       instructions: [
-        "Read reports/action-dispatch-research.json. If targeted_research_expansion was selected, re-screen every current bounded candidate from titles and abstracts and write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}. If it was not selected, preserve the existing valid semantic-screen artifact exactly; do not invent a new research decision.",
+        "A targeted_research_expansion was dispatched this round (this stage runs only then). Re-screen every current bounded candidate from titles and abstracts and write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}.",
         "This is abstract-level semantic triage, not a claim-evidence judgment. Assess only supplied candidate source IDs and configured taxonomy cells. Do not invent claims, quotations, pages, venues, acceptance status, or source IDs. Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D (D, never none); and fulltext_priority true|false as a JSON boolean. Final A/B depth still requires retrieved full text and validated source evidence.",
       ],
       outputs: ["sources/semantic-screening.json", "reports/semantic-screen-repair.md"], validators: ["required_output_exists"],
@@ -917,7 +935,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       optional_inputs: ["evidence/source-packets.json", "fulltext/*.md"],
       skills: ["reports/action-dispatch-research.json", "sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "evidence/source-packets.json", "fulltext/*.md"],
       instructions: [
-        "If reports/action-dispatch-research.json records targeted_research_expansion, write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates. If no expansion was selected, preserve the existing valid packet artifact exactly.",
+        "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
         "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one.",
       ],
       outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
@@ -944,7 +962,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       outputs: ["evidence/coverage.json"], validators: ["required_output_exists"], runtime: "script",
       command: longwriteCommand(["evidence", "allocate", "."]),
     },
-  ] : [];
+  ] : []).map((stage) => ({ ...stage, when: "research_expansion_dispatched >= 1" }));
   const outlineReopenStages: Array<Record<string, unknown>> = policy?.outlineReviewEnabled && policy?.semanticScreenEnabled && provider !== "seed" ? [
     {
       id: "quality_outline_survey_contract",
@@ -980,6 +998,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     planner,
     splitActionPlan,
     researchDispatch,
+    ...(evidenceRefreshStages.length ? [dispatchMetrics] : []),
     ...evidenceRefreshStages,
     outlineDispatch,
     ...outlineReopenStages,
@@ -1039,7 +1058,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       recoveryWhen(finalReleasePlanner),
       recoveryWhen(splitActionPlan),
       recoveryWhen(researchDispatch),
-      ...evidenceRefreshStages.map(recoveryWhen),
+      // dispatchMetrics is gated by the recovery predicate, but the refresh
+      // stages keep their own research_expansion_dispatched gate (recoveryWhen
+      // must not clobber it) so a no-op recovery round still skips them.
+      ...(evidenceRefreshStages.length ? [recoveryWhen(dispatchMetrics)] : []),
+      ...evidenceRefreshStages,
       recoveryWhen(outlineDispatch),
       ...outlineReopenStages.map(recoveryWhen),
       recoveryWhen(revisionDispatch),

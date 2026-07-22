@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { prepareResearchWorkspace } from "../src/lib/research/pipeline.js";
 import { buildFigureWorkspace } from "../src/lib/writing/figures.js";
+import { detectPython } from "../src/lib/writing/figure-backends.js";
 import { buildLatexWorkspace } from "../src/lib/writing/latex.js";
 import { validateFigureWorkspace } from "../src/lib/validation/figures.js";
 import { runBuildResearch } from "../src/commands/build.js";
@@ -38,13 +39,22 @@ afterEach(async () => {
 });
 
 let previousEngine: string | undefined;
+let previousMmdc: string | undefined;
 beforeAll(() => {
   previousEngine = process.env.LONGWRITE_LATEX_ENGINE;
   process.env.LONGWRITE_LATEX_ENGINE = "none";
+  // Force the no-local-tool deterministic renderers so these assertions are
+  // hermetic: without this, a machine that happens to have mmdc installed
+  // renders the concept map to a PDF include instead of the deterministic
+  // TikZ/SVG contract under test (green in CI, red on a dev laptop).
+  previousMmdc = process.env.LONGWRITE_MMDC_BIN;
+  process.env.LONGWRITE_MMDC_BIN = path.join(os.tmpdir(), "no-such-mmdc-binary");
 });
 afterAll(() => {
   if (previousEngine === undefined) delete process.env.LONGWRITE_LATEX_ENGINE;
   else process.env.LONGWRITE_LATEX_ENGINE = previousEngine;
+  if (previousMmdc === undefined) delete process.env.LONGWRITE_MMDC_BIN;
+  else process.env.LONGWRITE_MMDC_BIN = previousMmdc;
 });
 
 describe("research figures and tables", () => {
@@ -65,10 +75,14 @@ describe("research figures and tables", () => {
     ]));
 
     const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
+    // The source-years plot uses the Matplotlib PNG when available and the
+    // deterministic pgfplots/SVG fallback otherwise; either way the manifest
+    // must declare the artifact that was actually produced.
+    const pythonAvailable = await detectPython();
     expect(manifest.figures[0]).toMatchObject({
       id: "source-years",
-      backend: "python",
-      path: "figures/source-years-plot.png",
+      backend: pythonAvailable ? "python" : "deterministic-svg",
+      path: pythonAvailable ? "figures/source-years-plot.png" : "figures/source-years.svg",
     });
     expect(await fs.readFile(path.join(ws, "data", "source-years.csv"), "utf-8")).toContain("year,count");
     expect(await fs.readFile(path.join(ws, "tables", "evidence-profile.md"), "utf-8")).toContain("| Citation depth | Sources | Share |");
@@ -85,11 +99,15 @@ describe("research figures and tables", () => {
     const ws = await makeWorkspace();
     await buildFigureWorkspace(ws);
     await addPublicationFigure(ws);
-    await fs.rm(path.join(ws, "figures", "source-years-plot.png"));
+    // Removing whichever artifact the manifest actually declares must fail the
+    // gate, regardless of which figure backend the environment selected.
+    const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
+    const declaredPath = manifest.figures[0].path as string;
+    await fs.rm(path.join(ws, declaredPath));
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
     expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
-      expect.stringContaining("figures/source-years-plot.png is missing or empty"),
+      expect.stringContaining(`${declaredPath} is missing or empty`),
     ]));
   }, 15_000);
 

@@ -123,6 +123,52 @@ describe("compileModeToManifest", () => {
     expect(roundTrip.workflow.stages).toHaveLength(mode.workflow.stages.length);
   });
 
+  it("gates the LLM evidence-refresh stages on a dispatched expansion", async () => {
+    const mode = await loadMode("auto_research_agentic");
+    const manifest = compileModeToManifest(mode, {
+      projectId: "survey",
+      topic: "Long-horizon agent memory",
+      researchProvider: "semantic_scholar",
+      researchPolicy: {
+        targetCandidates: 400, queryBudget: 50, taxonomy: ["memory", "planning"], fulltextMaxSources: 100,
+        allowPdfDownload: true, semanticScreenEnabled: true, outlineReviewEnabled: true, outlineReviewMaxRounds: 2, verificationMaxSources: 100, writingStrategy: "llm_sections",
+      },
+    });
+    const stages = (manifest.workflow as { stages: Array<Record<string, unknown>> }).stages;
+
+    // A deterministic script step emits the gate metric right after dispatch.
+    const dispatchMetrics = childStage(stages, "quality_loop", "quality_dispatch_metrics") as
+      | { runtime?: string; command?: { args: string[] }; outputs?: string[] }
+      | undefined;
+    expect(dispatchMetrics?.runtime).toBe("script");
+    expect(dispatchMetrics?.command?.args).toEqual(expect.arrayContaining(["research", "dispatch-metrics", "."]));
+    expect(dispatchMetrics?.outputs).toContain("reports/metrics.json");
+
+    // Every refresh stage is skipped unless an expansion was actually dispatched,
+    // so the no-op "preserve" contradiction that produced stale_attempt_output is
+    // gone. The two model stages must carry the gate and drop the preserve prompt.
+    for (const id of ["quality_semantic_screen", "quality_source_evidence_extract"]) {
+      const stage = childStage(stages, "quality_loop", id) as
+        | { when?: string; instructions?: string[] }
+        | undefined;
+      expect(stage?.when).toBe("research_expansion_dispatched >= 1");
+      expect((stage?.instructions ?? []).join(" ")).not.toContain("preserve");
+    }
+
+    // The same refresh stages are replayed in the final-release recovery loop.
+    // recoveryWhen must NOT clobber their dispatch gate, or a no-op recovery
+    // round would reintroduce the stale_attempt_output failure.
+    const recovery = stages.find((s) => s.id === "final_release_recovery_loop") as
+      | { stages?: Array<Record<string, unknown>> }
+      | undefined;
+    const recoveryStages = recovery?.stages ?? [];
+    expect(recoveryStages.find((s) => s.id === "quality_dispatch_metrics")).toBeDefined();
+    for (const id of ["quality_semantic_screen", "quality_source_evidence_extract"]) {
+      const stage = recoveryStages.find((s) => s.id === id) as { when?: string } | undefined;
+      expect(stage?.when).toBe("research_expansion_dispatched >= 1");
+    }
+  });
+
   it("does not inject research script commands without a topic", async () => {
     const mode = await loadMode("auto_research_agentic");
     const manifest = compileModeToManifest(mode, { projectId: "survey" });
@@ -370,18 +416,18 @@ describe("compileModeToManifest", () => {
     expect(initialDraft.steps.find((step) => step.id === "draft")?.inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
     const loop = workflow.stages.find((stage) => stage.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
     expect(loop.stages.slice(0, 4).map((stage) => stage.id)).toEqual(["artifact_plan", "action_plan", "action_plan_split", "research_action_dispatch"]);
-    expect(loop.stages.slice(4, 12).map((stage) => stage.id)).toEqual([
-      "quality_semantic_screen", "quality_fulltext_refresh",
+    expect(loop.stages.slice(4, 13).map((stage) => stage.id)).toEqual([
+      "quality_dispatch_metrics", "quality_semantic_screen", "quality_fulltext_refresh",
       "quality_evidence_index_refresh", "quality_source_evidence_candidate_select", "quality_source_evidence_extract",
       "quality_finalize_evidence_depth", "quality_corpus_gates", "quality_allocate_evidence",
     ]);
-    expect(loop.stages.slice(12, 17).map((stage) => stage.id)).toEqual([
+    expect(loop.stages.slice(13, 18).map((stage) => stage.id)).toEqual([
       "outline_action_dispatch",
       "quality_outline_survey_contract", "quality_outline_structure_audit",
       "quality_outline_reopen_validate", "quality_reallocate_outline_evidence",
     ]);
     expect(loop.stages.find((stage) => stage.id === "quality_source_evidence_extract")?.instructions).toEqual(expect.arrayContaining([
-      expect.stringContaining("action-dispatch-research.json records targeted_research_expansion"),
+      expect.stringContaining("dispatched this round"),
     ]));
     expect(loop.stages.find((stage) => stage.id === "quality_source_evidence_extract")?.validator_commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ args: expect.arrayContaining(["research", "repair-source-evidence", "."]) }),

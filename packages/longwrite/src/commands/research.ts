@@ -475,6 +475,39 @@ export async function runResearchCorpusGates(workspaceDir: string, opts: { advis
   }
 }
 
+/** Translate the research action-dispatch record into the numeric gate metric
+ * `research_expansion_dispatched` so the compiled workflow can skip the LLM
+ * evidence-refresh stages when no targeted_research_expansion actually ran.
+ * Without the gate those stages are asked to "preserve" an unchanged declared
+ * output, which the runtime freshness check rejects as stale — wasting a full
+ * model turn per round before it self-heals by rewriting identical content.
+ *
+ * Fail open: when the dispatch record is missing or malformed we cannot prove
+ * that no expansion ran, so we permit the refresh (a rare wasted turn) rather
+ * than risk leaving newly recalled sources metadata-only. */
+export async function runResearchDispatchMetrics(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  let dispatched = 1;
+  try {
+    const record = JSON.parse(await fs.readFile(path.join(resolved, "reports", "action-dispatch-research.json"), "utf-8")) as { executions?: unknown };
+    if (Array.isArray(record.executions)) dispatched = record.executions.length > 0 ? 1 : 0;
+  } catch {
+    // Missing or unparseable dispatch record: fail open (see doc comment).
+  }
+  const metricsPath = path.join(resolved, "reports", "metrics.json");
+  let metrics: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await fs.readFile(metricsPath, "utf-8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metrics = parsed as Record<string, unknown>;
+  } catch {
+    // A malformed prior metrics snapshot must not block the fresh gate metric.
+  }
+  metrics.research_expansion_dispatched = dispatched;
+  await fs.mkdir(path.dirname(metricsPath), { recursive: true });
+  await fs.writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf-8");
+  console.log(`research_expansion_dispatched = ${dispatched}`);
+}
+
 /** Validate the narrow pre-outline recovery plan.  It may select exactly one
  * allowlisted research expansion and must be grounded in the currently failed
  * deterministic corpus findings; the script never invents a remediation. */

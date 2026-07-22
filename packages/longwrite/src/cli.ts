@@ -716,6 +716,14 @@ research
   });
 
 research
+  .command("dispatch-metrics <workspace>")
+  .description("Emit research_expansion_dispatched so no-op evidence-refresh stages are skipped rather than asked to rewrite an unchanged artifact")
+  .action(async (workspace) => {
+    const { runResearchDispatchMetrics } = await import("./commands/research.js");
+    await runResearchDispatchMetrics(workspace);
+  });
+
+research
   .command("repair-corpus-recovery-plan <workspace>")
   .description("Validate a bounded, corpus-gate-grounded evidence recovery plan")
   .action(async (workspace) => {

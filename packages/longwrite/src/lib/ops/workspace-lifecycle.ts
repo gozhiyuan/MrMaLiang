@@ -99,6 +99,18 @@ async function commandVersion(command: string): Promise<string | undefined> {
   return commandText(command, ["--version"]);
 }
 
+/** The MalaClaw version for provenance. Prefer the runtime's own `--version`,
+ * but fall back to the pinned source checkout's package.json when the engine is
+ * built from source and not on PATH — the CI and pinned-runtime setup, where
+ * MALACLAW_SOURCE_DIR is set but no `malaclaw` bin is linked. This keeps
+ * provenance recording the runtime actually in use instead of dropping it. */
+async function resolveMalaclawVersion(): Promise<string | undefined> {
+  const fromCommand = await commandVersion(malaclawCommand());
+  if (fromCommand) return fromCommand;
+  const sourceDir = process.env.MALACLAW_SOURCE_DIR;
+  return sourceDir ? packageVersion(path.resolve(sourceDir)) : undefined;
+}
+
 function modelPolicy(manifest: unknown): unknown {
   if (!manifest || typeof manifest !== "object") return undefined;
   const workflow = (manifest as { workflow?: unknown }).workflow;
@@ -144,7 +156,7 @@ export async function publicationProvenanceSummary(workspaceDir: string): Promis
   const longwriteVersion = await packageVersion(packageRoot());
   const longwriteGit = await gitIdentity(packageRoot());
   const shortRevision = longwriteGit.revision?.slice(0, 12);
-  const malaclawVersion = await commandVersion(malaclawCommand());
+  const malaclawVersion = await resolveMalaclawVersion();
   const units = await actualFlowUnits(root);
   const grouped = new Map<string, number>();
   for (const unit of units) {
@@ -190,7 +202,7 @@ export async function writeRunProvenance(workspaceDir: string, options: Provenan
     longwrite: { version: await packageVersion(packageRoot()), ...(await gitIdentity(packageRoot())) },
     malaclaw: {
       command: malaclawCommand(),
-      version: await commandVersion(malaclawCommand()),
+      version: await resolveMalaclawVersion(),
       ...(malaclawSource ? { source_dir: malaclawSource, ...(await gitIdentity(malaclawSource)) } : {}),
     },
     execution: {

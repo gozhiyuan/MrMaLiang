@@ -13,7 +13,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: gozhiyuan/MalaClaw
-          ref: 29abaf5c16899e548a35e8e1552d090a6220f00c
+          # v1.0.2 — must satisfy runtime-compatibility.json (">=1.0.2 <2.0.0").
+          # The prior pin (29abaf5c) was v1.0.0, below the supported minimum.
+          ref: 2b71703fc70f48ce8efb5872e4a536b57a05cc14
           path: .dependencies/MalaClaw
       - uses: actions/setup-node@v4
         with:

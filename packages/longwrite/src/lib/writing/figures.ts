@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseJsonl } from "../research/jsonl.js";
 import type { ClassifiedSource } from "../research/types.js";
-import { cropPdfFile, renderFigureBackends, renderMermaidFile } from "./figure-backends.js";
+import { cropPdfFile, detectPython, renderFigureBackends, renderMermaidFile } from "./figure-backends.js";
 import { runNanobanana } from "./nanobanana.js";
 import { AgenticArtifactPlan } from "../ops/artifact-plan.js";
 import { loadProjectConfigIfExists } from "../project-config.js";
@@ -773,13 +773,102 @@ export async function readFigureManifest(workspaceDir: string): Promise<FigureMa
   }
 }
 
+/** Truncate over-long descriptive text at a word boundary with an ellipsis so
+ * the result fits within `max` (the ellipsis counts as one character). */
+function clampText(value: unknown, max: number): { value: string; clamped: boolean } | null {
+  if (typeof value !== "string") return null;
+  if (value.length <= max) return { value, clamped: false };
+  const slice = value.slice(0, max - 1);
+  const lastSpace = slice.lastIndexOf(" ");
+  const body = (lastSpace > Math.floor(max * 0.6) ? slice.slice(0, lastSpace) : slice).trimEnd();
+  return { value: `${body}…`, clamped: true };
+}
+
+async function appendVisualPlanRepair(workspaceDir: string, message: string): Promise<void> {
+  const reportPath = path.join(workspaceDir, "reports", "visual-plan-repair.md");
+  await fs.mkdir(path.dirname(reportPath), { recursive: true });
+  await fs.appendFile(reportPath, `- ${new Date().toISOString()}: ${message}\n`, "utf-8");
+}
+
+/** Set aside a placement plan the renderer cannot honor and let the build fall
+ * back to default figures, exactly as it already does when the file is absent.
+ * The original is preserved for inspection and the reason is recorded so the
+ * next visual-plan round can re-emit a valid contract. */
+async function rejectPlacementPlan(workspaceDir: string, planPath: string, raw: string, reason: string): Promise<void> {
+  await fs.writeFile(path.join(workspaceDir, "figures", "placement-plan.rejected.json"), raw, "utf-8").catch(() => {});
+  await fs.rm(planPath, { force: true });
+  await appendVisualPlanRepair(workspaceDir, `Rejected an invalid figures/placement-plan.json (preserved as placement-plan.rejected.json) and rebuilt with default figures. Re-emit a corrected plan next round — ${reason}`);
+}
+
+/** The builder owns the rendered caption/title/insight text (see the spec
+ * comments). Descriptive text that merely overflows a render cap must not crash
+ * the whole manuscript build: clamp it deterministically and record the change.
+ * If the plan is still invalid after clamping, set it aside so the renderer
+ * degrades to defaults instead of throwing. On return, figures/placement-plan.
+ * json is always valid against PlacementPlan or absent — never crash-inducing. */
+export async function sanitizePlacementPlanFile(workspaceDir: string): Promise<void> {
+  const planPath = path.join(workspaceDir, "figures", "placement-plan.json");
+  let raw: string;
+  try {
+    raw = await fs.readFile(planPath, "utf-8");
+  } catch {
+    return; // absent: the renderer already degrades to default figures
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    await rejectPlacementPlan(workspaceDir, planPath, raw, `not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const clamps: string[] = [];
+  const clampField = (owner: unknown, field: string, max: number, label: string): void => {
+    if (!owner || typeof owner !== "object") return;
+    const record = owner as Record<string, unknown>;
+    const result = clampText(record[field], max);
+    if (result?.clamped) { record[field] = result.value; clamps.push(`${label}.${field} (max ${max})`); }
+  };
+  const clampEntries = (list: unknown, label: string): void => {
+    if (!Array.isArray(list)) return;
+    list.forEach((item, index) => {
+      clampField(item, "title", 180, `${label}[${index}]`);
+      clampField(item, "caption", 500, `${label}[${index}]`);
+      clampField(item, "insight", 800, `${label}[${index}]`);
+    });
+  };
+  if (parsed && typeof parsed === "object") {
+    const plan = parsed as Record<string, unknown>;
+    clampField(plan.concept_map, "title", 180, "concept_map");
+    clampField(plan.concept_map, "caption", 500, "concept_map");
+    clampEntries(plan.table_overrides, "table_overrides");
+    clampEntries(plan.table_specs, "table_specs");
+    clampEntries(plan.timelines, "timelines");
+  }
+  const result = PlacementPlan.safeParse(parsed);
+  if (!result.success) {
+    await rejectPlacementPlan(workspaceDir, planPath, raw, result.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; "));
+    return;
+  }
+  if (clamps.length > 0) {
+    await fs.writeFile(planPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf-8");
+    await appendVisualPlanRepair(workspaceDir, `Clamped over-long placement-plan text to render caps: ${clamps.join(", ")}.`);
+  }
+}
+
 export async function buildFigureWorkspace(workspaceDir: string): Promise<string[]> {
+  // Normalize/guard the model-authored placement plan first, so a merely
+  // over-long caption cannot hard-fail the whole build with no repair path.
+  await sanitizePlacementPlanFile(workspaceDir);
   const sources = await sourcesForWorkspace(workspaceDir);
   const years = yearCounts(sources);
   const depths = depthCounts(sources);
   const config = await loadProjectConfigIfExists(workspaceDir);
-  // Every research release renders the readable PNG chart; preflight
-  // enforces its Matplotlib renderer.
+  // A full research release renders the readable Matplotlib PNG chart, which
+  // preflight enforces. When Matplotlib is genuinely unavailable (a dry-run or
+  // degraded environment), fall back to the deterministic pgfplots plot — the
+  // same backend every other metadata plot already uses — so the manuscript
+  // still compiles instead of referencing a PNG asset that was never rendered.
+  const pythonPlotAvailable = await detectPython();
   const target = await placement(workspaceDir);
   const overrides = await placementOverrides(workspaceDir);
   const metadataIntents = await metadataPlotIntents(workspaceDir);
@@ -833,8 +922,8 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
         id: "source-years", title: "Sources by publication year",
         caption: "The retrieved corpus is concentrated in the years represented by the classified source set.",
         insight: "The plot makes the corpus's temporal concentration visible, so recency claims can be checked against the retrieved evidence.",
-        path: "figures/source-years-plot.png", latex_path: "paper/figures/source-years.tex", placement: sourceYearsPlacement,
-        backend: "python", data: ["data/source-years.csv"],
+        path: pythonPlotAvailable ? "figures/source-years-plot.png" : "figures/source-years.svg", latex_path: "paper/figures/source-years.tex", placement: sourceYearsPlacement,
+        backend: pythonPlotAvailable ? "python" : "deterministic-svg", data: ["data/source-years.csv"],
       },
       {
         id: "concept-map", title: conceptMap.title, caption: conceptMap.caption,
@@ -918,7 +1007,7 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
       ["tables/taxonomy-coverage.md", markdownTable(["Taxonomy cell", "Sources", "A/B-depth"], taxonomy.map((row) => [row.cell, String(row.sourceCount), String(row.directCount)]))],
       ["paper/tables/taxonomy-coverage.tex", taxonomyCoverageLatex(taxonomy)],
     ] as Array<[string, string]> : []),
-    ["paper/figures/source-years.tex", sourceYearsPngLatex()],
+    ["paper/figures/source-years.tex", pythonPlotAvailable ? sourceYearsPngLatex() : sourceYearsLatex(years)],
     ...metadataFigures.flatMap((figure) => [
       [`figures/${figure.id}.svg`, categoryPlotSvg(figure.title, figure.rows)] as [string, string],
       [`paper/figures/${figure.id}.tex`, categoryPlotLatex(figure.rows, "Classified sources")] as [string, string],
