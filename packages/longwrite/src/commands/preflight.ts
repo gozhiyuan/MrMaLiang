@@ -44,6 +44,10 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
   checks.push({ id: "token_guardrail", pass: typeof config.run_limits?.max_recorded_tokens === "number", finding: typeof config.run_limits?.max_recorded_tokens === "number" ? `recorded-token guardrail: ${config.run_limits.max_recorded_tokens}` : "set run_limits.max_recorded_tokens before a costly run" });
   if (config.project.mode === "auto_research_agentic") {
     checks.push({ id: "public_release_urls", pass: config.research.source_policy.require_live_urls, finding: config.research.source_policy.require_live_urls ? "live citation URLs are a final release gate" : "set research.source_policy.require_live_urls: true for a public release" });
+    const initialVisual = findStage(workflowStages, "visual_review");
+    const loopVisual = findStage(loopStages, "visual_review");
+    const visualEnabled = initialVisual?.enabled !== false && loopVisual?.enabled !== false;
+    checks.push({ id: "rendered_visual_review_topology", pass: !visualEnabled || (Boolean(initialVisual) && Boolean(loopVisual) && initialVisual?.runtime === "codex" && loopVisual?.runtime === "codex"), finding: !visualEnabled ? "seed/dry-run rehearsal explicitly skips multimodal visual review" : "initial and post-rebuild rendered visual reviews are pinned to the Codex image-input runtime" });
   }
   const python = process.env.LONGWRITE_PYTHON_BIN ?? "python3";
   const matplotlib = await executable(python, ["-c", "import matplotlib"]);
@@ -51,6 +55,10 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
   if (config.writing.output_formats.includes("pdf")) {
     const latex = await detectLatexEngine();
     checks.push({ id: "pdf_compiler", pass: latex !== null, finding: latex ? `${latex.engine} compiler available` : "install tectonic or TeX Live/latexmk before a PDF release run" });
+    if (config.project.mode === "auto_research_agentic" && config.research.provider !== "seed") {
+      const [text, render] = await Promise.all([executable("pdftotext", ["-v"]), executable("pdftoppm", ["-v"])]);
+      checks.push({ id: "rendered_visual_review_tools", pass: text && render, finding: text && render ? "pdftotext and pdftoppm can render caption-bearing PDF pages for multimodal review" : "install Poppler (pdftotext + pdftoppm) before a live visual-review release" });
+    }
   }
   if (opts.runtime) {
     try {

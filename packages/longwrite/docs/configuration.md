@@ -541,6 +541,26 @@ learn from it. Comparative-table and metadata-plot targets count only
 source-grounded tables and figures backed by manifest data; Nano Banana is
 capped as an orienting illustration and never counts as a data-driven plot.
 
+### Rendered visual-review gate
+
+Every live agentic-paper build renders each PDF page that contains a `Figure N:`
+or `Table N:` caption into `reports/visual-review/page-*.png` and writes the
+checksummed `reports/visual-render-manifest.json`. The `visual_review` unit is
+pinned to the Codex runtime, which receives those PNGs through `codex exec
+--image`; it is not asked to infer layout from PDF text or a file path. It must
+write `reviews/visual-qa.json` with a page-by-page observation and either a
+pass or actionable major/critical findings. A malformed or incomplete review is
+retried; a valid failing review is supplied to the normal revision loop and
+blocks final release until a rebuilt PDF passes. This requires MalaClaw 1.0.2
+or newer. Seed/dry-run rehearsals explicitly skip the multimodal stage.
+
+The final research validator also writes `reports/release-gates.json`, a
+single fail-closed aggregate of every release check. Research publication
+packaging refuses to run when that file is absent, invalid, or records
+`pass: false`; `reports/longwrite-validation.json` remains the detailed source
+for bounded corrective planning. MalaClaw records classified boundary failures
+append-only in `reports/failures.ndjson`.
+
 ### Publication presentation
 
 ```yaml
@@ -550,7 +570,7 @@ publication:
     show_production_statistics: true
     disclosure:
       enabled: true
-      ai_use: "LongWrite and configured models supported drafting and figure planning."
+      ai_use: "MrMaLiang and configured models supported drafting and figure planning through its LongWrite writing component."
       authorship: "AI-assisted research artifact; source verification remains required."
       correspondence: author@example.org
       last_updated: 2026-07-17
@@ -565,7 +585,7 @@ publication:
 `author_year` uses an author--year bibliography style; `numeric` preserves
 numeric citations. The disclosure is optional and is rendered as a compact
 front-matter note only when enabled. `provenance.enabled` adds the installed
-LongWrite/MalaClaw identities and MalaClaw's actual per-unit runtime/model
+MrMaLiang, its LongWrite writing component, and MalaClaw identities, plus MalaClaw's actual per-unit runtime/model
 assignments. Models remain visibly unpinned when the harness did not receive an
 explicit model id; LongWrite never invents one. The compact production-
 statistics table reports the woven bibliography count, figures, tables,

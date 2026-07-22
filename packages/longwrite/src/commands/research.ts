@@ -525,6 +525,59 @@ export async function runResearchRepairCorpusRecoveryPlan(workspaceDir: string):
   }
 }
 
+/** Validate a final-release remediation plan against the actual failed
+ * release checks.  It never relaxes a gate: the LLM may choose an allowlisted
+ * corrective action, while this adapter makes sure every current failure is
+ * explicitly owned before the recovery loop spends another round. */
+export async function runResearchRepairFinalReleasePlan(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const target = path.join(resolved, "reviews", "action-plan.json");
+  const reportPath = path.join(resolved, "reports", "final-release-plan-repair.md");
+  try {
+    const plan = AgenticActionPlan.parse(JSON.parse(await fs.readFile(target, "utf-8")));
+    const validation = JSON.parse(await fs.readFile(path.join(resolved, "reports", "longwrite-validation.json"), "utf-8")) as {
+      pass?: boolean;
+      checks?: Array<{ id?: string; pass?: boolean }>;
+    };
+    const failedIds = new Set((validation.checks ?? [])
+      .filter((check) => check.pass === false)
+      .map((check) => check.id)
+      .filter((id): id is string => Boolean(id)));
+    if (validation.pass || failedIds.size === 0) {
+      if (plan.actions.length !== 0) throw new Error("a final-release plan must be empty when all release checks pass");
+      await fs.mkdir(path.dirname(reportPath), { recursive: true });
+      await fs.writeFile(reportPath, "# Final-release plan validation\n\n- Status: pass\n- No failed release checks require recovery.\n", "utf-8");
+      return;
+    }
+    if (plan.actions.length === 0) throw new Error("failed release checks require one or more corrective actions");
+    const allowedTools = new Set(["targeted_research_expansion", "reopen_outline", "revise_sections", "revise_visual_plan", "request_operator_clarification"]);
+    const addressed = new Set<string>();
+    for (const action of plan.actions) {
+      if (!allowedTools.has(action.tool)) throw new Error(`action ${action.id} selects unsupported final-release tool ${action.tool}`);
+      for (const findingId of action.finding_ids) {
+        if (!failedIds.has(findingId)) throw new Error(`action ${action.id} references non-failed release check ${findingId}`);
+        addressed.add(findingId);
+      }
+    }
+    const missing = [...failedIds].filter((id) => !addressed.has(id));
+    if (missing.length > 0) throw new Error(`final-release plan does not address failed checks: ${missing.join(", ")}`);
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, [
+      "# Final-release plan validation", "", "- Status: pass",
+      `- Failed checks addressed: ${[...failedIds].join(", ")}`,
+      `- Selected actions: ${plan.actions.map((action) => action.tool).join(", ")}`, "",
+    ].join("\n"), "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath, [
+      "# Final-release plan validation", "", "- Status: failed", `- Detail: ${detail}`,
+      "- Required repair: use only the currently failed IDs in reports/longwrite-validation.json, select allowlisted corrective actions, and cover every failed release check without lowering a gate.", "",
+    ].join("\n"), "utf-8");
+    throw new Error("reviews/action-plan.json: invalid final-release recovery plan; see reports/final-release-plan-repair.md");
+  }
+}
+
 export async function runResearchReconcileIdentities(workspaceDir: string): Promise<void> {
   const resolved = path.resolve(workspaceDir);
   const { reconcileWorkspaceSources } = await import("../lib/research/identity.js");

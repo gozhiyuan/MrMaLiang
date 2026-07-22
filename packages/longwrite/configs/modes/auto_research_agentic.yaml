@@ -101,6 +101,8 @@ workflow:
         - sources/snowball_results.jsonl
         - sources/deduped_sources.jsonl
         - reports/snowball.md
+      allow_unchanged_outputs:
+        - sources/deduped_sources.jsonl
       validators:
         - required_output_exists
         - jsonl_parseable
@@ -114,6 +116,8 @@ workflow:
         - sources/deduped_sources.jsonl
         - sources/metadata-upgrades.jsonl
         - reports/metadata-enrichment.md
+      allow_unchanged_outputs:
+        - sources/deduped_sources.jsonl
       validators:
         - required_output_exists
         - jsonl_parseable
@@ -127,6 +131,8 @@ workflow:
         - sources/deduped_sources.jsonl
         - sources/venue-upgrades.jsonl
         - reports/venue-upgrade.md
+      allow_unchanged_outputs:
+        - sources/deduped_sources.jsonl
       validators:
         - required_output_exists
         - jsonl_parseable
@@ -273,7 +279,7 @@ workflow:
       outputs:
         - figures/placement-plan.json
       instructions:
-        - "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes and only edges that express the survey's actual organizing relationship. In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files."
+        - "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes (each label at most 48 characters) and only edges that express the survey's actual organizing relationship (edge labels at most 36 characters). In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files."
         - "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables."
         - "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section."
       validators:
@@ -380,6 +386,46 @@ workflow:
       validators:
         - required_output_exists
 
+    # Rendered page images are attached to the visual reviewer as real prompt
+    # inputs. A PDF path alone is not evidence that a text-only worker saw
+    # overlapping labels, clipped tables, or unreadable arrows.
+    - id: render_visual_review
+      title: Render caption-bearing PDF pages for multimodal visual review
+      owner: artifact-builder
+      inputs:
+        - build/manuscript.pdf
+      outputs:
+        - reports/visual-render-manifest.json
+        - reports/visual-review/*.png
+      validators:
+        - required_output_exists
+
+    - id: visual_review
+      title: Inspect rendered figures and tables for reader-facing legibility
+      owner: skeptical-reviewer
+      runtime: codex
+      inputs:
+        - reports/visual-render-manifest.json
+        - build/manuscript.pdf
+      image_inputs:
+        - reports/visual-review/*.png
+      skills:
+        - reports/visual-render-manifest.json
+        - figures/manifest.json
+      instructions:
+        - "Inspect the attached PNG pages as visual input, not merely their filenames or PDF text. Check every rendered page for overlapping labels/arrows/nodes, clipping, illegibly small text, unsafe contrast, table overflow/truncation, misplaced captions, and visual claims that the reader cannot verify."
+        - "Write reviews/visual-qa.json as strict JSON: {version:1,render_manifest_sha256:<sha256 of reports/visual-render-manifest.json including its trailing newline>,status:pass|fail,inspected_pages:[every rendered page number],observations:[{page,observation}],findings:[{id,severity:minor|major|critical,page,summary,remediation}],summary}. Every page needs a concrete observation. status: pass is legal only with no major/critical finding; status: fail requires at least one major/critical finding."
+        - "This is a visual QA record, not a prose review. Do not edit figures, TeX, or manuscript text. A major or critical defect must name the page and an actionable renderer/placement repair."
+        - "Also write reviews/visual-qa.md as a concise reader-facing summary of the observations and findings."
+      outputs:
+        - reviews/visual-qa.json
+        - reviews/visual-qa.md
+      validators:
+        - required_output_exists
+        - non_empty_markdown
+      retry:
+        max_attempts: 2
+
     # Establish a scored baseline before the first revision. Each quality-loop
     # round ends in a new review, so the stop condition always evaluates the
     # manuscript that was just rebuilt rather than its predecessor.
@@ -399,6 +445,8 @@ workflow:
         - reports/evidence-audit.md
         - reports/word-metrics.md
         - feedback/user-feedback.md
+        - reviews/visual-qa.json
+        - reviews/visual-qa.md
       skills:
         - project_brief.md
         - outline.json
@@ -407,9 +455,12 @@ workflow:
         - reports/evidence-audit.md
         - reports/word-metrics.md
         - feedback/user-feedback.md
+        - reviews/visual-qa.json
+        - reviews/visual-qa.md
       instructions:
         - "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations."
         - "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation."
+        - "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved."
         - "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler."
         - "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
       outputs:
@@ -426,19 +477,11 @@ workflow:
       # base manifest aligned with the deep profile's five-round ceiling.
       max_rounds: 5
       stop_when: review_score >= 8.0
-      # Stop early when the score plateaus: further rewriting cannot reach the
-      # target without more corpus/evidence (AutoResearch's delta rule). With
-      # the bounded revision budget, expand_research gets room to fix coverage before
-      # stagnation trips; preserve the best rebuilt manuscript and continue to
-      # the downstream verification and release-validation stages.
-      stop_on_stagnation:
-        min_delta: 0.3
-        consecutive_rounds: 2
-        on_stagnation: succeed
-      # Exhausting the bounded improvement budget also preserves the manuscript
-      # and runs final reports. final_validate remains the release gate: it
-      # rejects a score below the calibrated target, even though the flow has
-      # produced the inspectable final artifacts.
+      # A flagship gets all five bounded review/revision opportunities unless
+      # it actually reaches the score target.  Plateau detection is useful as
+      # diagnostics, but must not silently skip the remaining planned rounds.
+      # Exhaustion preserves the inspectable manuscript and runs final release
+      # validation, which remains authoritative for publication.
       on_exhaustion: succeed
       stages:
         - id: route
@@ -550,22 +593,10 @@ workflow:
             - "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
           outputs:
             - reviews/claim-judgments.jsonl
-          validators:
-            - required_output_exists
-            - jsonl_parseable
-
-        # Models occasionally wrap otherwise valid rows in a JSON array. This
-        # syntax-only repair preserves the original and validates every row;
-        # semantic errors remain visible for the next remediation action.
-        - id: claim_judgment_repair
-          title: Normalize and validate claim-judgment contract
-          owner: analyst
-          inputs:
-            - reviews/claim-judgments.jsonl
-          outputs:
             - reports/claim-judgment-repair.md
           validators:
             - required_output_exists
+            - jsonl_parseable
 
         - id: claim_score
           title: Score claim support gate
@@ -603,6 +634,42 @@ workflow:
           validators:
             - required_output_exists
 
+        - id: render_visual_review
+          title: Render rebuilt caption pages for multimodal visual review
+          owner: artifact-builder
+          inputs:
+            - build/manuscript.pdf
+          outputs:
+            - reports/visual-render-manifest.json
+            - reports/visual-review/*.png
+          validators:
+            - required_output_exists
+
+        - id: visual_review
+          title: Inspect rebuilt figures and tables for reader-facing legibility
+          owner: skeptical-reviewer
+          runtime: codex
+          inputs:
+            - reports/visual-render-manifest.json
+            - build/manuscript.pdf
+          image_inputs:
+            - reports/visual-review/*.png
+          skills:
+            - reports/visual-render-manifest.json
+            - figures/manifest.json
+          instructions:
+            - "Inspect the attached PNG pages as visual input. Check every rendered page for overlapping labels/arrows/nodes, clipping, illegibly small text, unsafe contrast, table overflow/truncation, misplaced captions, and visual claims that a reader cannot verify."
+            - "Write reviews/visual-qa.json as strict JSON: {version:1,render_manifest_sha256:<sha256 of reports/visual-render-manifest.json including its trailing newline>,status:pass|fail,inspected_pages:[every rendered page number],observations:[{page,observation}],findings:[{id,severity:minor|major|critical,page,summary,remediation}],summary}. Every page needs a concrete observation. status: pass is legal only with no major/critical finding; status: fail requires at least one major/critical finding."
+            - "Also write reviews/visual-qa.md as a concise reader-facing summary. Do not edit figures, TeX, or manuscript text."
+          outputs:
+            - reviews/visual-qa.json
+            - reviews/visual-qa.md
+          validators:
+            - required_output_exists
+            - non_empty_markdown
+          retry:
+            max_attempts: 2
+
         # Score the rebuilt manuscript, not the draft that preceded revision.
         - id: review
           title: Simulated peer review of rebuilt manuscript
@@ -620,6 +687,8 @@ workflow:
             - reports/evidence-audit.md
             - reports/word-metrics.md
             - feedback/user-feedback.md
+            - reviews/visual-qa.json
+            - reviews/visual-qa.md
           skills:
             - project_brief.md
             - outline.json
@@ -628,9 +697,12 @@ workflow:
             - reports/evidence-audit.md
             - reports/word-metrics.md
             - feedback/user-feedback.md
+            - reviews/visual-qa.json
+            - reviews/visual-qa.md
           instructions:
             - "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations."
             - "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation."
+            - "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved."
             - "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler."
             - "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
           outputs:
@@ -683,6 +755,7 @@ workflow:
       outputs:
         - reports/longwrite-validation.json
         - reports/longwrite-validation.md
+        - reports/release-gates.json
       validators:
         - required_output_exists
 
@@ -694,6 +767,7 @@ workflow:
         - paper/references.bib
         - build/manuscript.pdf
         - reports/longwrite-validation.json
+        - reports/release-gates.json
       outputs:
         - build/submission/*/longwrite-submission-manifest.json
       validators:

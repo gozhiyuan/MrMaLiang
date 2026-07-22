@@ -61,7 +61,9 @@ async function runRuntimeChecks(workspace: string): Promise<ComponentReport> {
   } catch {
     malaclawVersion = "";
   }
-  checks.push({ id: "malaclaw", pass: Boolean(malaclawVersion && /^1\./.test(malaclawVersion)), finding: malaclawVersion ? `MalaClaw ${malaclawVersion} (supported >=1.0.0 <2.0.0)` : "MalaClaw >=1.0.0 <2.0.0 must be available on PATH" });
+  const malaclawParts = malaclawVersion.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+  const compatibleMalaClaw = Boolean(malaclawParts && malaclawParts[0] === 1 && (malaclawParts[1] > 0 || malaclawParts[2] >= 2));
+  checks.push({ id: "malaclaw", pass: compatibleMalaClaw, finding: malaclawVersion ? `MalaClaw ${malaclawVersion} (supported >=1.0.2 <2.0.0)` : "MalaClaw >=1.0.2 <2.0.0 must be available on PATH" });
   return { status: statusFor(checks), checks };
 }
 

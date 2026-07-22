@@ -184,7 +184,7 @@ runner logs can never substitute for that packet.
 Required for all workflows:
 
 - Node.js **22+** and npm
-- [MalaClaw](https://github.com/gozhiyuan/MalaClaw) **>=1.0.0 <2.0.0** on `PATH`
+- [MalaClaw](https://github.com/gozhiyuan/MalaClaw) **>=1.0.2 <2.0.0** on `PATH`
 - Git, for repository studies and immutable input pins
 
 Required for a real survey or manuscript run:
@@ -246,7 +246,7 @@ git clone https://github.com/gozhiyuan/MrMaLiang.git
 cd MrMaLiang
 
 node --version                 # v22 or newer
-malaclaw --version             # >=1.0.0 <2.0.0
+malaclaw --version             # >=1.0.2 <2.0.0
 npm install
 npm run build
 npm link --workspace @mr-maliang/maliang

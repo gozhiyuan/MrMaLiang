@@ -14,6 +14,13 @@ section evidence packets, claim review, publication figures/tables, LaTeX/PDF
 build, and strict release validation. It does not claim to reproduce an
 unpublished or private implementation.
 
+For a live run, every caption-bearing PDF page is also rendered as a PNG and
+attached to a Codex visual-review unit. This catches reader-facing defects such
+as overlapping diagram labels or clipped tables; PDF text extraction alone is
+not considered visual inspection. A failing visual review routes to the normal
+bounded visual-plan revision path and blocks final release until the rebuilt
+page passes. This needs MalaClaw 1.0.2+; seed/dry-run rehearsals skip it.
+
 This guide starts from a new machine. By the end, you will have a local
 research workspace, an optional dashboard for monitoring it, a manually
 approved outline, and a resumable agent run that produces inspectable sources,
@@ -93,7 +100,9 @@ flowchart TB
   predraftcheck --> drafting["[LLM · chapter-writer] Draft sections<br/>foreach approved section; max 2 parallel"]
   drafting --> ledger["[script] Evidence ledger and audit"]
   ledger --> initialbuild["[script] Figures, tables, TeX, initial build"]
-  initialbuild --> baseline["[LLM · skeptical-reviewer]<br/>Baseline review"]
+  initialbuild --> initialrender["[script] Render every caption-bearing PDF page"]
+  initialrender --> initialvisualqa["[multimodal LLM] Inspect rendered pages<br/>and write bound visual QA"]
+  initialvisualqa --> baseline["[LLM · skeptical-reviewer]<br/>Baseline review + visual findings"]
 
   subgraph quality["2. Bounded adaptive quality loop (at most 5 rounds)"]
     direction LR
@@ -113,7 +122,9 @@ flowchart TB
     ask --> audit
     audit --> judge["[LLM · skeptical-reviewer]<br/>Double claim judgment"]
     judge --> rebuild["[script] Rebuild"]
-    rebuild --> review["[LLM · skeptical-reviewer]<br/>Review rebuilt manuscript"]
+    rebuild --> rerender["[script] Re-render caption-bearing pages"]
+    rerender --> visualqa["[multimodal LLM] Fresh visual QA<br/>bound to render-manifest hash"]
+    visualqa --> review["[LLM · skeptical-reviewer]<br/>Review rebuilt manuscript + visual findings"]
     review --> stop{"[script] Deterministic score and stop test"}
     stop -->|"continue"| artifactplan
   end
@@ -1276,6 +1287,8 @@ paper/assets/source-years-plot.png       # portable full-release visual asset
 build/manuscript.pdf                     # publication artifact
 build/submission/<target>/               # package-ready TeX source tree
 reports/longwrite-validation.md          # final validation
+reports/release-gates.json               # fail-closed aggregate of every release check
+reports/failures.ndjson                  # classified contract/runtime failures, when any
 .malaclaw/flow/events.jsonl              # append-only execution trace
 reports/run-provenance/<timestamp>.json  # LongWrite/MalaClaw/runtime provenance
 ```

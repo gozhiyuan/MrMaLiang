@@ -47,6 +47,12 @@ describe("publication packaging", () => {
     await fs.writeFile(path.join(ws, "paper", "abstract.md"), "An anonymous abstract.", "utf-8");
     process.env.LONGWRITE_LATEX_ENGINE = "none";
     await buildLatexWorkspace(ws);
+    await fs.mkdir(path.join(ws, "reports"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reports", "release-gates.json"), JSON.stringify({
+      version: 1, generated_at: new Date().toISOString(), pass: true,
+      summary: { total: 1, passed: 1, failed: 0 },
+      gates: [{ id: "test_release_gate", pass: true, findings: [] }],
+    }), "utf-8");
 
     const report = await validatePublicationWorkspace(ws);
     expect(report.pass).toBe(true);
@@ -56,6 +62,21 @@ describe("publication packaging", () => {
     expect(main).toContain("\\documentclass[review]{venue}");
     expect(main).toContain("\\author{Anonymous}");
     await expect(fs.stat(path.join(ws, "build", "submission", "custom", "venue.cls"))).resolves.toBeTruthy();
+  });
+
+  it("fails closed when a research release-gate aggregate is missing or failed", async () => {
+    const ws = await workspace("release-gates");
+    await fs.writeFile(path.join(ws, "outline.json"), JSON.stringify({ sections: [{ id: "introduction", title: "Introduction" }] }), "utf-8");
+    await fs.mkdir(path.join(ws, "paper"), { recursive: true });
+    await fs.writeFile(path.join(ws, "paper", "main.tex"), "\\documentclass{article}\n\\begin{document}\n\\begin{abstract}Test\\end{abstract}\n\\end{document}\n", "utf-8");
+    const missing = await validatePublicationWorkspace(ws);
+    expect(missing.checks.find((check) => check.id === "publication_release_gates")).toMatchObject({ pass: false });
+    await fs.mkdir(path.join(ws, "reports"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reports", "release-gates.json"), JSON.stringify({ version: 1, pass: false, gates: [] }), "utf-8");
+    const failed = await validatePublicationWorkspace(ws);
+    expect(failed.checks.find((check) => check.id === "publication_release_gates")).toMatchObject({
+      pass: false, findings: expect.arrayContaining(["research release gates have not passed"]),
+    });
   });
 
   it("writes an inspectable no-LLM preflight report before a run", async () => {

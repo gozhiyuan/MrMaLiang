@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/research-protocol",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shared, versioned evidence and experiment contracts for MrMaLiang",
   "type": "module",
   "license": "MIT",

@@ -22,7 +22,7 @@ const FINAL_OUTPUT_PATHS = [
   "sources/bibliography.bib", "sources/classified_sources.jsonl", "sources/citation_plan.jsonl",
   "evidence/citation-ledger.jsonl", "evidence/chunks.jsonl", "evidence/source-packets.json",
   "codebases/manifest.json",
-  "reports/corpus-gates.json", "reports/longwrite-validation.md",
+  "reports/corpus-gates.json", "reports/longwrite-validation.md", "reports/release-gates.json",
 ] as const;
 
 const PRUNABLE_EXACT_PATHS = ["evidence/index.sqlite"] as const;
@@ -132,8 +132,15 @@ async function actualFlowUnits(root: string): Promise<Array<{ key: string; statu
   }
 }
 
-export async function publicationProvenanceSummary(workspaceDir: string): Promise<{ longwrite?: string; malaclaw?: string; runtime_models: string[] }> {
+export async function publicationProvenanceSummary(workspaceDir: string): Promise<{ maliang?: string; longwrite?: string; malaclaw?: string; runtime_models: string[] }> {
   const root = path.resolve(workspaceDir);
+  // LongWrite is a component package inside the MrMaLiang product monorepo.
+  // Keep the component version for reproducibility, but put the public product
+  // identity first in publication-facing provenance.
+  const maliangRoot = path.resolve(packageRoot(), "..", "..");
+  const maliangVersion = await packageVersion(maliangRoot);
+  const maliangGit = await gitIdentity(maliangRoot);
+  const maliangRevision = maliangGit.revision?.slice(0, 12);
   const longwriteVersion = await packageVersion(packageRoot());
   const longwriteGit = await gitIdentity(packageRoot());
   const shortRevision = longwriteGit.revision?.slice(0, 12);
@@ -148,8 +155,9 @@ export async function publicationProvenanceSummary(workspaceDir: string): Promis
     grouped.set(key, (grouped.get(key) ?? 0) + 1);
   }
   return {
+    ...(maliangVersion ? { maliang: `MrMaLiang ${maliangVersion}${maliangRevision ? ` (${maliangRevision})` : ""}` } : {}),
     ...(longwriteVersion ? { longwrite: `LongWrite ${longwriteVersion}${shortRevision ? ` (${shortRevision})` : ""}` } : {}),
-    ...(malaclawVersion ? { malaclaw: malaclawVersion } : {}),
+    ...(malaclawVersion ? { malaclaw: `MalaClaw ${malaclawVersion}` } : {}),
     runtime_models: [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, count]) => `${key} (${count} unit${count === 1 ? "" : "s"})`),
   };
 }

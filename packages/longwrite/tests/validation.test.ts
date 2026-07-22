@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { toJsonl } from "../src/lib/research/jsonl.js";
+import { bibtexKey } from "../src/lib/research/bibtex.js";
 import type { CitationPlanEntry, ClassifiedSource } from "../src/lib/research/types.js";
 import {
   validateResearchWorkspace,
@@ -73,8 +74,8 @@ function validFiles(): Record<string, string | Buffer> {
     "sources/classified_sources.jsonl": toJsonl(sources),
     "sources/citation_plan.jsonl": toJsonl(citationPlan),
     "sources/bibliography.bib":
-      "@misc{lovelace2026,\n  title = {Grounded Research Agents}\n}\n\n" +
-      "@misc{hopper2025,\n  title = {Workflow Validation}\n}\n",
+      `@misc{${bibtexKey(sources[0]!)},\n  title = {Grounded Research Agents}\n}\n\n` +
+      `@misc{${bibtexKey(sources[1]!)},\n  title = {Workflow Validation}\n}\n`,
     "chapters/section-1.md":
       "# Background\n\nGrounded research agents cite source records [source:source-1] and validators [source:source-2].\n",
     "build/manuscript.pdf": Buffer.from("not really a pdf, but non-empty for validator tests"),
@@ -208,8 +209,15 @@ describe("research workspace validation", () => {
     const ws = await makeWorkspace(validFiles());
     const report = await validateResearchWorkspace(ws);
     const written = await writeValidationReport(ws, report);
-    expect(written).toEqual(["reports/longwrite-validation.json", "reports/longwrite-validation.md"]);
+    expect(written).toEqual(["reports/longwrite-validation.json", "reports/longwrite-validation.md", "reports/release-gates.json"]);
     expect(await fs.readFile(path.join(ws, "reports/longwrite-validation.md"), "utf-8"))
       .toContain("LongWrite Validation Report");
+    const gates = JSON.parse(await fs.readFile(path.join(ws, "reports/release-gates.json"), "utf-8"));
+    expect(gates).toMatchObject({
+      version: 1,
+      pass: report.pass,
+      summary: { total: report.checks.length },
+    });
+    expect(gates.gates.map((gate: { id: string }) => gate.id)).toEqual(report.checks.map((check) => check.id));
   });
 });

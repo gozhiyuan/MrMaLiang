@@ -78,6 +78,22 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
   if (!main.includes("\\begin{abstract}")) common.push("paper/main.tex is missing an abstract");
   checks.push({ id: "publication_article_layout", pass: common.length === 0, findings: common });
 
+  if (config.project.mode === "auto_research_agentic") {
+    const releaseFindings: string[] = [];
+    type ReleaseGateEnvelope = { version?: unknown; pass?: unknown; gates?: unknown };
+    let release: ReleaseGateEnvelope | null = null;
+    try {
+      release = JSON.parse(await fs.readFile(path.join(root, "reports", "release-gates.json"), "utf-8")) as ReleaseGateEnvelope;
+    } catch {
+      releaseFindings.push("reports/release-gates.json is missing or invalid; run the final research validator before packaging");
+    }
+    if (release) {
+      if (release.version !== 1 || !Array.isArray(release.gates)) releaseFindings.push("reports/release-gates.json has an invalid contract");
+      if (release.pass !== true) releaseFindings.push("research release gates have not passed");
+    }
+    checks.push({ id: "publication_release_gates", pass: releaseFindings.length === 0, findings: releaseFindings });
+  }
+
   const titles = await outlineTitles(root);
   const missingSections = config.publication.required_sections.filter((required) =>
     !titles.some((title) => title.toLocaleLowerCase().includes(required.toLocaleLowerCase())),

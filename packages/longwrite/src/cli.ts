@@ -724,6 +724,14 @@ research
   });
 
 research
+  .command("repair-final-release-plan <workspace>")
+  .description("Validate a bounded action plan against the current failed final-release checks")
+  .action(async (workspace) => {
+    const { runResearchRepairFinalReleasePlan } = await import("./commands/research.js");
+    await runResearchRepairFinalReleasePlan(workspace);
+  });
+
+research
   .command("reconcile-identities <workspace>")
   .description("Write source identity/provenance records across DOI, arXiv, S2, DBLP, OpenAlex, and canonical URLs")
   .action(async (workspace) => {
@@ -760,9 +768,10 @@ validate
 validate
   .command("research <workspace>")
   .description("Validate a research-writing workspace")
-  .action(async (workspace) => {
+  .option("--advisory", "Write final-release findings and a release-gate metric without failing; intended only inside bounded recovery")
+  .action(async (workspace, opts) => {
     const { runValidateResearch } = await import("./commands/validate.js");
-    await runValidateResearch(workspace);
+    await runValidateResearch(workspace, { advisory: opts.advisory === true });
   });
 
 validate
@@ -779,6 +788,14 @@ validate
   .action(async (workspace) => {
     const { runValidateFigures } = await import("./commands/validate.js");
     await runValidateFigures(workspace);
+  });
+
+validate
+  .command("visual-review <workspace>")
+  .description("Validate a multimodal rendered-PDF visual review and record its gate metric")
+  .action(async (workspace) => {
+    const { runValidateVisualReview } = await import("./commands/validate.js");
+    await runValidateVisualReview(workspace);
   });
 
 validate
@@ -863,6 +880,14 @@ build
   .action(async (workspace) => {
     const { runBuildResearch } = await import("./commands/build.js");
     await runBuildResearch(workspace);
+  });
+
+build
+  .command("visual-review <workspace>")
+  .description("Render every figure/table caption page from build/manuscript.pdf as PNG visual-review evidence")
+  .action(async (workspace) => {
+    const { runBuildVisualReview } = await import("./commands/build.js");
+    await runBuildVisualReview(workspace);
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

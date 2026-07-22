@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { parse, stringify } from "yaml";
 import { assertNewWorkspace, projectIdFromDir, readMaliangProject, writeMaliangProject, type MaliangProject } from "./project.js";
@@ -13,6 +14,8 @@ import { validateInitPassthrough } from "./init-passthrough.js";
 import { runUnifiedPreflight } from "./preflight.js";
 import { ROUTING_REGISTRY, type Component } from "./routing.js";
 import { readFlagshipBlueprint } from "./blueprints.js";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 async function run(command: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -332,7 +335,7 @@ const cliArgv = dashDashIndex === -1 ? process.argv : process.argv.slice(0, dash
 const initPassthrough = dashDashIndex === -1 ? undefined : process.argv.slice(dashDashIndex + 1);
 
 const program = new Command();
-program.name("maliang").description("MrMaLiang unified writing and experiment workflows").version("0.2.0");
+program.name("maliang").description("MrMaLiang unified writing and experiment workflows").version(packageVersion);
 
 const templates = program.command("template").description("Inspect bundled MrMaLiang templates");
 templates.command("list").action(() => {

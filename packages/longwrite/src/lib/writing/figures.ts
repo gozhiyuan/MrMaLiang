@@ -83,8 +83,10 @@ const PlacementPlan = z.object({
     title: z.string().min(1).max(180),
     caption: z.string().min(1).max(500),
     placement: Placement,
-    nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(80) }).strict()).min(3).max(10),
-    edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().max(60).optional() }).strict()).max(10),
+    // The deterministic fallback renderer uses a bounded publication grid.
+    // Short labels are a layout contract, not merely a stylistic preference.
+    nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(48) }).strict()).min(3).max(10),
+    edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().max(36).optional() }).strict()).max(10),
   }).strict().optional(),
   // Optional agentic remediation contract.  A table override changes data,
   // Markdown, TeX, placement, and the publication manifest together on the
@@ -446,86 +448,86 @@ function fallbackConceptMap(
   };
 }
 
+function svgEscaped(value: string): string {
+  return value.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char);
+}
+
+function svgLines(value: string, maxChars = 24): string[] {
+  const words = value.trim().split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if (line && `${line} ${word}`.length > maxChars) { lines.push(line); line = word; }
+    else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, 3);
+}
+
 function conceptMapSvg(map: ConceptMap): string {
   const width = 980;
-  const gap = 18;
-  const boxWidth = Math.max(130, Math.floor((width - 80 - gap * (map.nodes.length - 1)) / map.nodes.length));
-  const boxY = 120;
-  const nodes = map.nodes.map((node, index) => {
-    const x = 40 + index * (boxWidth + gap);
-    const label = node.label.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char);
-    return `<rect x="${x}" y="${boxY}" width="${boxWidth}" height="78" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/><text x="${x + boxWidth / 2}" y="${boxY + 38}" text-anchor="middle" font-size="15" font-family="Arial, sans-serif">${label}</text>`;
+  const margin = 40;
+  const gapX = 30;
+  const gapY = 42;
+  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
+  const rows = Math.ceil(map.nodes.length / columns);
+  const boxWidth = Math.floor((width - margin * 2 - gapX * (columns - 1)) / columns);
+  const boxHeight = 88;
+  const top = 94;
+  const height = top + rows * boxHeight + Math.max(0, rows - 1) * gapY + 32;
+  const positions = new Map(map.nodes.map((node, index) => [node.id, {
+    x: margin + (index % columns) * (boxWidth + gapX),
+    y: top + Math.floor(index / columns) * (boxHeight + gapY),
+  }]));
+  const arrows = map.edges.flatMap((edge) => {
+    const from = positions.get(edge.from); const to = positions.get(edge.to);
+    if (!from || !to) return [];
+    const sx = from.x + boxWidth / 2; const sy = from.y + boxHeight / 2;
+    const tx = to.x + boxWidth / 2; const ty = to.y + boxHeight / 2;
+    return [`<path d="M ${sx} ${sy} L ${tx} ${ty}" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>`];
   }).join("");
-  const arrows = map.nodes.slice(1).map((_, index) => {
-    const x = 40 + (index + 1) * boxWidth + index * gap;
-    return `<path d="M ${x} ${boxY + 39} h ${gap - 4}" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>`;
+  const nodes = map.nodes.map((node) => {
+    const position = positions.get(node.id)!;
+    const lines = svgLines(node.label).map((line, index) => `<tspan x="${position.x + boxWidth / 2}" dy="${index === 0 ? 0 : 18}">${svgEscaped(line)}</tspan>`).join("");
+    const firstBaseline = position.y + boxHeight / 2 - (svgLines(node.label).length - 1) * 9;
+    return `<rect x="${position.x}" y="${position.y}" width="${boxWidth}" height="${boxHeight}" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/><text x="${position.x + boxWidth / 2}" y="${firstBaseline}" text-anchor="middle" font-size="15" font-family="Arial, sans-serif">${lines}</text>`;
   }).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="300" viewBox="0 0 ${width} 300"><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker></defs><rect width="100%" height="100%" fill="white"/><text x="40" y="56" font-size="24" font-weight="700" font-family="Arial, sans-serif">${map.title.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char)}</text>${arrows}${nodes}</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker></defs><rect width="100%" height="100%" fill="white"/><text x="${margin}" y="42" font-size="24" font-weight="700" font-family="Arial, sans-serif">${svgEscaped(compactText(map.title, 78))}</text>${arrows}${nodes}</svg>\n`;
 }
 
 function conceptMapLatex(map: ConceptMap): string {
   const nodeNames = new Map(map.nodes.map((node, index) => [node.id, `conceptnode${index + 1}`]));
-  const ids = new Set(map.nodes.map((node) => node.id));
-  const incoming = new Map(map.nodes.map((node) => [node.id, 0]));
-  const outgoing = new Map(map.nodes.map((node) => [node.id, [] as string[]]));
-  for (const edge of map.edges) {
-    if (!ids.has(edge.from) || !ids.has(edge.to)) continue;
-    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
-    outgoing.get(edge.from)?.push(edge.to);
-  }
-  // A BFS gives forward causal edges their own columns. Back-edges (common in
-  // lifecycle diagrams) retain their target column and are drawn as explicit
-  // feedback arcs below, rather than crossing the primary flow.
-  const columns = new Map<string, number>();
-  const queue = map.nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0).map((node) => node.id);
-  if (queue.length === 0 && map.nodes[0]) queue.push(map.nodes[0].id);
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    const column = columns.get(id) ?? 0;
-    columns.set(id, column);
-    for (const next of outgoing.get(id) ?? []) {
-      if (columns.has(next)) continue;
-      columns.set(next, column + 1);
-      queue.push(next);
-    }
-  }
-  for (const node of map.nodes) if (!columns.has(node.id)) columns.set(node.id, Math.max(0, ...columns.values()) + 1);
-  const byColumn = new Map<number, string[]>();
-  for (const node of map.nodes) {
-    const column = columns.get(node.id) ?? 0;
-    byColumn.set(column, [...(byColumn.get(column) ?? []), node.id]);
-  }
-  const positions = new Map<string, { column: number; row: number }>();
-  for (const [column, columnIds] of byColumn) {
-    columnIds.forEach((id, index) => positions.set(id, { column, row: index - (columnIds.length - 1) / 2 }));
-  }
-  const maxColumn = Math.max(0, ...columns.values());
-  const horizontalStep = Math.min(2.35, 14.2 / Math.max(1, maxColumn));
+  // A bounded three-column grid preserves readable node widths even when an
+  // LLM proposes a dense map. The old rank layout compressed seven nodes into
+  // 2cm boxes and placed arrow labels directly over them.
+  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
+  const positions = new Map(map.nodes.map((node, index) => [node.id, {
+    column: index % columns,
+    row: Math.floor(index / columns),
+  }]));
+  const horizontalStep = 4.55;
+  const verticalStep = 3.45;
   const nodeLines = map.nodes.map((node) => {
     const position = positions.get(node.id) ?? { column: 0, row: 0 };
     const x = (position.column * horizontalStep).toFixed(2);
-    const y = (-position.row * 2.15).toFixed(2);
-    return `\\node[draw=blue!65, rounded corners=3pt, fill=blue!5, align=center, text width=2.0cm, minimum height=12mm] (${nodeNames.get(node.id)}) at (${x}cm,${y}cm) {${latexCell(node.label)}};`;
+    const y = (-position.row * verticalStep).toFixed(2);
+    return `\\node[draw=blue!65, rounded corners=3pt, fill=blue!5, align=center, text width=3.15cm, minimum height=16mm] (${nodeNames.get(node.id)}) at (${x}cm,${y}cm) {${latexCell(compactText(node.label, 48))}};`;
   });
   const edgeLines = map.edges.flatMap((edge) => {
     const from = nodeNames.get(edge.from);
     const to = nodeNames.get(edge.to);
     if (!from || !to || from === to) return [];
-    const label = edge.label ? ` node[midway, above, font=\\scriptsize, align=center] {${latexCell(edge.label)}}` : "";
+    const label = edge.label ? ` node[midway, fill=white, inner sep=1pt, font=\\tiny, align=center, text width=1.45cm] {${latexCell(compactText(edge.label, 36))}}` : "";
     const source = positions.get(edge.from)!;
     const target = positions.get(edge.to)!;
-    if (target.column < source.column) {
-      return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.south) to[bend right=28]${label} (${to}.south);`];
-    }
-    if (target.column === source.column) {
-      return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.south) to[bend right=28]${label} (${to}.south);`];
-    }
-    return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.east) --${label} (${to}.west);`];
+    if (target.row === source.row && target.column > source.column) return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.east) --${label} (${to}.west);`];
+    if (target.row > source.row) return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.south) to[out=-90,in=90,looseness=1.05]${label} (${to}.north);`];
+    return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.north) to[out=90,in=-90,looseness=1.05]${label} (${to}.south);`];
   });
   return [
     "\\begin{tikzpicture}[node distance=3mm, baseline]",
-    ...nodeLines,
     ...edgeLines,
+    ...nodeLines,
     "\\end{tikzpicture}",
     "",
   ].join("\n");

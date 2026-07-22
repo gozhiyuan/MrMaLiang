@@ -115,7 +115,7 @@ Requirements:
 
 - Node.js 22 or newer.
 - npm workspaces.
-- MalaClaw `>=1.0.0 <2.0.0` on `PATH` for integration rehearsals.
+- MalaClaw `>=1.0.2 <2.0.0` on `PATH` for integration rehearsals.
 
 Common commands from the repository root:
 
@@ -180,4 +180,3 @@ providers unless the test is explicitly an opt-in live rehearsal.
   not silently deleted.
 
 When behavior changes, update tests and documentation in the same commit.
-

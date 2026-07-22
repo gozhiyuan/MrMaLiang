@@ -185,6 +185,60 @@ describe("research figures and tables", () => {
     expect(await fs.readFile(path.join(ws, "paper", "tables", "comparison-regimes.tex"), "utf-8")).toContain("Evidence varies by task");
   });
 
+  it("keeps a dense long-label concept map inside non-overlapping deterministic bounds", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    const nodes = [
+      "Public CLI configuration and lifecycle",
+      "LongWrite evidence and manuscript component",
+      "LongExperiment audited trial component",
+      "Shared research protocol contracts",
+      "MalaClaw runtime and dashboard host",
+      "Pinned repository source evidence",
+      "Verified experiment manifest handoff",
+    ].map((label, index) => ({ id: `node-${index + 1}`, label }));
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      concept_map: {
+        title: "Bounded architecture handoffs for a repository research workflow",
+        caption: "The diagram distinguishes orchestration, evidence, runtime, and empirical handoff boundaries.",
+        placement: { section_id: "section-1", discussion: "The architecture map anchors the component-boundary discussion." },
+        nodes,
+        edges: [
+          { from: "node-1", to: "node-2", label: "writing configuration" },
+          { from: "node-1", to: "node-3", label: "experiment configuration" },
+          { from: "node-2", to: "node-4", label: "shared evidence schema" },
+          { from: "node-3", to: "node-4", label: "audited result schema" },
+          { from: "node-2", to: "node-5", label: "durable execution" },
+          { from: "node-3", to: "node-5", label: "remote execution" },
+          { from: "node-6", to: "node-2", label: "code locators" },
+          { from: "node-7", to: "node-2", label: "verified results" },
+        ],
+      },
+    }, null, 2));
+    await buildFigureWorkspace(ws);
+
+    const svg = await fs.readFile(path.join(ws, "figures", "concept-map.svg"), "utf-8");
+    const boxes = [...svg.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)]
+      .map((match) => ({ x: Number(match[1]), y: Number(match[2]), width: Number(match[3]), height: Number(match[4]) }));
+    expect(boxes).toHaveLength(nodes.length);
+    for (let left = 0; left < boxes.length; left += 1) {
+      expect(boxes[left].x).toBeGreaterThanOrEqual(40);
+      expect(boxes[left].x + boxes[left].width).toBeLessThanOrEqual(940);
+      for (let right = left + 1; right < boxes.length; right += 1) {
+        const overlapX = boxes[left].x < boxes[right].x + boxes[right].width && boxes[right].x < boxes[left].x + boxes[left].width;
+        const overlapY = boxes[left].y < boxes[right].y + boxes[right].height && boxes[right].y < boxes[left].y + boxes[left].height;
+        expect(overlapX && overlapY, `boxes ${left + 1} and ${right + 1} overlap`).toBe(false);
+      }
+    }
+    const latex = await fs.readFile(path.join(ws, "paper", "figures", "concept-map.tex"), "utf-8");
+    expect(latex.match(/\\node\[draw=blue!/g)).toHaveLength(nodes.length);
+    expect(latex).toContain("text width=3.15cm");
+    expect(latex).not.toContain("text width=2cm");
+    expect(latex.indexOf("\\draw[-{Latex")).toBeLessThan(latex.indexOf("\\node[draw=blue!"));
+  });
+
   it("fails when a manifest artifact is not embedded at its declared placement", async () => {
     const ws = await makeWorkspace();
     await buildFigureWorkspace(ws);

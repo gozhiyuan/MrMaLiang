@@ -148,6 +148,25 @@ describe("LaTeX manuscript build", () => {
     expect(section).not.toContain("Place Figure");
   });
 
+  it("preserves identifier underscores in generated figure labels and references", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "manifest.json"), JSON.stringify({
+      version: 1,
+      figures: [{
+        id: "metadata-citation_depth", title: "Sources by citation depth", caption: "Depth distribution.",
+        path: "figures/metadata-citation_depth.svg", latex_path: "paper/figures/metadata-citation_depth.tex",
+        placement: { section_id: "section-1", discussion: "Grounded metadata plot." }, backend: "deterministic-svg",
+      }],
+      tables: [],
+    }, null, 2), "utf-8");
+    await buildLatexWorkspace(ws);
+    const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
+    expect(section).toContain("\\label{fig:metadata-citation_depth}");
+    expect(section).toContain("Figure~\\ref{fig:metadata-citation_depth}");
+    expect(section).not.toContain("metadata-citation\\_depth");
+  });
+
   it("reports missing LaTeX sources", async () => {
     const ws = await makeWorkspace();
     const report = await validateLatexWorkspace(ws);
@@ -155,6 +174,17 @@ describe("LaTeX manuscript build", () => {
     expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
       expect.stringContaining("paper/main.tex is missing"),
       expect.stringContaining("build/manuscript.pdf is missing"),
+    ]));
+  });
+
+  it("rejects a placeholder when an available LaTeX engine failed", async () => {
+    const ws = await makeWorkspace();
+    await buildLatexWorkspace(ws);
+    await fs.writeFile(path.join(ws, "reports", "latex-build.md"), "# LaTeX Build Report\n\n- Engine: tectonic\n- Real PDF compiled: no (placeholder PDF in build/manuscript.pdf)\n");
+    const report = await validateLatexWorkspace(ws);
+    expect(report.pass).toBe(false);
+    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+      expect.stringContaining("placeholder PDF rather than a real LaTeX compilation"),
     ]));
   });
 });
@@ -216,7 +246,9 @@ describe("citation mapping", () => {
     expect(main).toContain("\\usepackage[round,authoryear]{natbib}");
     expect(main).toContain("\\bibliographystyle{plainnat}");
     expect(main).toContain("AI tools used: LongWrite");
-    expect(main).toMatch(/Execution provenance: LongWrite \d+\.\d+\.\d+/);
+    expect(main).toMatch(/Execution provenance: MrMaLiang \d+\.\d+\.\d+/);
+    expect(main).toMatch(/Writing component: LongWrite \d+\.\d+\.\d+/);
+    expect(main).toMatch(/MalaClaw \d+\.\d+\.\d+/);
     expect(main).toContain("codex | gpt-5 (1 unit)");
     expect(main).toContain("Cited sources & 1");
   });

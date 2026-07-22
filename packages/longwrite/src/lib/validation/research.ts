@@ -4,6 +4,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { parseJsonl } from "../research/jsonl.js";
 import type { CitationPlanEntry, ClassifiedSource } from "../research/types.js";
+import { bibtexKey, bibtexKeys } from "../research/bibtex.js";
 import { computeCitationVerification, computeLiteratureQuality } from "../ops/research-quality.js";
 import { validateEvidenceLedger } from "../research/evidence.js";
 import { citationMarkers } from "../research/citation-markers.js";
@@ -16,6 +17,7 @@ import { validateFigureWorkspace } from "./figures.js";
 import { countWords } from "../ops/word-metrics.js";
 import { codebaseMarkerIds, loadCodebaseManifest } from "../research/codebase-contract.js";
 import { CodebaseComparisonPacket, validateCodebaseComparison } from "../research/codebase-comparison.js";
+import { checkVisualReviewReleaseGate } from "../ops/visual-review.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -295,9 +297,10 @@ function checkBibliography(
     findings.push("bibliography_consistent: sources/bibliography.bib is missing or empty");
     return { id: "bibliography_consistent", pass: false, findings };
   }
+  const keys = bibtexKeys(bibliography);
   for (const source of sources) {
-    if (!bibliography.includes(source.title)) {
-      findings.push(`bibliography_consistent: bibliography is missing title "${source.title}"`);
+    if (!keys.has(bibtexKey(source))) {
+      findings.push(`bibliography_consistent: bibliography is missing source id "${source.id}"`);
     }
   }
   return { id: "bibliography_consistent", pass: findings.length === 0, findings };
@@ -523,7 +526,7 @@ async function checkPublicationArtifacts(workspaceDir: string): Promise<Validati
 
 async function checkFullResearchContracts(workspaceDir: string): Promise<ValidationCheck[]> {
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
-  if (!isFullResearchMode(config?.project.mode)) {
+  if (!config || !isFullResearchMode(config.project.mode)) {
     return [{ id: "full_research_contracts", pass: true, findings: ["not a full research release mode; full contract gates are informational"] }];
   }
   const requireJsonPass = async (id: string, rel: string): Promise<ValidationCheck> => {
@@ -552,6 +555,7 @@ async function checkFullResearchContracts(workspaceDir: string): Promise<Validat
         ? []
         : [`claim double review requires at least one double-reviewed sample and zero disagreements; got double_reviewed=${doubleReviewed}, disagreements=${disagreements}`],
     },
+    await checkVisualReviewReleaseGate(workspaceDir, config.research.provider !== "seed"),
   ];
 }
 
@@ -636,7 +640,19 @@ export async function writeValidationReport(workspaceDir: string, report: Valida
   await fs.mkdir(reportsDir, { recursive: true });
   const jsonRel = "reports/longwrite-validation.json";
   const markdownRel = "reports/longwrite-validation.md";
+  const gatesRel = "reports/release-gates.json";
   await fs.writeFile(path.join(workspaceDir, jsonRel), `${JSON.stringify(report, null, 2)}\n`, "utf-8");
   await fs.writeFile(path.join(workspaceDir, markdownRel), validationReportToMarkdown(report), "utf-8");
-  return [jsonRel, markdownRel];
+  await fs.writeFile(path.join(workspaceDir, gatesRel), `${JSON.stringify({
+    version: 1,
+    generated_at: new Date().toISOString(),
+    pass: report.pass,
+    summary: {
+      total: report.checks.length,
+      passed: report.checks.filter((check) => check.pass).length,
+      failed: report.checks.filter((check) => !check.pass).length,
+    },
+    gates: report.checks.map((check) => ({ id: check.id, pass: check.pass, findings: check.findings })),
+  }, null, 2)}\n`, "utf-8");
+  return [jsonRel, markdownRel, gatesRel];
 }

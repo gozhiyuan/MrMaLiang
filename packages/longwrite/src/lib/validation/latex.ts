@@ -96,6 +96,13 @@ async function checkBuildArtifacts(workspaceDir: string): Promise<ValidationChec
   } catch {
     // Expected canonical output contract.
   }
+  const buildReport = await fileText(workspaceDir, "reports/latex-build.md");
+  // Dry-run/test workspaces intentionally use the placeholder when no engine
+  // exists. A real compiler that fails is different: never let that fallback
+  // masquerade as a publication-ready build.
+  if (buildReport?.includes("Real PDF compiled: no") && !buildReport.includes("- Engine: placeholder")) {
+    findings.push("latex_build: reports/latex-build.md records a placeholder PDF rather than a real LaTeX compilation");
+  }
   return { id: "latex_build", pass: findings.length === 0, findings };
 }
 

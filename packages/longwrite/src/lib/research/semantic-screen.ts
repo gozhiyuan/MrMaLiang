@@ -221,7 +221,13 @@ export async function repairSourceEvidencePackets(workspaceDir: string): Promise
       const fulltext = normalize(await fs.readFile(path.join(workspaceDir, rel), "utf-8"));
       for (const claim of packet.claims) {
         const excerpt = normalize(claim.supporting_excerpt);
-        if (excerpt.split(" ").length < 4 || !fulltext.includes(excerpt)) throw new Error(`packet ${packet.source_id} contains an excerpt not found in ${rel}`);
+        const wordCount = excerpt ? excerpt.split(" ").length : 0;
+        if (wordCount < 4) {
+          throw new Error(`packet ${packet.source_id} excerpt has ${wordCount} normalized words; use an exact contiguous excerpt of at least 4 words from ${rel}`);
+        }
+        if (!fulltext.includes(excerpt)) {
+          throw new Error(`packet ${packet.source_id} excerpt is not found in ${rel}; copy an exact contiguous excerpt without paraphrasing`);
+        }
       }
       const minimum = packet.recommended_depth === "A" ? config.research.semantic_screen.min_supported_claims_for_a : config.research.semantic_screen.min_supported_claims_for_b;
       if (packet.claims.length < minimum) throw new Error(`packet ${packet.source_id} has ${packet.claims.length} supported claims; ${minimum} required for ${packet.recommended_depth}`);

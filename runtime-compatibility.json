@@ -1,7 +1,7 @@
 {
   "version": 1,
   "malaclaw": {
-    "supported": ">=1.0.0 <2.0.0",
-    "tested_with": "1.0.0"
+    "supported": ">=1.0.2 <2.0.0",
+    "tested_with": "1.0.2"
   }
 }

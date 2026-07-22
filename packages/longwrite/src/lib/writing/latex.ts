@@ -338,7 +338,8 @@ async function disclosureLatex(presentation: PresentationConfig, workspaceDir: s
     ? await publicationProvenanceSummary(workspaceDir)
     : undefined;
   const provenanceParts = [
-    ...(presentation.disclosure.provenance.include_longwrite && provenance?.longwrite ? [provenance.longwrite] : []),
+    ...(presentation.disclosure.provenance.include_longwrite && provenance?.maliang ? [provenance.maliang] : []),
+    ...(presentation.disclosure.provenance.include_longwrite && provenance?.longwrite ? [`Writing component: ${provenance.longwrite}`] : []),
     ...(presentation.disclosure.provenance.include_malaclaw && provenance?.malaclaw ? [provenance.malaclaw] : []),
     ...(presentation.disclosure.provenance.include_runtime_models && provenance?.runtime_models.length ? [`Runtime/model units: ${provenance.runtime_models.join("; ")}`] : []),
   ];
@@ -383,7 +384,10 @@ function figureLatex(figure: FigureManifest["figures"][number]): string {
     "\\centering",
     `\\input{${latexPath(figure.latex_path)}}`,
     `\\caption{${escapeLatex(readerCaption(figure.caption))}}`,
-    `\\label{fig:${escapeLatex(figure.id)}}`,
+    // Labels and references are identifiers, not reader-facing text. Escaping
+    // an underscore here changes the identifier and breaks the validator's
+    // manifest-to-manuscript contract.
+    `\\label{fig:${figure.id}}`,
     "\\end{figure}",
     "",
   ].join("\n");
@@ -401,7 +405,7 @@ function tableLatex(table: FigureManifest["tables"][number]): string {
     "\\centering",
     `\\input{${latexPath(table.latex_path)}}`,
     `\\caption{${escapeLatex(readerCaption(table.caption))}}`,
-    `\\label{tab:${escapeLatex(table.id)}}`,
+    `\\label{tab:${table.id}}`,
     "\\end{table}",
     "",
   ].join("\n");
@@ -420,12 +424,12 @@ function placedArtifacts(sectionId: string, manifest: FigureManifest | null): st
   const tables = manifest.tables.filter((table) => table.placement.section_id === sectionId);
   return [
     ...figures.flatMap((figure) => [
-      `The following figure supports this section's discussion of ${escapeLatex(readerCaption(figure.title).toLowerCase())}. Figure~\\ref{fig:${escapeLatex(figure.id)}} presents the visualization.`,
+      `The following figure supports this section's discussion of ${escapeLatex(readerCaption(figure.title).toLowerCase())}. Figure~\\ref{fig:${figure.id}} presents the visualization.`,
       "",
       figureLatex(figure),
     ]),
     ...tables.flatMap((table) => [
-      `The following table supports this section's discussion of ${escapeLatex(readerCaption(table.title).toLowerCase())}. Table~\\ref{tab:${escapeLatex(table.id)}} summarizes the evidence.`,
+      `The following table supports this section's discussion of ${escapeLatex(readerCaption(table.title).toLowerCase())}. Table~\\ref{tab:${table.id}} summarizes the evidence.`,
       "",
       tableLatex(table),
     ]),

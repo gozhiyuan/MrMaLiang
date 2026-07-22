@@ -5,7 +5,7 @@ import { z } from "zod";
 const AcceptanceCriterion = z.object({
   /** Each metric is mechanically observable in the workspace or by the
    * next independent reviewer; free-form success claims are not accepted. */
-  metric: z.enum(["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "empirical_trials", "outline_readiness"]),
+  metric: z.enum(["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review", "empirical_trials", "outline_readiness"]),
   target: z.number().nonnegative(),
   scope: z.string().min(1).max(160).optional(),
 }).strict();

@@ -77,6 +77,10 @@ function validateResearchCommand(): { cmd: string; args: string[] } {
   return longwriteCommand(["validate", "research", "."]);
 }
 
+function validateResearchAdvisoryCommand(): { cmd: string; args: string[] } {
+  return longwriteCommand(["validate", "research", ".", "--advisory"]);
+}
+
 function isResearchMode(mode: LongWriteModeDef): boolean {
   return mode.artifact_type === "research_paper";
 }
@@ -98,6 +102,10 @@ function validateFiguresCommand(): { cmd: string; args: string[] } {
   return longwriteCommand(["validate", "figures", "."]);
 }
 
+function validateVisualReviewCommand(): { cmd: string; args: string[] } {
+  return longwriteCommand(["validate", "visual-review", "."]);
+}
+
 function validateScorecardCommand(): { cmd: string; args: string[] } {
   return longwriteCommand(["validate", "scorecard", "."]);
 }
@@ -112,6 +120,10 @@ function reviewRouteCommand(): { cmd: string; args: string[] } {
 
 function buildResearchCommand(): { cmd: string; args: string[] } {
   return longwriteCommand(["build", "research", "."]);
+}
+
+function buildVisualReviewCommand(): { cmd: string; args: string[] } {
+  return longwriteCommand(["build", "visual-review", "."]);
 }
 
 function assessResearchCommand(): { cmd: string; args: string[] } {
@@ -268,18 +280,13 @@ function withResearchScriptStages(
         command: longwriteCommand(["review", "claims", "."]),
       };
     }
-    if (String(stage.id) === "claim_judgment_repair") {
+    if (String(stage.id) === "claim_judge") {
       return {
         ...stage,
-        runtime: "script",
-        command: longwriteCommand(["review", "repair-claims", "."]),
-      };
-    }
-    if (String(stage.id) === "action_plan_repair") {
-      return {
-        ...stage,
-        runtime: "script",
-        command: longwriteCommand(["review", "repair-action-plan", "."]),
+        validator_commands: [
+          ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
+          longwriteCommand(["review", "repair-claims", "."]),
+        ],
       };
     }
     if (String(stage.id) === "expand_research") {
@@ -302,6 +309,18 @@ function withResearchScriptStages(
           ...(insideLoop || String(stage.id) === "initial_build" ? [] : [validateResearchCommand()]),
           validateFiguresCommand(),
           validateLatexCommand(),
+        ],
+      };
+    }
+    if (String(stage.id) === "render_visual_review") {
+      return { ...stage, runtime: "script", command: buildVisualReviewCommand() };
+    }
+    if (String(stage.id) === "visual_review") {
+      return {
+        ...stage,
+        validator_commands: [
+          ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
+          validateVisualReviewCommand(),
         ],
       };
     }
@@ -375,15 +394,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
               ? "Select at least one and at most the configured maximum. This repository-study profile has no explicit codebase, so an empty selection is invalid. If no candidate is suitable, do not invent one: the run will stop with a repair report requiring a pinned research.codebases entry or a changed paper profile. A selected repository will later be pinned with Git and cited as software; it never substitutes for scholarly evidence."
               : "Select at most the configured maximum. Select no repository when none is relevant. A selected repository will later be pinned with Git and cited as software; it never substitutes for scholarly evidence.",
           ],
-          outputs: ["codebases/github-selection.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-        },
-        {
-          id: "github_codebase_selection_repair",
-          title: "Validate GitHub codebase selections",
-          owner: "source-curator",
-          inputs: ["codebases/github-candidates.json", "codebases/github-selection.json"],
-          outputs: ["reports/github-codebase-selection-repair.md"], validators: ["required_output_exists"], runtime: "script",
-          command: longwriteCommand(["research", "repair-github-codebase-selection", "."]),
+          outputs: ["codebases/github-selection.json", "reports/github-codebase-selection-repair.md"], validators: ["required_output_exists"],
+          validator_commands: [longwriteCommand(["research", "repair-github-codebase-selection", "."])], retry: { max_attempts: 2 },
         },
       );
     }
@@ -410,19 +422,10 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           "Schema: {version:1,codebases:[{codebase_id,summary,summary_locators,components:[{id,name,summary,locators}],entrypoints:[{id,name,summary,locators}],interfaces:[{from,to,relationship,summary,locators}],data_control_flows:[{summary,locators}],configuration_extension_points:[{id,name,summary,locators}],trust_boundaries:[{summary,locators}],operational_limitations:[{summary,locators}]}]}. All arrays are required; use [] when the bounded snapshot does not support that category. Include at least one component per codebase.",
           "Every summary, component, entrypoint, interface, flow, extension point, trust boundary, and limitation must cite one or more exact markers copied verbatim from evidence/codebase-context.md, for example `[codebase:repo:path/file.ts#L1-L40]`. A limitation must be an observed constraint in the supplied code/config/docs, not an argument from missing evidence. Preserve uncertainty and do not invent files, line ranges, components, relationships, or behavior.",
         ],
-        outputs: ["evidence/codebase-analysis.raw.json"],
+        outputs: ["evidence/codebase-analysis.raw.json", "evidence/codebase-analysis.json", "reports/codebase-analysis-repair.md"],
         validators: ["required_output_exists"],
+        validator_commands: [longwriteCommand(["research", "repair-codebase-analysis", "."])],
         retry: { max_attempts: 2 },
-      },
-      {
-        id: "codebase_architecture_analysis_repair",
-        title: "Validate repository architecture grounding",
-        owner: "source-curator",
-        inputs: ["evidence/codebase-analysis.raw.json", "codebases/manifest.json", "evidence/codebase-chunks.jsonl"],
-        outputs: ["evidence/codebase-analysis.json", "reports/codebase-analysis-repair.md"],
-        validators: ["required_output_exists"],
-        runtime: "script",
-        command: longwriteCommand(["research", "repair-codebase-analysis", "."]),
       },
       {
         id: "codebase_comparison_analysis",
@@ -436,16 +439,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           "Every row must use exact locators copied from the validated architecture dossier/context. When two or more codebases are pinned, add at least one comparison that names all compared IDs and includes at least one exact locator from each. Compare purpose, component boundaries, interfaces, extension model, trust boundaries, or documented operational limitations—not stars, popularity, or inferred benchmark quality.",
           "codebases/mentioned-repositories.json is a bounded operator candidate list only. Do not treat an unpinned mentioned repository as evidence, add it to the comparison, recursively fetch it, or cite it.",
         ],
-        outputs: ["evidence/codebase-comparison.raw.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-      },
-      {
-        id: "codebase_comparison_analysis_repair",
-        title: "Validate repository comparison grounding",
-        owner: "source-curator",
-        inputs: ["evidence/codebase-comparison.raw.json", "codebases/manifest.json", "evidence/codebase-chunks.jsonl"],
-        outputs: ["evidence/codebase-comparison.json", "reports/codebase-comparison-repair.md"],
-        validators: ["required_output_exists"], runtime: "script",
-        command: longwriteCommand(["research", "repair-codebase-comparison", "."]),
+        outputs: ["evidence/codebase-comparison.raw.json", "evidence/codebase-comparison.json", "reports/codebase-comparison-repair.md"], validators: ["required_output_exists"],
+        validator_commands: [longwriteCommand(["research", "repair-codebase-comparison", "."])], retry: { max_attempts: 2 },
       },
     );
     next.stages.splice(searchPlanIndex + 1, 0, ...codebaseStages);
@@ -491,7 +486,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           "This is abstract-level semantic triage, not a claim-evidence judgment. Assess every candidate; source_id and taxonomy_cells must come from the supplied artifact/configuration. Do not invent findings, quotes, pages, venues, acceptance status, or source IDs.",
           "Use these exact enums: chapter_role is protagonist, comparison, background, or exclude; semantic_relevance is high, medium, or low; recommended_depth is A, B, C, or D (use D—not none—for excluded material); fulltext_priority is the JSON boolean true or false (never high, medium, low, null, or a string). An excluded source must set fulltext_priority false. Use A/B only when the abstract indicates a central/comparative role; final A/B still requires validated full-text evidence.",
         ],
-        outputs: ["sources/semantic-screening.json"], validators: ["required_output_exists"],
+        outputs: ["sources/semantic-screening.json", "reports/semantic-screen-repair.md"], validators: ["required_output_exists"],
         validator_commands: [longwriteCommand(["research", "repair-semantic-screen", "."])],
         retry: { max_attempts: 2 },
       },
@@ -521,17 +516,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         skills: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "fulltext/*.md"],
         instructions: [
           "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}.",
-          "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must be a short exact contiguous excerpt from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
-          "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The following script verifies every excerpt against the retrieved text and controls final A/B depth.",
+          "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must copy an exact contiguous run of at least four normalized words from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
+          "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The validator checks every excerpt against the retrieved text before accepting this attempt and controls final A/B depth.",
         ],
-        outputs: ["evidence/source-packets.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-      },
-      {
-        id: "source_evidence_repair",
-        title: "Validate source-level full-text evidence",
-        owner: "analyst", inputs: ["evidence/source-packets.json", "sources/source-evidence-candidates.json"],
-        outputs: ["reports/source-evidence-repair.md"], validators: ["required_output_exists"], runtime: "script",
-        command: longwriteCommand(["research", "repair-source-evidence", "."]),
+        outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+        validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
       },
       {
         id: "finalize_evidence_depth",
@@ -586,7 +575,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
               "Read only the bounded candidate metadata and current corpus-gate report. Write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}. Reassess every supplied candidate using title/abstract evidence.",
               "Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D; fulltext_priority true|false. Prioritize open, directly relevant sources that can close the named gate, but do not promote a source without abstract support. Final A/B still requires validated full-text evidence.",
             ],
-            outputs: ["sources/semantic-screening.json"], validators: ["required_output_exists"],
+            outputs: ["sources/semantic-screening.json", "reports/semantic-screen-repair.md"], validators: ["required_output_exists"],
             validator_commands: [longwriteCommand(["research", "repair-semantic-screen", "."])], retry: { max_attempts: 2 },
           },
           {
@@ -616,17 +605,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
             owner: "analyst", when: "corpus_gate_pass < 1",
             inputs: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl"], optional_inputs: ["fulltext/*.md"], skills: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "fulltext/*.md"],
             instructions: [
-              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
+              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
               "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Explain comparison dimensions and limitations faithfully so the deterministic validator can finalize citation depth.",
             ],
-            outputs: ["evidence/source-packets.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-          },
-          {
-            id: "corpus_recovery_source_evidence_repair",
-            title: "Validate evidence recovered from full text",
-            owner: "analyst", when: "corpus_gate_pass < 1",
-            inputs: ["evidence/source-packets.json", "sources/source-evidence-candidates.json"], outputs: ["reports/source-evidence-repair.md"], validators: ["required_output_exists"], runtime: "script",
-            command: longwriteCommand(["research", "repair-source-evidence", "."]),
+            outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+            validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
           },
           {
             id: "corpus_recovery_finalize_evidence_depth",
@@ -703,14 +686,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
             "Review the outline as a research argument, not a table of contents. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
             "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval.",
           ],
-          outputs: ["reviews/outline-review.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-        },
-        {
-          id: "outline_review_repair",
-          title: "Validate outline-review grounding",
-          owner: "analyst", inputs: ["reviews/outline-review.json", "outline.json", "sources/classified_sources.jsonl"],
-          outputs: ["reports/outline-review-repair.md"], validators: ["required_output_exists"], runtime: "script",
-          command: longwriteCommand(["review", "repair-outline-review", "."]),
+          outputs: ["reviews/outline-review.json", "reports/outline-review-repair.md"], validators: ["required_output_exists"],
+          validator_commands: [longwriteCommand(["review", "repair-outline-review", "."])], retry: { max_attempts: 2 },
         },
         {
           id: "outline_readiness_score",
@@ -774,17 +751,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         "Choose at most five intents. Do not invent source IDs, sections, taxonomy cells, numerical values, experimental results, or unsupported equations. Use an empty intents array when no artifact is justified.",
         ...selectedPaperProfile.promptOverlays.artifact,
       ],
-      outputs: ["reviews/artifact-plan.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-    };
-    const initialArtifactRepair = {
-      id: "initial_artifact_plan_repair",
-      title: "Validate pre-draft artifact strategy",
-      owner: "analyst", inputs: ["reviews/artifact-plan.json"],
-      outputs: ["reports/artifact-plan-repair.md"], validators: ["required_output_exists"], runtime: "script",
-      command: longwriteCommand(["review", "repair-artifact-plan", "."]),
+      outputs: ["reviews/artifact-plan.json", "reports/artifact-plan-repair.md"], validators: ["required_output_exists"],
+      validator_commands: [longwriteCommand(["review", "repair-artifact-plan", "."])], retry: { max_attempts: 2 },
     };
     const visualIndex = next.stages.findIndex((stage) => stage.id === "visual_plan");
-    next.stages.splice(visualIndex, 0, initialArtifactPlanner, initialArtifactRepair);
+    next.stages.splice(visualIndex, 0, initialArtifactPlanner);
     visualPlan.inputs = [...new Set([...(visualPlan.inputs as string[]), "reviews/artifact-plan.json"])];
     visualPlan.optional_inputs = [...new Set([...((visualPlan.optional_inputs as string[] | undefined) ?? []), "reports/artifact-plan-repair.md"])];
     visualPlan.skills = [...new Set([...((visualPlan.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json"])];
@@ -828,19 +799,10 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       "Choose at most five intents. Do not invent source ids, sections, taxonomy cells, commands, experimental results, or plot values.",
       ...selectedPaperProfile.promptOverlays.artifact,
     ],
-    outputs: ["reviews/artifact-plan.json"],
+    outputs: ["reviews/artifact-plan.json", "reports/artifact-plan-repair.md"],
     validators: ["required_output_exists"],
+    validator_commands: [longwriteCommand(["review", "repair-artifact-plan", "."])],
     retry: { max_attempts: 2 },
-  };
-  const artifactRepair = {
-    id: "artifact_plan_repair",
-    title: "Normalize and validate artifact strategy",
-    owner: "analyst",
-    inputs: ["reviews/artifact-plan.json"],
-    outputs: ["reports/artifact-plan-repair.md"],
-    validators: ["required_output_exists"],
-    runtime: "script",
-    command: longwriteCommand(["review", "repair-artifact-plan", "."]),
   };
   const planner = {
     id: "action_plan",
@@ -852,7 +814,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     instructions: [
       "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
       "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
-      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to verified-metadata plots or comparison tables. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
+      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
       "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
       "Select reopen_outline only when incremental chapter revision cannot address the review finding. Its rationale must name the defective organizing claim and evidence-backed replacement. It may co-occur with targeted_research_expansion: the dispatcher refreshes and validates the literature before it reopens the outline in the same bounded round.",
       "Output ownership is strict: revise_sections may change only chapters/*.md, paper/abstract.md, and reviews/revision-report.md. Never assign it a generated table/figure, placement, caption, rendered-PDF, bibliography-presentation, TeX, or build defect. Assign those findings to revise_visual_plan so the artifact builder can write the durable placement contract before the normal rebuild.",
@@ -861,19 +823,10 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       "Every action must name at least one finding id and at least one quantitative acceptance criterion. Select the smallest sufficient set; do not invent commands, paths, tool ids, or model settings.",
       "If a finding requires an operator decision, select request_operator_clarification as the ONLY action. Put the exact question in its rationale; never guess the answer.",
     ],
-    outputs: ["reviews/action-plan.json"],
+    outputs: ["reviews/action-plan.json", "reports/action-plan-repair.md"],
     validators: ["required_output_exists"],
+    validator_commands: [longwriteCommand(["review", "repair-action-plan", "."])],
     retry: { max_attempts: 2 },
-  };
-  const repair = {
-    id: "action_plan_repair",
-    title: "Normalize and validate action-plan contract",
-    owner: "analyst",
-    inputs: ["reviews/action-plan.json"],
-    outputs: ["reports/action-plan-repair.md"],
-    validators: ["required_output_exists"],
-    runtime: "script",
-    command: longwriteCommand(["review", "repair-action-plan", "."]),
   };
   const splitActionPlan = {
     id: "action_plan_split",
@@ -931,7 +884,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         "Read reports/action-dispatch-research.json. If targeted_research_expansion was selected, re-screen every current bounded candidate from titles and abstracts and write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}. If it was not selected, preserve the existing valid semantic-screen artifact exactly; do not invent a new research decision.",
         "This is abstract-level semantic triage, not a claim-evidence judgment. Assess only supplied candidate source IDs and configured taxonomy cells. Do not invent claims, quotations, pages, venues, acceptance status, or source IDs. Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D (D, never none); and fulltext_priority true|false as a JSON boolean. Final A/B depth still requires retrieved full text and validated source evidence.",
       ],
-      outputs: ["sources/semantic-screening.json"], validators: ["required_output_exists"],
+      outputs: ["sources/semantic-screening.json", "reports/semantic-screen-repair.md"], validators: ["required_output_exists"],
       validator_commands: [longwriteCommand(["research", "repair-semantic-screen", "."])],
       retry: { max_attempts: 2 },
     },
@@ -965,16 +918,10 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       skills: ["reports/action-dispatch-research.json", "sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "evidence/source-packets.json", "fulltext/*.md"],
       instructions: [
         "If reports/action-dispatch-research.json records targeted_research_expansion, write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates. If no expansion was selected, preserve the existing valid packet artifact exactly.",
-        "Every supporting_excerpt must be a short exact contiguous excerpt from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one.",
+        "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one.",
       ],
-      outputs: ["evidence/source-packets.json"], validators: ["required_output_exists"], retry: { max_attempts: 2 },
-    },
-    {
-      id: "quality_source_evidence_repair",
-      title: "Validate refreshed source-level evidence",
-      owner: "analyst", inputs: ["evidence/source-packets.json", "sources/source-evidence-candidates.json"],
-      outputs: ["reports/source-evidence-repair.md"], validators: ["required_output_exists"], runtime: "script",
-      command: longwriteCommand(["research", "repair-source-evidence", "."]),
+      outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+      validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
     },
     {
       id: "quality_finalize_evidence_depth",
@@ -1030,9 +977,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   ] : [];
   const adaptiveChildren: Array<Record<string, unknown>> = [
     artifactPlanner,
-    artifactRepair,
     planner,
-    repair,
     splitActionPlan,
     researchDispatch,
     ...evidenceRefreshStages,
@@ -1050,6 +995,91 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       ...((stage.instructions as string[] | undefined) ?? []),
       "When reviews/action-plan.json and reviews/artifact-plan.json exist, independently check every selected action and artifact intent against its quantitative acceptance_criteria. Report each unmet criterion as an unresolved finding; do not award credit for a claimed fix without its stated observable result.",
     ];
+  }
+  // A final release validation has stricter, manuscript-wide checks than a
+  // peer-review score alone (for example live URLs and woven A/B depth).  Do
+  // not leave those findings as a dead-end after the normal quality budget:
+  // write them as an advisory report, then run at most two explicit recovery
+  // rounds through the same trusted dispatcher and deterministic rebuild.
+  // The final hard validator still decides publication eligibility.
+  if (policy?.semanticScreenEnabled && provider !== "seed") {
+    const releaseAssessment = {
+      id: "final_release_assessment",
+      title: "Assess final release gates for bounded recovery",
+      owner: "artifact-builder",
+      inputs: ["chapters/*.md", "sources/classified_sources.jsonl", "sources/bibliography.bib", "reviews/scorecard.json"],
+      outputs: ["reports/longwrite-validation.json", "reports/longwrite-validation.md", "reports/release-gates.json", "reports/metrics.json"],
+      validators: ["required_output_exists"], runtime: "script",
+      command: validateResearchAdvisoryCommand(),
+    };
+    const finalReleasePlanner = {
+      ...planner,
+      id: "final_release_plan",
+      title: "Plan corrective actions for failed final release gates",
+      inputs: [...new Set([...(planner.inputs as string[]), "reports/longwrite-validation.json", "reports/longwrite-validation.md"])],
+      optional_inputs: [...new Set([...(planner.optional_inputs as string[]), "reports/source-verification.md", "reports/research-assessment.md"])],
+      skills: [...new Set([...(planner.skills as string[]), "reports/longwrite-validation.json", "reports/longwrite-validation.md", "reports/source-verification.md", "reports/research-assessment.md"])],
+      instructions: [
+        "This is a final-release recovery round. Read reports/longwrite-validation.json first. Its failed check IDs are authoritative: create one finding with the exact ID for every currently failed check, and select allowlisted corrective action(s) that cover every one. Never lower a target, waive a URL/claim/evidence gate, or claim a pass without a new deterministic assessment.",
+        "For a dead cited URL, revise the prose to remove or replace the citation with a currently evidence-backed source, or perform targeted research to obtain such a source; do not edit verification records or invent a replacement URL. For citation-depth quotas, weave a validated B-depth source into each named chapter rather than weakening the quota. For claim support or review score, repair the evidence-backed prose and/or placed artifact that the report and reviewer identify.",
+        "For rendered_visual_review, select revise_visual_plan with rendered_visual_review >= 1, then let the normal rebuild → PNG rendering → Codex visual-review path produce a fresh verdict. Never mark the visual QA JSON as passing by hand or waive a page-specific legibility finding.",
+        ...((planner.instructions as string[]) ?? []),
+      ],
+      outputs: ["reviews/action-plan.json", "reports/action-plan-repair.md", "reports/final-release-plan-repair.md"],
+      validator_commands: [
+        ...((planner.validator_commands as Array<Record<string, unknown>>) ?? []),
+        longwriteCommand(["research", "repair-final-release-plan", "."]),
+      ],
+    };
+    const recoveryWhen = (stage: Record<string, unknown>): Record<string, unknown> => ({
+      ...stage,
+      when: "final_release_gate_pass < 1",
+    });
+    const finalReleaseRecoveryChildren: Array<Record<string, unknown>> = [
+      recoveryWhen(finalReleasePlanner),
+      recoveryWhen(splitActionPlan),
+      recoveryWhen(researchDispatch),
+      ...evidenceRefreshStages.map(recoveryWhen),
+      recoveryWhen(outlineDispatch),
+      ...outlineReopenStages.map(recoveryWhen),
+      recoveryWhen(revisionDispatch),
+      ...children
+        .filter((stage) => !["route", "expand_research", "revise"].includes(String(stage.id)))
+        .map(recoveryWhen),
+      {
+        id: "final_release_verify_citations",
+        title: "Re-verify cited URLs after final-release recovery",
+        owner: "source-curator",
+        inputs: ["chapters/*.md", "sources/classified_sources.jsonl"],
+        outputs: ["sources/citation-verification.jsonl", "reports/source-verification.md"],
+        validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
+        command: longwriteCommand(["research", "verify", "."]),
+      },
+      {
+        id: "final_release_assess_research",
+        title: "Reassess literature and citation quality after recovery",
+        owner: "analyst",
+        inputs: ["sources/classified_sources.jsonl", "sources/citation_plan.jsonl", "chapters/*.md", "sources/bibliography.bib"],
+        outputs: ["reports/research-assessment.json", "reports/research-assessment.md", "sources/source_upgrade_plan.jsonl"],
+        validators: ["required_output_exists"], runtime: "script",
+        command: assessResearchCommand(),
+      },
+      releaseAssessment,
+    ];
+    const finalValidateIndex = next.stages.findIndex((stage) => stage.id === "final_validate");
+    if (finalValidateIndex < 0) throw new Error("auto_research_agentic requires final_validate for final-release recovery");
+    next.stages.splice(finalValidateIndex, 0,
+      releaseAssessment,
+      {
+        type: "loop",
+        id: "final_release_recovery_loop",
+        title: "Recover failed final release gates",
+        max_rounds: 2,
+        stop_when: "final_release_gate_pass >= 1",
+        on_exhaustion: "succeed",
+        stages: finalReleaseRecoveryChildren,
+      },
+    );
   }
   next.tool_catalog = [
     {
@@ -1218,6 +1248,19 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         return stage.runtime === "script" ? stage : extend(stage);
       });
     }
+  }
+  // Seed + dry-run is an offline control-plane rehearsal. It has no
+  // multimodal worker, so retain visual stages as explicitly skipped rather
+  // than pretending that a text fixture inspected rendered PNG pages.
+  if (provider === "seed") {
+    const disableVisualReview = (stages: Array<Record<string, unknown>>): Array<Record<string, unknown>> => stages.map((stage) => {
+      if (Array.isArray(stage.stages)) return { ...stage, stages: disableVisualReview(stage.stages as Array<Record<string, unknown>>) };
+      if (["render_visual_review", "visual_review"].includes(String(stage.id))) {
+        return { ...stage, enabled: false, skippable: true, disabled_reason: "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer" };
+      }
+      return stage;
+    });
+    next.stages = disableVisualReview(next.stages);
   }
   return next;
 }

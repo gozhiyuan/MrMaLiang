@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseJsonl } from "../research/jsonl.js";
 import { citationMarkers } from "../research/citation-markers.js";
 import type { CitationPlanEntry, ClassifiedSource } from "../research/types.js";
+import { bibtexKey, bibtexKeys } from "../research/bibtex.js";
 
 export type LiteratureQualityDimension = {
   id: string;
@@ -204,8 +205,9 @@ export function computeCitationVerification(
   if (bibliography === null || bibliography.trim().length === 0) {
     findings.push("sources/bibliography.bib is missing or empty.");
   } else {
+    const keys = bibtexKeys(bibliography);
     for (const source of sources) {
-      if (!bibliography.includes(source.title)) findings.push(`Bibliography is missing "${source.title}".`);
+      if (!keys.has(bibtexKey(source))) findings.push(`Bibliography is missing source id "${source.id}".`);
     }
   }
 

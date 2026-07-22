@@ -1,6 +1,6 @@
 {
   "name": "mr-maliang",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Unified long-form writing and computational research workflows",
   "type": "module",

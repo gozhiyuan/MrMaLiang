@@ -266,7 +266,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         disclosure: {
           enabled: mode.id === "auto_research_agentic" && !opts.publication?.anonymous,
           ...(mode.id === "auto_research_agentic" && !opts.publication?.anonymous
-            ? { ai_use: "LongWrite's agentic research workflow supported literature research, drafting, review, and figure planning." }
+            ? { ai_use: "MrMaLiang's agentic research workflow supported literature research, drafting, review, and figure planning through its LongWrite writing component and the MalaClaw runtime." }
             : {}),
           provenance: { enabled: mode.id === "auto_research_agentic" && !opts.publication?.anonymous, include_longwrite: true, include_malaclaw: true, include_runtime_models: true },
         },

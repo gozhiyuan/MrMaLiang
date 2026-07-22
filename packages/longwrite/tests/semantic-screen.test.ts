@@ -85,4 +85,20 @@ describe("agentic semantic-screen contract", () => {
     await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "Fabricated claim has no support.", supporting_excerpt: "invented text never appears", locator: "none" }] }] }));
     await expect(repairSourceEvidencePackets(dir)).rejects.toThrow(/invalid source-evidence contract/);
   });
+
+  it("reports a too-short exact excerpt as a repairable contract error", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-screen-short-excerpt-"));
+    dirs.push(dir);
+    await fs.mkdir(path.join(dir, "sources"), { recursive: true });
+    await fs.mkdir(path.join(dir, "fulltext"), { recursive: true });
+    await fs.mkdir(path.join(dir, "evidence"), { recursive: true });
+    await fs.writeFile(path.join(dir, "longwrite.yaml"), `version: 1\nproject: { id: test, artifact_type: research_paper, mode: auto_research_agentic }\nresearch: { topic: test, taxonomy: [], semantic_screen: { enabled: true, max_candidates: 2, min_candidates_per_taxonomy_cell: 0, max_evidence_sources: 2, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 } }\nwriting: {}\npublication: {}\nfigures: {}\nreview: {}\nexecution: {}\n`);
+    await fs.writeFile(path.join(dir, "sources", "source-evidence-candidates.json"), JSON.stringify({ version: 1, candidates: [{ id: "paper", fulltext_path: "fulltext/paper.md" }] }));
+    await fs.writeFile(path.join(dir, "fulltext", "paper.md"), "This text contains five perspectives on the tested system.");
+    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "The paper names perspectives.", supporting_excerpt: "five perspectives", locator: "opening" }] }] }));
+    await expect(repairSourceEvidencePackets(dir)).rejects.toThrow(/invalid source-evidence contract/);
+    const report = await fs.readFile(path.join(dir, "reports", "source-evidence-repair.md"), "utf8");
+    expect(report).toContain("2 normalized words");
+    expect(report).toContain("at least 4 words");
+  });
 });

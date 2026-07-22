@@ -1,24 +1,44 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { validateResearchWorkspace, writeValidationReport } from "../lib/validation/research.js";
 import { loadScorecard } from "../lib/ops/scorecard.js";
 import { loadProjectConfig, projectConfigErrorToFindings } from "../lib/project-config.js";
 import { validateLatexWorkspace } from "../lib/validation/latex.js";
 import { validateFigureWorkspace } from "../lib/validation/figures.js";
+import { validateVisualReview } from "../lib/ops/visual-review.js";
 import {
   validateNovelWorkspace,
   validateTechnicalBookWorkspace,
   writeLongformValidationReport,
 } from "../lib/validation/longform.js";
 
-export async function runValidateResearch(workspaceDir: string): Promise<void> {
+async function writeReleaseGateMetric(workspaceDir: string, pass: boolean): Promise<void> {
+  const target = path.join(workspaceDir, "reports", "metrics.json");
+  let metrics: Record<string, unknown> = {};
+  try {
+    metrics = JSON.parse(await fs.readFile(target, "utf-8")) as Record<string, unknown>;
+  } catch {
+    // A validation report remains useful even before an earlier scorer writes
+    // metrics.  Create the derived release-gate metric from an empty object.
+  }
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify({ ...metrics, final_release_gate_pass: pass ? 1 : 0 }, null, 2)}\n`, "utf-8");
+}
+
+export async function runValidateResearch(workspaceDir: string, opts: { advisory?: boolean } = {}): Promise<void> {
   const resolved = path.resolve(workspaceDir);
   const report = await validateResearchWorkspace(resolved);
   const written = await writeValidationReport(resolved, report);
+  await writeReleaseGateMetric(resolved, report.pass);
   console.log(`Validated LongWrite research workspace at ${resolved}`);
   for (const file of written) console.log(`  + ${file}`);
   if (!report.pass) {
     for (const check of report.checks.filter((c) => !c.pass)) {
       for (const finding of check.findings) console.error(`  ! ${finding}`);
+    }
+    if (opts.advisory) {
+      console.error("  advisory: final-release findings were recorded for bounded recovery");
+      return;
     }
     // Seed is an offline dev fixture: release validation is advisory so a
     // free dry-run proves plumbing. Live providers get full enforcement.
@@ -88,6 +108,15 @@ export async function runValidateFigures(workspaceDir: string): Promise<void> {
     }
     process.exitCode = 1;
   }
+}
+
+export async function runValidateVisualReview(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const report = await validateVisualReview(resolved);
+  console.log(`Validated LongWrite rendered visual-review contract at ${resolved}`);
+  console.log(`  ${report.pass ? "✓" : "✗"} ${report.id}`);
+  for (const finding of report.findings) console.error(`  ! ${finding}`);
+  if (!report.pass) process.exitCode = 1;
 }
 
 export async function runValidateNovel(workspaceDir: string): Promise<void> {
