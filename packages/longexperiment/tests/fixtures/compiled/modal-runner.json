@@ -1,0 +1,351 @@
+{
+  "version": 1,
+  "project": {
+    "id": "memory-ablation",
+    "description": "LongExperiment: Memory helps planning."
+  },
+  "agents": [
+    "experiment-lead",
+    "methodologist",
+    "result-auditor",
+    "experiment-reporter"
+  ],
+  "packs": [
+    {
+      "id": "experiment-workflow"
+    }
+  ],
+  "runtime": "script",
+  "workflow": {
+    "external_inputs": [
+      "experiment.yaml",
+      "experiment_brief.md"
+    ],
+    "max_parallel": 2,
+    "run_limits": {
+      "max_active_run_minutes": 10,
+      "on_limit": "pause"
+    },
+    "stages": [
+      {
+        "id": "pin_inputs",
+        "title": "Materialize immutable inputs",
+        "owner": "methodologist",
+        "inputs": [
+          "experiment.yaml"
+        ],
+        "outputs": [
+          "inputs/locks.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "pin-inputs",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Resolve only configured immutable revisions. Do not accept tags, branches, HEAD, or operator placeholders as research evidence."
+        ]
+      },
+      {
+        "id": "design",
+        "title": "Design experiment",
+        "owner": "experiment-lead",
+        "inputs": [
+          "experiment.yaml",
+          "experiment_brief.md"
+        ],
+        "outputs": [
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ],
+        "requires_human_approval": false,
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "design",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "prepare_worktrees",
+        "title": "Prepare isolated candidate worktrees",
+        "owner": "methodologist",
+        "inputs": [
+          "experiment.yaml",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "worktrees/manifest.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "worktrees",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "suite_plan",
+        "title": "Materialize approved suite and trial matrix",
+        "owner": "methodologist",
+        "inputs": [
+          "reports/experiment-design.md",
+          "inputs/locks.json",
+          "worktrees/manifest.json"
+        ],
+        "outputs": [
+          "runs/suite-plan.json",
+          "runs/study-level-1.json",
+          "runs/study-level-2.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "suite-plan",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_1",
+        "title": "Execute and audit dependency level 1",
+        "foreach": "runs/study-level-1.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "worktrees/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "remote-job",
+            "command": {
+              "cmd": "sh",
+              "args": [
+                "-lc",
+                "LONGEXPERIMENT_STUDY_ID='{{item.id}}' LONGEXPERIMENT_WORKSPACE=. python3 adapters/modal/adapter.py"
+              ]
+            },
+            "instructions": [
+              "Run only through the configured Modal adapter. The adapter receives a JSON submit/status/collect/cancel request on stdin and must write the declared study raw-results artifact only after remote outputs are collected.",
+              "Do not alter the pinned inputs, GPU class, environment, or study id."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_2",
+        "title": "Execute and audit dependency level 2",
+        "foreach": "runs/study-level-2.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "worktrees/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "remote-job",
+            "command": {
+              "cmd": "sh",
+              "args": [
+                "-lc",
+                "LONGEXPERIMENT_STUDY_ID='{{item.id}}' LONGEXPERIMENT_WORKSPACE=. python3 adapters/modal/adapter.py"
+              ]
+            },
+            "instructions": [
+              "Run only through the configured Modal adapter. The adapter receives a JSON submit/status/collect/cancel request on stdin and must write the declared study raw-results artifact only after remote outputs are collected.",
+              "Do not alter the pinned inputs, GPU class, environment, or study id."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "aggregate_results",
+        "title": "Aggregate paired study results",
+        "owner": "result-auditor",
+        "inputs": [
+          "runs/suite-plan.json",
+          "inputs/locks.json",
+          "results/studies/*/audit.json"
+        ],
+        "outputs": [
+          "results/raw-results.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "aggregate",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."
+        ]
+      },
+      {
+        "id": "audit_results",
+        "title": "Certify result provenance",
+        "owner": "result-auditor",
+        "inputs": [
+          "results/raw-results.json",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "audit",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "report",
+        "title": "Package result hand-off",
+        "owner": "experiment-reporter",
+        "inputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "outputs": [
+          "reports/experiment-report.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "report",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      }
+    ]
+  }
+}

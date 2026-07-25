@@ -1,0 +1,702 @@
+{
+  "version": 1,
+  "project": {
+    "id": "memory-ablation",
+    "description": "LongExperiment: Memory helps planning."
+  },
+  "agents": [
+    "experiment-lead",
+    "methodologist",
+    "result-auditor",
+    "experiment-reporter"
+  ],
+  "packs": [
+    {
+      "id": "experiment-workflow"
+    }
+  ],
+  "runtime": "codex",
+  "workflow": {
+    "external_inputs": [
+      "experiment.yaml",
+      "experiment_brief.md"
+    ],
+    "max_parallel": 2,
+    "run_limits": {
+      "max_active_run_minutes": 10,
+      "on_limit": "pause"
+    },
+    "stages": [
+      {
+        "id": "pin_inputs",
+        "title": "Materialize immutable inputs",
+        "owner": "methodologist",
+        "inputs": [
+          "experiment.yaml"
+        ],
+        "outputs": [
+          "inputs/locks.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "pin-inputs",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Resolve only configured immutable revisions. Do not accept tags, branches, HEAD, or operator placeholders as research evidence."
+        ]
+      },
+      {
+        "id": "experiment_search_plan",
+        "title": "Plan pre-experiment literature recall",
+        "owner": "experiment-lead",
+        "inputs": [
+          "experiment.yaml",
+          "experiment_brief.md",
+          "inputs/locks.json"
+        ],
+        "optional_inputs": [
+          "../writing/project_brief.md"
+        ],
+        "skills": [
+          "experiment.yaml",
+          "experiment_brief.md",
+          "../writing/project_brief.md"
+        ],
+        "instructions": [
+          "Write ONLY agent/search-plan.json. Design bounded scholarly queries that identify prior methods, controls, benchmarks, negative results, and evaluation risks relevant to this experiment objective.",
+          "Schema: {version:1,topic,query_variants:[...],exclusion_terms:[],venue_priorities:[],source_types:[paper|preprint|survey|benchmark|blog],taxonomy_cells:[],rationale}. Use 6-12 distinct query_variants and never invent search results."
+        ],
+        "outputs": [
+          "agent/search-plan.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "experiment_research_context",
+        "title": "Recall and normalize experiment literature",
+        "owner": "source-curator",
+        "inputs": [
+          "agent/search-plan.json",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "agent/literature-context.json",
+          "agent/code-context.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "research-context",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Execute the LLM-authored search plan through LongWrite's deterministic providers and expose a bounded abstract/code dossier. Do not promote repository text into experimental results."
+        ]
+      },
+      {
+        "type": "loop",
+        "id": "experiment_proposal_loop",
+        "title": "Propose and validate the experiment",
+        "max_rounds": 2,
+        "stop_when": "proposal_readiness >= 1",
+        "on_exhaustion": "fail",
+        "stages": [
+          {
+            "id": "propose",
+            "title": "Author a literature-grounded experiment proposal",
+            "owner": "experiment-lead",
+            "inputs": [
+              "experiment.yaml",
+              "experiment_brief.md",
+              "agent/literature-context.json",
+              "agent/code-context.md"
+            ],
+            "optional_inputs": [
+              "agent/proposal-validation.json"
+            ],
+            "skills": [
+              "experiment.yaml",
+              "agent/literature-context.json",
+              "agent/code-context.md",
+              "agent/proposal-validation.json"
+            ],
+            "instructions": [
+              "Write ONLY agent/experiment-proposal.json. Use source ids only from agent/literature-context.json. The approved evaluation metric, direction, baseline, control, seeds, and configured treatment condition names are immutable guardrails; design the hypothesis, method, implementation, and stopping rule within them.",
+              "Schema: {version:1,research_question,hypothesis,rationale,literature_source_ids:[...],primary_metric,direction,baseline_condition,treatment_conditions:[...],control,seeds:[...],implementation_plan:[...],stopping_rule,risks:[...]}. Do not claim results, write code, or increase the budget."
+            ],
+            "outputs": [
+              "agent/experiment-proposal.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "validate",
+            "title": "Validate proposal against the research envelope",
+            "owner": "result-auditor",
+            "inputs": [
+              "agent/experiment-proposal.json",
+              "agent/literature-context.json",
+              "experiment.yaml"
+            ],
+            "outputs": [
+              "agent/proposal-validation.json",
+              "reports/experiment-design.md",
+              "runs/trial-plan.json",
+              "reports/metrics.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "validate-proposal",
+                "."
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "design_approval",
+        "title": "Approve experiment design before code authoring",
+        "owner": "experiment-lead",
+        "inputs": [
+          "agent/validated-proposal.json",
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ],
+        "outputs": [
+          "reports/design-approval.md"
+        ],
+        "requires_human_approval": true,
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "approval",
+            ".",
+            "design"
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "type": "loop",
+        "id": "candidate_revision_loop",
+        "title": "Author, test, and smoke the candidate",
+        "max_rounds": 3,
+        "stop_when": "experiment_readiness >= 1",
+        "on_exhaustion": "fail",
+        "stages": [
+          {
+            "id": "author_candidate",
+            "title": "Author or revise isolated experiment code",
+            "owner": "methodologist",
+            "inputs": [
+              "agent/validated-proposal.json",
+              "agent/code-context.md",
+              "experiment.yaml"
+            ],
+            "optional_inputs": [
+              "agent/candidate-bundle.json",
+              "agent/candidate-test.json",
+              "agent/smoke-results.json",
+              "reports/candidate-materialization.md",
+              "reports/agentic-readiness.md"
+            ],
+            "skills": [
+              "agent/validated-proposal.json",
+              "agent/code-context.md",
+              "agent/candidate-test.json",
+              "agent/smoke-results.json",
+              "reports/agentic-readiness.md"
+            ],
+            "instructions": [
+              "Write ONLY agent/candidate-bundle.json. It must contain the complete current overlay as {version:1,entrypoint:\"maliang_runner.py\",summary,files:[{path,role,content}]}. role is source, test, config, or documentation.",
+              "The entrypoint reads LONGEXPERIMENT_CONDITION, LONGEXPERIMENT_SEED, LONGEXPERIMENT_SMOKE, LONGEXPERIMENT_ARTIFACT_DIR, and LONGEXPERIMENT_PRIMARY_METRIC; its final stdout line must be JSON {metric:<finite number>,artifacts:[workspace-relative paths]}. Include at least one test_*.py unittest. Use prior diagnostics to repair failures without weakening controls or fabricating measurements.",
+              "Do not write outside the JSON bundle, use network credentials, change the pinned evaluation split/metric/seeds, or embed claimed results."
+            ],
+            "outputs": [
+              "agent/candidate-bundle.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "materialize_candidate",
+            "title": "Validate and materialize the candidate bundle",
+            "owner": "methodologist",
+            "inputs": [
+              "agent/candidate-bundle.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "agent/candidate/manifest.json",
+              "reports/candidate-materialization.md"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "materialize-candidate",
+                "."
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ]
+          },
+          {
+            "id": "candidate_execution_approval",
+            "title": "Approve generated code before execution",
+            "owner": "methodologist",
+            "inputs": [
+              "agent/candidate/manifest.json",
+              "reports/candidate-materialization.md"
+            ],
+            "outputs": [
+              "reports/candidate-approval.md"
+            ],
+            "requires_human_approval": true,
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "approval",
+                ".",
+                "candidate"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Review every generated file and execute it only on a dedicated worker or container with no unrelated credentials or data. Path confinement is not an operating-system sandbox."
+            ]
+          },
+          {
+            "id": "test_candidate",
+            "title": "Run bounded candidate tests",
+            "owner": "methodologist",
+            "inputs": [
+              "agent/candidate/manifest.json"
+            ],
+            "outputs": [
+              "agent/candidate-test.json",
+              "logs/agent-candidate-tests.log"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "test-candidate",
+                "."
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ]
+          },
+          {
+            "id": "smoke_candidate",
+            "title": "Run and audit the one-seed smoke comparison",
+            "owner": "result-auditor",
+            "inputs": [
+              "agent/candidate-test.json",
+              "agent/validated-proposal.json"
+            ],
+            "outputs": [
+              "agent/smoke-results.json",
+              "reports/agentic-readiness.md",
+              "reports/metrics.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "smoke-candidate",
+                "."
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "revision_approval",
+        "title": "Approve candidate before full trials",
+        "owner": "methodologist",
+        "inputs": [
+          "agent/candidate/manifest.json",
+          "agent/smoke-results.json",
+          "reports/agentic-readiness.md"
+        ],
+        "outputs": [
+          "reports/revision-approval.md"
+        ],
+        "requires_human_approval": true,
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "approval",
+            ".",
+            "revision"
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "suite_plan",
+        "title": "Materialize approved suite and trial matrix",
+        "owner": "methodologist",
+        "inputs": [
+          "reports/experiment-design.md",
+          "inputs/locks.json",
+          "agent/candidate/manifest.json"
+        ],
+        "outputs": [
+          "runs/suite-plan.json",
+          "runs/study-level-1.json",
+          "runs/study-level-2.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "suite-plan",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_1",
+        "title": "Execute and audit dependency level 1",
+        "foreach": "runs/study-level-1.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "agent/candidate/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "run-agentic-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "instructions": [
+              "Execute only the schema-validated candidate entrypoint materialized under agent/candidate/project. Bind the approved study, conditions, seeds, metric, immutable inputs, and budget from experiment.yaml.",
+              "A candidate process may report measurements and workspace-relative artifacts only; it cannot certify statistics or publication eligibility."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_2",
+        "title": "Execute and audit dependency level 2",
+        "foreach": "runs/study-level-2.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "agent/candidate/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "run-agentic-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "instructions": [
+              "Execute only the schema-validated candidate entrypoint materialized under agent/candidate/project. Bind the approved study, conditions, seeds, metric, immutable inputs, and budget from experiment.yaml.",
+              "A candidate process may report measurements and workspace-relative artifacts only; it cannot certify statistics or publication eligibility."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "aggregate_results",
+        "title": "Aggregate paired study results",
+        "owner": "result-auditor",
+        "inputs": [
+          "runs/suite-plan.json",
+          "inputs/locks.json",
+          "results/studies/*/audit.json"
+        ],
+        "outputs": [
+          "results/raw-results.json"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "aggregate",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."
+        ]
+      },
+      {
+        "id": "audit_results",
+        "title": "Certify result provenance",
+        "owner": "result-auditor",
+        "inputs": [
+          "results/raw-results.json",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "audit",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "interpret_results",
+        "title": "Interpret audited comparisons",
+        "owner": "experiment-lead",
+        "inputs": [
+          "results/raw-results.json",
+          "results/experiment-manifest.json",
+          "agent/validated-proposal.json"
+        ],
+        "skills": [
+          "results/raw-results.json",
+          "agent/validated-proposal.json"
+        ],
+        "instructions": [
+          "Write ONLY agent/result-interpretation.json as {version:1,conclusion,comparison_ids:[...],summary,limitations:[...],follow_up}. conclusion is supported, not_supported, or inconclusive.",
+          "Use only comparison ids and confidence intervals in results/raw-results.json. Respect the configured metric direction. Do not turn a noisy interval, failed control, or untested follow-up into a positive result."
+        ],
+        "outputs": [
+          "agent/result-interpretation.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "validate_result_interpretation",
+        "title": "Validate conclusions against confidence intervals",
+        "owner": "result-auditor",
+        "inputs": [
+          "agent/result-interpretation.json",
+          "results/raw-results.json"
+        ],
+        "outputs": [
+          "agent/result-interpretation-validation.json",
+          "reports/result-interpretation.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "validate-result-interpretation",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      },
+      {
+        "id": "report",
+        "title": "Package result hand-off",
+        "owner": "experiment-reporter",
+        "inputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "outputs": [
+          "reports/experiment-report.md"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "report",
+            "."
+          ]
+        },
+        "validators": [
+          "required_output_exists"
+        ]
+      }
+    ]
+  }
+}
