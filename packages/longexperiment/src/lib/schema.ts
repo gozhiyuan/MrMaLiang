@@ -6,6 +6,43 @@ export { ExperimentManifest, TrialRecord } from "@mr-maliang/research-protocol";
 const ProjectId = z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "must be a slug-like id");
 export const ExperimentProfile = z.enum(["existing_code", "public_benchmark", "from_scratch"]);
 export const ExperimentAuthoringMode = z.enum(["prescribed", "agentic"]);
+
+/**
+ * Which pilot shape an experiment workspace is (LE-1.1).
+ *
+ * The three pilots share one kernel and differ in input source, planning,
+ * allowed mutations, evaluator, promotion policy, stopping rule and report.
+ */
+export const ExperimentPilot = z.enum([
+  "repository_optimization",
+  "survey_pilot_study",
+  "paper_reproduction",
+]);
+export type ExperimentPilot = z.infer<typeof ExperimentPilot>;
+
+/**
+ * How much autonomy this workspace is authorized to exercise (LE-1.2).
+ *
+ * `interactive` is the historical behavior: a human gates design, code and
+ * full runs. `unattended` trades those gates for a config-bound lease plus
+ * ephemeral isolation — never for nothing.
+ *
+ * Deviation from the plan sketch: the interactive variant does not restate
+ * requires_design_approval / requires_code_approval / requires_full_run_approval
+ * as literal(true) fields. Those already exist under `execution`, and copying
+ * them here would create two places to disagree about whether a gate is on.
+ * The invariant is enforced in superRefine against the existing flags instead.
+ */
+export const ExecutionAuthorization = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("interactive") }).strict(),
+  z.object({
+    mode: z.literal("unattended"),
+    /** Workspace-relative path to the signed lease. */
+    lease_path: z.string().min(1),
+    isolation: z.enum(["ephemeral_container", "ephemeral_vm"]),
+  }).strict(),
+]);
+export type ExecutionAuthorization = z.infer<typeof ExecutionAuthorization>;
 export const StudyKind = z.enum(["inference_comparison", "exact_simulation", "training_ablation", "horizon_extension", "parameter_ablation", "heldout_evaluation"]);
 
 const PinnedInput = z.object({
@@ -130,6 +167,11 @@ export const ExperimentConfig = z.object({
     name: z.string().min(1).optional(),
     mode: z.literal("computational_experiment").default("computational_experiment"),
   }).strict(),
+  /** Optional on purpose: legacy workspaces predate pilots and must keep
+   * parsing. New scaffolds require it, and nothing infers a pilot for an old
+   * config — a silent conversion would change how an existing project is
+   * executed without anyone deciding to. */
+  pilot: ExperimentPilot.optional(),
   profile: ExperimentProfile.default("existing_code"),
   authoring: z.discriminatedUnion("mode", [PrescribedAuthoring, AgenticAuthoring]).default({ mode: "prescribed" }),
   hypothesis: z.string().min(1),
@@ -148,6 +190,8 @@ export const ExperimentConfig = z.object({
     /** Explicit candidate revisions are isolated in Git worktrees below
      * worktrees/. A runner receives LONGEXPERIMENT_WORKTREE for its study. */
     candidate_worktrees: z.array(CandidateWorktree).max(20).default([]),
+    /** Autonomy authorization. Absent means interactive. */
+    authorization: ExecutionAuthorization.optional(),
     /** Optional studies never run merely because they are declared. */
     enabled_optional_actions: z.array(z.enum(["extend_horizon", "replicate_condition", "run_parameter_ablation"])).max(3).default([]),
   }).strict().default({ max_trials: 10, max_active_run_minutes: 480, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true, candidate_worktrees: [], enabled_optional_actions: [] }),
@@ -155,6 +199,27 @@ export const ExperimentConfig = z.object({
     longwrite_workspace: z.string().min(1).optional(),
   }).strict().default({}),
 }).strict().superRefine((config, ctx) => {
+  const authorization = config.execution.authorization;
+  if (authorization?.mode === "interactive") {
+    // Interactive means a human gates the expensive steps. Declaring
+    // interactive while the gates are off would be a contradiction that reads
+    // as "supervised" but behaves as unattended.
+    if (!config.execution.requires_design_approval || !config.execution.requires_revision_approval) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom, path: ["execution", "authorization"],
+        message: "interactive authorization requires design and revision approval gates",
+      });
+    }
+  }
+  if (authorization?.mode === "unattended" && config.runner.kind === "command") {
+    // A local command runner executes agent-authored code on the machine
+    // running the control plane. Unattended execution must be isolated.
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom, path: ["execution", "authorization"],
+      message: "unattended authorization requires an isolated runner (modal or autoscientists), not a local command runner",
+    });
+  }
+
   if (config.authoring.mode !== "agentic") return;
   const baseInputId = config.authoring.base_input_id;
   if (!config.evaluation) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["evaluation"], message: "agentic authoring requires a fixed evaluation guardrail" });
