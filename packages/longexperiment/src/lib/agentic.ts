@@ -2,15 +2,15 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { CliResearchProvider } from "@mr-maliang/research-protocol";
 import type { ExperimentConfig as ExperimentConfigType } from "./schema.js";
 import { StudyRawResults } from "./schema.js";
+import { RunnerRequest, legacyRunnerEnvironment, parseRunnerResponse } from "./runner-protocol.js";
 
 const execFile = promisify(execFileCallback);
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const longwriteCli = path.resolve(packageRoot, "..", "longwrite", "dist", "cli.js");
+const researchProvider = new CliResearchProvider();
 
 const AgenticExperimentProposal = z.object({
   version: z.literal(1),
@@ -68,11 +68,6 @@ function candidateProcessEnv(workspace: string, extra: NodeJS.ProcessEnv = {}): 
   return { ...env, ...extra };
 }
 
-async function runLongWrite(args: string[], cwd: string): Promise<void> {
-  await fs.access(longwriteCli).catch(() => { throw new Error("LongWrite is not built; run npm run build before agentic experiment research"); });
-  await execFile(process.execPath, [longwriteCli, ...args], { cwd, env: process.env, maxBuffer: 20 * 1024 * 1024 });
-}
-
 async function selectedCodeFiles(root: string): Promise<string[]> {
   const preferred = new Set(["README", "README.md", "CITATION.cff", "pyproject.toml", "package.json"]);
   const result: string[] = [];
@@ -104,7 +99,7 @@ export async function prepareAgentResearchContextStage(workspace: string, config
   await fs.access(searchPlan);
   await fs.mkdir(path.join(writing, "sources"), { recursive: true });
   await fs.copyFile(searchPlan, path.join(writing, "sources", "search-plan.json"));
-  for (const command of ["recall", "enrich", "score", "classify"] as const) await runLongWrite(["research", command, writing], workspace);
+  for (const command of ["recall", "enrich", "score", "classify"] as const) await researchProvider.run(["research", command, writing], { cwd: workspace });
 
   const rows = (await fs.readFile(path.join(writing, "sources", "classified_sources.jsonl"), "utf8"))
     .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
@@ -262,24 +257,21 @@ export async function testAgentCandidateStage(workspace: string, config: Experim
 }
 
 function metricFromOutput(stdout: string, primaryMetric: string): { metric: number; artifacts: string[] } {
-  const line = stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean).at(-1);
-  if (!line) throw new Error("runner produced no JSON result");
-  const row = JSON.parse(line) as { metric?: unknown; metrics?: Record<string, unknown>; artifacts?: unknown };
-  const value = typeof row.metric === "number" ? row.metric : row.metrics?.[primaryMetric];
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`runner must report finite metric ${primaryMetric}`);
-  if (row.artifacts !== undefined && (!Array.isArray(row.artifacts) || !row.artifacts.every((item) => typeof item === "string"))) throw new Error("runner artifacts must be string paths");
-  return { metric: value, artifacts: (row.artifacts as string[] | undefined) ?? [] };
+  const response = parseRunnerResponse(stdout, primaryMetric);
+  return { metric: response.metrics[primaryMetric], artifacts: response.artifacts };
 }
 
 async function executeCandidate(workspace: string, config: ExperimentConfigType, studyId: string, condition: string, seed: number, smoke: boolean): Promise<{ metric: number; artifacts: string[]; stdout: string }> {
   if (config.authoring.mode !== "agentic" || !config.evaluation) throw new Error("agentic candidate execution requires authoring and evaluation config");
   const project = path.join(workspace, "agent", "candidate", "project");
-  const artifactDir = path.join(workspace, "artifacts", smoke ? "smoke" : "trials", studyId, condition, String(seed));
+  const artifactRel = path.posix.join("artifacts", smoke ? "smoke" : "trials", studyId, condition, String(seed));
+  const artifactDir = path.join(workspace, artifactRel);
   await fs.mkdir(artifactDir, { recursive: true });
   await fs.mkdir(path.join(workspace, "agent", "runtime-home"), { recursive: true });
+  const request = RunnerRequest.parse({ protocol: 1, operation: "run_trial", study_id: studyId, condition, seed, primary_metric: config.evaluation.primary_metric, artifact_dir: artifactRel });
   const result = await execFile("python3", [config.authoring.entrypoint], {
     cwd: project,
-    env: candidateProcessEnv(workspace, { LONGEXPERIMENT_WORKSPACE: workspace, LONGEXPERIMENT_STUDY_ID: studyId, LONGEXPERIMENT_CONDITION: condition, LONGEXPERIMENT_SEED: String(seed), LONGEXPERIMENT_SMOKE: smoke ? "1" : "0", LONGEXPERIMENT_ARTIFACT_DIR: artifactDir, LONGEXPERIMENT_PRIMARY_METRIC: config.evaluation.primary_metric }),
+    env: candidateProcessEnv(workspace, legacyRunnerEnvironment(request, workspace, smoke)),
     maxBuffer: 20 * 1024 * 1024,
   });
   return { ...metricFromOutput(result.stdout, config.evaluation.primary_metric), stdout: `${result.stdout}${result.stderr}` };

@@ -101,6 +101,14 @@ describe("execution authorization (LE-1.2)", () => {
       },
     }))).toThrow(/requires an isolated runner/);
   });
+
+  it("requires generalized agentic pilots to use durable remote compute", () => {
+    expect(() => ExperimentConfig.parse(rawConfig({
+      pilot: "repository_optimization",
+      authoring: { mode: "agentic", base_input_id: "repo" },
+      execution: { max_trials: 8, max_active_run_minutes: 10, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true },
+    }))).toThrow(/require the modal remote-job runner/);
+  });
 });
 
 describe("config hashing", () => {

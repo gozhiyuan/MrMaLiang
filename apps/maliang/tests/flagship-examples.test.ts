@@ -9,14 +9,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const examples = [
   "long-agentic-survey",
   "repository-survey",
-  "nanogpt-agentic-empirical-paper",
+  "nanochat-agentic-empirical-paper",
   "self-play-autonomous-empirical-paper",
 ] as const;
 
 const expectedAxes = {
   "long-agentic-survey": { paperKind: "survey", evidenceProfile: "literature", experimentSource: "none" },
   "repository-survey": { paperKind: "survey", evidenceProfile: "repository", experimentSource: "none" },
-  "nanogpt-agentic-empirical-paper": { paperKind: "empirical", evidenceProfile: "repository", experimentSource: "run", experimentAuthoring: "agentic" },
+  "nanochat-agentic-empirical-paper": { paperKind: "empirical", evidenceProfile: "repository", experimentSource: "run", experimentAuthoring: "agentic" },
   "self-play-autonomous-empirical-paper": { paperKind: "empirical", evidenceProfile: "literature", experimentSource: "run", experimentAuthoring: "agentic" },
 } as const;
 

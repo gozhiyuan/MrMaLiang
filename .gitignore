@@ -5,3 +5,12 @@ coverage/
 .env
 .malaclaw/
 *.log
+
+# Python runner/protocol build and test residue
+__pycache__/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# CI checks the compatible MalaClaw runtime out here; locally it is a symlink.
+.dependencies/

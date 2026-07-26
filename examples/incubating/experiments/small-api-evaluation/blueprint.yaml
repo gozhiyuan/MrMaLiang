@@ -1,0 +1,5 @@
+id: small-api-evaluation
+calls_max: 300
+repetitions: 3
+metric: heldout_accuracy
+label: reduced-scale pilot; not a frontier-model benchmark

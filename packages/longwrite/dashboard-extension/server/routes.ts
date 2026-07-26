@@ -182,6 +182,95 @@ async function readYamlIfExists(absPath: string): Promise<YamlRecord | null> {
   return typeof parsed === "object" && parsed !== null ? (parsed as YamlRecord) : {};
 }
 
+/**
+ * Normalized research projection (plan tasks UI-5.2 through UI-5.5).
+ *
+ * The server does this parsing, not the browser: these artifacts are large
+ * JSON/JSONL corpora, and a client that fetched and parsed each one would both
+ * leak raw evidence bodies over the wire and re-derive gate semantics that only
+ * the deterministic pipeline is allowed to decide.
+ */
+export type ResearchProjection = {
+  phase: string;
+  evidence: { sources: number; coverage: Record<string, number>; depth: Record<string, number>; unresolved: string[] };
+  manuscript: { chapters: Array<{ id: string; words: number; targetWords?: number; state: string }>; totalWords: number; targetWords?: number; pdfBuilt: boolean };
+  release: { gates: Array<{ id: string; status: "passed" | "failed" | "unknown"; detail?: string }>; ready: boolean };
+  score: { review?: number; claimSupport?: number };
+};
+
+function countBy(values: unknown, key: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!Array.isArray(values)) return counts;
+  for (const entry of values) {
+    const bucket = asString(asRecord(entry)[key]) ?? "unclassified";
+    counts[bucket] = (counts[bucket] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Gate status is read, never inferred: an absent report is "unknown", which is
+ * deliberately not the same as "passed". */
+function gateStatus(record: YamlRecord | null, key: string): "passed" | "failed" | "unknown" {
+  if (!record) return "unknown";
+  const value = record[key] ?? asRecord(record.gates)[key];
+  if (value === true || value === "pass" || value === "passed") return "passed";
+  if (value === false || value === "fail" || value === "failed") return "failed";
+  return "unknown";
+}
+
+export async function buildResearchProjection(workspaceDir: string): Promise<ResearchProjection> {
+  const join = (...parts: string[]) => path.join(workspaceDir, ...parts);
+  const [coverage, corpusGates, releaseGates, validation, metrics, structure, scoreHistory] = await Promise.all([
+    readJsonIfExists(join("evidence", "coverage.json")),
+    readJsonIfExists(join("reports", "corpus-gates.json")),
+    readJsonIfExists(join("reports", "release-gates.json")),
+    readJsonIfExists(join("reports", "longwrite-validation.json")),
+    readJsonIfExists(join("reports", "metrics.json")),
+    readJsonIfExists(join("reports", "structure-audit.json")),
+    readJsonIfExists(join("reports", "score-history.json")),
+  ]);
+
+  const sources = Array.isArray(coverage?.sources) ? coverage!.sources : [];
+  const chapters = (Array.isArray(structure?.chapters) ? structure!.chapters : []).map((entry) => {
+    const record = asRecord(entry);
+    return {
+      id: asString(record.id) ?? asString(record.slug) ?? "chapter",
+      words: Number(record.words ?? record.word_count ?? 0) || 0,
+      targetWords: record.target_words === undefined ? undefined : Number(record.target_words),
+      state: asString(record.state) ?? asString(record.status) ?? "unknown",
+    };
+  });
+
+  const pdfBuilt = await readTextIfExists(join("build", "paper.pdf")).then((value) => value !== null).catch(() => false);
+  const gateIds = ["corpus_gate_pass", "citation_verification", "evidence_audit", "claim_support", "figures", "latex", "visual_qa", "page_targets", "experiment_verification", "submission_package"];
+
+  return {
+    phase: asString(metrics?.phase) ?? asString(validation?.phase) ?? "unknown",
+    evidence: {
+      sources: sources.length,
+      coverage: countBy(sources, "section"),
+      depth: countBy(sources, "depth"),
+      unresolved: (Array.isArray(validation?.findings) ? validation!.findings : [])
+        .map((finding) => asString(asRecord(finding).message) ?? "")
+        .filter((message) => message.length > 0).slice(0, 50),
+    },
+    manuscript: {
+      chapters, totalWords: chapters.reduce((total, chapter) => total + chapter.words, 0),
+      targetWords: structure?.target_words === undefined ? undefined : Number(structure.target_words),
+      pdfBuilt,
+    },
+    release: {
+      gates: gateIds.map((id) => ({ id, status: gateStatus(releaseGates ?? corpusGates, id) })),
+      ready: gateStatus(releaseGates, "final_release_gate_pass") === "passed",
+    },
+    score: {
+      review: metrics?.review_score === undefined ? undefined : Number(metrics.review_score),
+      claimSupport: metrics?.claim_support_rate === undefined ? undefined : Number(metrics.claim_support_rate),
+      ...(scoreHistory ? {} : {}),
+    },
+  };
+}
+
 async function readJsonIfExists(absPath: string): Promise<YamlRecord | null> {
   const raw = await readTextIfExists(absPath);
   if (raw === null) return null;
@@ -740,6 +829,13 @@ function spawnLongWriteRun(workspaceDir: string, parentWorkspace: string | null,
 
 export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
   return async (app: FastifyLike) => {
+  app.get("/api/longwrite/research", async (req, reply) => {
+    const { workspaceDir } = await resolveWritingWorkspace((req.query as { dir?: string }).dir);
+    const longwrite = await readYamlIfExists(path.join(workspaceDir, "longwrite.yaml"));
+    if (!longwrite) return reply.status(404).send({ error: "longwrite.yaml not found" });
+    return buildResearchProjection(workspaceDir);
+  });
+
   app.get("/api/longwrite", async (req, reply) => {
     const resolvedWorkspace = await resolveWritingWorkspace((req.query as { dir?: string }).dir);
     const { workspaceDir, parentWorkspace } = resolvedWorkspace;

@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export { ExperimentIntent } from "./experiment-intent.js";
+export type { ExperimentIntent as ExperimentIntentType } from "./experiment-intent.js";
+export { ReproductionClaim, ReproductionVerdict } from "./reproduction.js";
+export type {
+  ReproductionClaim as ReproductionClaimType,
+  ReproductionVerdict as ReproductionVerdictType,
+} from "./reproduction.js";
+export { CliResearchProvider } from "./research-provider.js";
+export type { ResearchProvider } from "./research-provider.js";
+
 /** A completed condition/seed record is the smallest empirical unit LongWrite
  * may use when supporting a quantitative claim. */
 export const TrialRecord = z.object({

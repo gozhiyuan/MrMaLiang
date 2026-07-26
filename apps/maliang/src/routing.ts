@@ -34,6 +34,10 @@ function inspect(commandPath: string[], components: readonly Component[] = writi
 export const ROUTING_REGISTRY: readonly VerbContract[] = [
   shared(["sync"]),
   x(["validate"]),
+  x(["authorize"]),
+  x(["lineage"]),
+  x(["champion"]),
+  x(["dead-ends"]),
   w(["validate", "config"]),
   w(["validate", "research"]),
   w(["validate", "figures"]),

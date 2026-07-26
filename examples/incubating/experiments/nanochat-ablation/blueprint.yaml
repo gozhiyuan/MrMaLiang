@@ -1,0 +1,20 @@
+version: 1
+id: nanochat-ablation
+template: experiment.nanochat-ablation
+components: [experiment]
+source_config: packages/longexperiment/configs/flagships/nanochat_ablation.yaml
+required_setup:
+  - Node.js 22 or newer
+  - pinned Nanochat checkout and dataset preparation
+  - approved candidate worktree revision
+  - local CUDA or a reviewed remote-job adapter
+smoke_controls:
+  environment:
+    LONGEXPERIMENT_NANOCHAT_COMMAND: "reviewed pinned Nanochat launcher that ends in a JSON metric record"
+    LONGEXPERIMENT_NANOCHAT_MAX_ITERS: "optional small positive iteration limit honored by that launcher"
+  trials: one seed before the declared multi-seed pilot
+expected_artifacts:
+  - experiment/results/trials.jsonl
+  - experiment/results/experiment-manifest.json
+  - experiment/reports/experiment-audit.json
+  - experiment/reports/run-provenance.json

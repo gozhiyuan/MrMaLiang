@@ -49,11 +49,12 @@ async function seedClassified(ws: string): Promise<void> {
 }
 
 describe("deterministic backend sources", () => {
-  it("emits a pipeline mermaid diagram and a matplotlib script", () => {
+  it("emits a pipeline Mermaid diagram and copies the versioned matplotlib module", () => {
     expect(researchPipelineMermaid()).toContain("flowchart LR");
     expect(researchPipelineMermaid()).toContain("Quality loop");
     expect(sourceYearsPlotScript()).toContain("matplotlib");
     expect(sourceYearsPlotScript()).toContain("source-years.csv");
+    expect(sourceYearsPlotScript()).toContain("def main() -> None:");
   });
 });
 

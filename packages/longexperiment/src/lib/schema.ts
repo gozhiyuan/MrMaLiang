@@ -45,6 +45,23 @@ export const ExecutionAuthorization = z.discriminatedUnion("mode", [
 export type ExecutionAuthorization = z.infer<typeof ExecutionAuthorization>;
 export const StudyKind = z.enum(["inference_comparison", "exact_simulation", "training_ablation", "horizon_extension", "parameter_ablation", "heldout_evaluation"]);
 
+/**
+ * Bounds on the generalized research loop (LE-4.3).
+ *
+ * Every field is a hard ceiling, not a target. The loop compiles to a MalaClaw
+ * bounded loop, so exhausting `max_rounds` is a normal, durable outcome rather
+ * than a failure — the search stops and the last certified champion stands.
+ */
+export const ResearchLoopPolicy = z.object({
+  max_rounds: z.number().int().min(1).max(50).default(8),
+  max_candidates_per_round: z.number().int().min(1).max(16).default(3),
+  /** Consecutive rounds without a promotion before the search stops. */
+  max_stagnant_rounds: z.number().int().min(1).max(10).default(2),
+  /** Promotion must clear this much improvement, in primary-metric units. */
+  minimum_improvement: z.number().nonnegative().default(0),
+}).strict();
+export type ResearchLoopPolicy = z.infer<typeof ResearchLoopPolicy>;
+
 const PinnedInput = z.object({
   id: z.string().min(1).regex(/^[a-z][a-z0-9_-]*$/),
   source: z.string().url(),
@@ -129,6 +146,8 @@ export const ModalRunner = z.object({
   gpu: z.string().min(1),
   max_gpu_hours: z.number().positive(),
   environment: z.string().min(1).optional(),
+  /** Versioned shared runtime from templates/adapters/modal/runtime-catalog.yaml. */
+  runtime_profile: z.string().regex(/^[a-z][a-z0-9-]*$/).optional(),
   /** Workspace-owned adapter implementing MalaClaw's submit/status/collect/
    * cancel JSON protocol. It is explicit so provider credentials and command
    * semantics never leak into the paper or generic runtime. */
@@ -195,6 +214,11 @@ export const ExperimentConfig = z.object({
     /** Optional studies never run merely because they are declared. */
     enabled_optional_actions: z.array(z.enum(["extend_horizon", "replicate_condition", "run_parameter_ablation"])).max(3).default([]),
   }).strict().default({ max_trials: 10, max_active_run_minutes: 480, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true, candidate_worktrees: [], enabled_optional_actions: [] }),
+  /** Opt in to the generalized multi-round search. Absent means the workspace
+   * keeps its single-candidate pipeline — declaring a pilot alone never
+   * converts an existing experiment into a search, because that would change
+   * how a configured project executes without anyone deciding to. */
+  research: ResearchLoopPolicy.optional(),
   outputs: z.object({
     longwrite_workspace: z.string().min(1).optional(),
   }).strict().default({}),
@@ -220,11 +244,33 @@ export const ExperimentConfig = z.object({
     });
   }
 
+  // The search loop is defined by profile hooks that are keyed on the pilot, so
+  // there is no coherent way to run one without knowing which pilot it is.
+  if (config.research && !config.pilot) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["research"], message: "the generalized research loop requires an explicit experiment pilot" });
+  }
+
+  // New generalized agentic pilots execute generated code through the durable
+  // remote-job lifecycle. Legacy pre-pilot workspaces remain parseable during
+  // migration, but cannot silently opt into the generalized research loop.
+  if (config.pilot && config.authoring.mode === "agentic" && config.runner.kind !== "modal") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom, path: ["runner"],
+      message: "generalized agentic pilots require the modal remote-job runner",
+    });
+  }
+
   if (config.authoring.mode !== "agentic") return;
   const baseInputId = config.authoring.base_input_id;
   if (!config.evaluation) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["evaluation"], message: "agentic authoring requires a fixed evaluation guardrail" });
   if (!config.suite) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["suite"], message: "agentic authoring requires a bounded suite envelope" });
-  if (!config.execution.requires_design_approval || !config.execution.requires_revision_approval) {
+  // A valid unattended lease IS the authorization: it is a human's explicit,
+  // config-bound, budget-capped grant issued before the run. Demanding
+  // per-round approval on top of it would make unattended search impossible,
+  // which is the whole point of the lease. Interactive mode still requires the
+  // gates — that contradiction is caught above.
+  if (config.execution.authorization?.mode !== "unattended"
+    && (!config.execution.requires_design_approval || !config.execution.requires_revision_approval)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["execution"], message: "agentic authoring requires design and revision approval guardrails" });
   }
   if (config.profile === "from_scratch" && baseInputId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["authoring", "base_input_id"], message: "from_scratch authoring cannot name a base code input" });

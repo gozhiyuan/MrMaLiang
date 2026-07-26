@@ -20,6 +20,7 @@
     "skills/",
     "configs/",
     "templates/",
+    "python/",
     "dashboard-extension/",
     "README.md",
     "LICENSE"
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.5.4",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "malaclaw": "file:../../.dependencies/MalaClaw"
   }
 }

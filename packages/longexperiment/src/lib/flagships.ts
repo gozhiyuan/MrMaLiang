@@ -2,7 +2,7 @@ import type { ExperimentConfig } from "./schema.js";
 
 /** Flagship IDs are declarative packs. Their configs may pin different source
  * revisions, but all compile through the same suite/study/runner modules. */
-export const FLAGSHIP_IDS = ["self_play_small_model", "nanogpt_ablation", "proteingym_autoscientists"] as const;
+export const FLAGSHIP_IDS = ["self_play_small_model", "nanochat_ablation", "proteingym_autoscientists"] as const;
 export type FlagshipId = typeof FLAGSHIP_IDS[number];
 
 /** This is deliberately stricter than a runner's self-report. The caller has

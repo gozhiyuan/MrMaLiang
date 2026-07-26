@@ -41,6 +41,11 @@ state for this project. The existing LongWrite evidence, drafting, review, and
 release scripts remain the implementation for this combination; adding the
 orthogonal axes does not fork or duplicate the survey pipeline.
 
+This blueprint already selects `paper.survey`; no migration to a new template
+or LongExperiment profile is needed. See [flagship platform
+adoption](./platform-adoption.md) for the boundary between survey workflows and
+incubating generalized experiment profiles.
+
 ## Workflow at a glance
 
 This is LongWrite's implementation, not a diagram of AutoResearch V2's private

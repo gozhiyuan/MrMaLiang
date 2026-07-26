@@ -21,10 +21,10 @@ templates:
     description: Audited experiment suite without a manuscript.
     experiment: {}
     handoff: none
-  - id: experiment.nanogpt-ablation
-    title: nanoGPT ablation
-    description: Pinned nanoGPT experiment flagship.
-    experiment: { flagship: nanogpt_ablation }
+  - id: experiment.nanochat-ablation
+    title: Nanochat ablation
+    description: Pinned Nanochat experiment flagship.
+    experiment: { flagship: nanochat_ablation }
     handoff: none
   - id: experiment.self-play-small-model
     title: Small-model self-play

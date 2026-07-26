@@ -21,12 +21,25 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Pin the interpreter that `npm test` shells out to. The bootstrap parity
+      # test compares Python against the TypeScript auditor bit-for-bit, and
+      # CPython changed float `sum()` to compensated summation in 3.12 — so the
+      # guard is only meaningful on >=3.12. An unpinned runner would silently
+      # move that boundary. See packages/longexperiment/tests/statistics-parity.test.ts.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build MalaClaw runtime
         run: |
           npm ci --prefix .dependencies/MalaClaw
           npm run build --prefix .dependencies/MalaClaw
       - run: npm ci
       - run: npm run build
+      # Stdlib unittest only — the experiment runner protocol deliberately has
+      # no third-party dependencies so a candidate image can execute it.
+      - name: Test LongExperiment Python runner protocol
+        working-directory: packages/longexperiment/python
+        run: python -m unittest discover -s tests -v
       - name: Test MrMaLiang with its pinned MalaClaw runtime
         run: npm test
         env:

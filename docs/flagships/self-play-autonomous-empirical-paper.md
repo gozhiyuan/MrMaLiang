@@ -20,6 +20,12 @@ benchmark and model revision, and fixes exact-match maximization, the no-self-pl
 baseline, the treatment name, held-out split, controls, three seeds,
 paired-bootstrap analysis, approvals, and an eight-trial ceiling.
 
+The blueprint already selects `paper.empirical`; do not replace it with an
+`experiment.*` template. It uses the generalized `survey_pilot_study` profile,
+remote-job execution, and a config-bound authorization lease. See [flagship
+platform adoption](./platform-adoption.md) before changing `pilot`, `runner`,
+or authorization settings.
+
 ## Exact workflow
 
 ```mermaid
@@ -64,24 +70,30 @@ This flagship additionally needs:
 - Python and a tested environment for the pinned model and benchmark;
 - access to the externally pinned model revision;
 - an authenticated Codex or Claude Code runtime;
-- sufficient local compute for the candidate smoke and frozen trial suite; and
+- a Modal account and a reviewed adapter for the candidate smoke and frozen trial suite; and
 - an operator-approved compute and data-use policy.
 
-The current agent-authored entrypoint executes on the MalaClaw worker host. Path
-validation is not an OS sandbox: use a dedicated worker/container without
-unrelated credentials or data, and review every generated file before approving
-execution. Generated processes receive a workspace-local `HOME` and only an
-allowlisted Python/CUDA/cache environment; API/provider credentials are not
-inherited. A Modal account is not required and merely configuring one does not
-remote this workflow. Remote execution must later use a reviewed adapter that
-preserves submit/status/collect/cancel, the same immutable candidate, and the
-same result contract.
+The control plane validates and materializes the candidate, but candidate tests,
+the smoke comparison, and frozen trials execute only through the Modal
+remote-job adapter. Path validation is not an OS sandbox: review the adapter
+and every generated file before approving execution. The scaffolded adapter
+fails closed until it is replaced with a reviewed submit/status/collect/cancel
+implementation.
 
 ## 2. Initialize and inspect the envelope
 
 ```bash
 maliang init self-play-agentic-paper \
   --blueprint self-play-autonomous-empirical-paper
+
+# Verify the copied, workspace-owned Modal adapter without spending GPU time.
+(cd self-play-agentic-paper/experiment && uv sync --project templates/adapters/modal --python 3.12)
+(cd self-play-agentic-paper/experiment && uv run --project templates/adapters/modal python -m unittest discover -s templates/adapters/modal/tests -v)
+
+# Then issue a lease bound to this exact experiment.yaml.
+maliang experiment authorize self-play-agentic-paper \
+  --unattended --max-trials 8 --max-gpu-hours 24 --max-wall-hours 24 \
+  --expires-in 24 --approved-by <operator-id> --yes
 
 maliang preflight self-play-agentic-paper --runtime codex
 maliang status self-play-agentic-paper
@@ -122,7 +134,7 @@ missing `maliang_runner.py`, or missing `test_*.py`. The isolated project is
 compiled and unit-tested only after a human releases its execution gate.
 
 The entrypoint receives the same `LONGEXPERIMENT_*` interface documented in the
-[nanoGPT flagship](./nanogpt-agentic-empirical-paper.md#4-approve-generated-code-then-review-smoke-evidence)
+[Nanochat flagship](./nanochat-agentic-empirical-paper.md#4-approve-generated-code-then-review-smoke-evidence)
 and must return only measured numeric output plus existing workspace-relative
 artifacts.
 

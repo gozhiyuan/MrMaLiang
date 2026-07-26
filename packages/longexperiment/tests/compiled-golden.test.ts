@@ -211,6 +211,29 @@ describe("golden experiment manifests keep their scientific structure", () => {
     expect(flat).not.toMatch(/MODAL_TOKEN|api[_-]?key|secret/i);
   });
 
+  it("keeps every agentic execution phase off the control-plane host for generalized Modal pilots", () => {
+    const modalPilot = baseConfig({
+      pilot: "repository_optimization",
+      authoring: { mode: "agentic", base_input_id: "repo" },
+      runner: { kind: "modal", app_path: "adapters/modal/adapter.py", function_ref: "run", gpu: "A10G", max_gpu_hours: 4, adapter_command: "python3 adapters/modal/adapter.py" },
+      execution: {
+        max_trials: 8, max_active_run_minutes: 10, max_parallel_trials: 1,
+        requires_design_approval: true, requires_revision_approval: true,
+        authorization: { mode: "unattended", lease_path: ".longexperiment/authorization.json", isolation: "ephemeral_container" },
+      },
+    });
+    const stages = stagesOf(modalPilot);
+    const serialized = JSON.stringify(stages);
+    expect(serialized).toContain("assert_authorization");
+    expect(serialized).toContain("LONGEXPERIMENT_REMOTE_PHASE='candidate_test'");
+    expect(serialized).toContain("LONGEXPERIMENT_REMOTE_PHASE='candidate_smoke'");
+    expect(serialized).toContain("LONGEXPERIMENT_REMOTE_PHASE='study'");
+    const candidateLoop = stages.find((stage) => stage.id === "candidate_revision_loop")!;
+    const nested = candidateLoop.stages as Array<{ id: string; runtime?: string }>;
+    expect(nested.find((stage) => stage.id === "test_candidate")?.runtime).toBe("remote-job");
+    expect(nested.find((stage) => stage.id === "smoke_candidate")?.runtime).toBe("remote-job");
+  });
+
   it("normalizes machine-specific paths out of the fixtures", () => {
     const flat = JSON.stringify(normalize(compileExperimentToManifest(baseConfig())));
     expect(flat).not.toContain(process.execPath);

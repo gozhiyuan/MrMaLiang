@@ -1,0 +1,22 @@
+version: 1
+# Maintained platform runtimes. Contributors select a profile through a
+# template; they do not publish container images for individual experiments.
+profiles:
+  gpu-base-v1:
+    base_image: pytorch/pytorch@sha256:7b324d212a4450795b49edba9949b7cdc72429148a64e974334bfe5774d51385
+    python_packages: [PyYAML==6.0.2]
+  nanochat-gpu-v1:
+    extends: gpu-base-v1
+    source:
+      repository: https://github.com/karpathy/nanochat.git
+      revision: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd
+    system_packages: [git]
+    python_packages: [uv==0.6.14]
+    commands:
+      - git clone --no-checkout https://github.com/karpathy/nanochat.git /opt/nanochat
+      - git -C /opt/nanochat checkout --detach 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd
+      - test "$(git -C /opt/nanochat rev-parse HEAD)" = "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
+      - uv sync --project /opt/nanochat --extra gpu --frozen
+      - uv pip install --python /opt/nanochat/.venv/bin/python PyYAML==6.0.2
+    environment:
+      PATH: /opt/nanochat/.venv/bin:${PATH}

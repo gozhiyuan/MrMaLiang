@@ -1,0 +1,56 @@
+version: 1
+project: { id: nanochat-agentic-empirical, name: Nanochat Agentic Empirical Paper }
+pilot: repository_optimization
+profile: existing_code
+authoring:
+  mode: agentic
+  base_input_id: nanochat
+  language: python
+  entrypoint: maliang_runner.py
+  max_revision_rounds: 3
+  max_files: 30
+  max_file_bytes: 80000
+  require_tests: true
+  require_literature_context: true
+hypothesis: "Within a fixed Nanochat training and evaluation budget, a literature-grounded agent-authored intervention can be evaluated reproducibly against the pinned baseline."
+research_question: "Which bounded Nanochat intervention is best justified by prior work and survives controlled multi-seed evaluation?"
+inputs:
+  code:
+    - { id: nanochat, source: https://github.com/karpathy/nanochat.git, revision: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd, license: MIT }
+evaluation:
+  primary_metric: validation_bits_per_byte
+  direction: minimize
+  baseline_id: pinned-baseline
+  control: "fixed Nanochat commit, tokenizer/data snapshots, depth, training steps, batch settings, evaluator, and hardware class"
+  seeds: [11, 23, 47]
+  statistical_test: "paired bootstrap confidence interval"
+  heldout_split: validation
+suite:
+  id: nanochat-agentic-study
+  max_rounds: 3
+  studies:
+    - id: primary
+      kind: training_ablation
+      conditions: [pinned-baseline, agent-candidate]
+      acceptance_criteria:
+        - "execute baseline and agent candidate under identical controls for every seed"
+        - "report validation bits per byte and a paired confidence interval without selecting seeds post hoc"
+runner:
+  kind: modal
+  app_path: templates/adapters/modal/agentic_adapter.py
+  function_ref: modal_sandbox.run_phase
+  gpu: A10G
+  runtime_profile: nanochat-gpu-v1
+  max_gpu_hours: 12
+  adapter_command: uv run --project templates/adapters/modal python templates/adapters/modal/agentic_adapter.py
+execution:
+  max_trials: 8
+  max_active_run_minutes: 1440
+  max_recorded_tokens: 2000000
+  max_parallel_trials: 1
+  requires_design_approval: true
+  requires_revision_approval: true
+  authorization: { mode: unattended, lease_path: .longexperiment/authorization.json, isolation: ephemeral_container }
+  candidate_worktrees: []
+  enabled_optional_actions: []
+outputs: {}

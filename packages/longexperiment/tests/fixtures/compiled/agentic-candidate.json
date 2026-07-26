@@ -29,15 +29,21 @@
     "stages": [
       {
         "id": "pin_inputs",
-        "title": "Materialize immutable inputs",
         "owner": "methodologist",
+        "runtime": "script",
+        "title": "Materialize immutable inputs",
         "inputs": [
           "experiment.yaml"
         ],
         "outputs": [
           "inputs/locks.json"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Resolve only configured immutable revisions. Do not accept tags, branches, HEAD, or operator placeholders as research evidence."
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -46,18 +52,12 @@
             "pin-inputs",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ],
-        "instructions": [
-          "Resolve only configured immutable revisions. Do not accept tags, branches, HEAD, or operator placeholders as research evidence."
-        ]
+        }
       },
       {
         "id": "experiment_search_plan",
-        "title": "Plan pre-experiment literature recall",
         "owner": "experiment-lead",
+        "title": "Plan pre-experiment literature recall",
         "inputs": [
           "experiment.yaml",
           "experiment_brief.md",
@@ -87,8 +87,9 @@
       },
       {
         "id": "experiment_research_context",
-        "title": "Recall and normalize experiment literature",
         "owner": "source-curator",
+        "runtime": "script",
+        "title": "Recall and normalize experiment literature",
         "inputs": [
           "agent/search-plan.json",
           "inputs/locks.json"
@@ -97,7 +98,12 @@
           "agent/literature-context.json",
           "agent/code-context.md"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Execute the LLM-authored search plan through LongWrite's deterministic providers and expose a bounded abstract/code dossier. Do not promote repository text into experimental results."
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -106,13 +112,7 @@
             "research-context",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ],
-        "instructions": [
-          "Execute the LLM-authored search plan through LongWrite's deterministic providers and expose a bounded abstract/code dossier. Do not promote repository text into experimental results."
-        ]
+        }
       },
       {
         "type": "loop",
@@ -124,8 +124,8 @@
         "stages": [
           {
             "id": "propose",
-            "title": "Author a literature-grounded experiment proposal",
             "owner": "experiment-lead",
+            "title": "Author a literature-grounded experiment proposal",
             "inputs": [
               "experiment.yaml",
               "experiment_brief.md",
@@ -157,8 +157,9 @@
           },
           {
             "id": "validate",
-            "title": "Validate proposal against the research envelope",
             "owner": "result-auditor",
+            "runtime": "script",
+            "title": "Validate proposal against the research envelope",
             "inputs": [
               "agent/experiment-proposal.json",
               "agent/literature-context.json",
@@ -170,7 +171,9 @@
               "runs/trial-plan.json",
               "reports/metrics.json"
             ],
-            "runtime": "script",
+            "validators": [
+              "required_output_exists"
+            ],
             "command": {
               "cmd": "<node>",
               "args": [
@@ -179,17 +182,15 @@
                 "validate-proposal",
                 "."
               ]
-            },
-            "validators": [
-              "required_output_exists"
-            ]
+            }
           }
         ]
       },
       {
         "id": "design_approval",
-        "title": "Approve experiment design before code authoring",
         "owner": "experiment-lead",
+        "runtime": "script",
+        "title": "Approve experiment design before code authoring",
         "inputs": [
           "agent/validated-proposal.json",
           "reports/experiment-design.md",
@@ -199,7 +200,9 @@
           "reports/design-approval.md"
         ],
         "requires_human_approval": true,
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -209,10 +212,7 @@
             ".",
             "design"
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       },
       {
         "type": "loop",
@@ -224,8 +224,8 @@
         "stages": [
           {
             "id": "author_candidate",
-            "title": "Author or revise isolated experiment code",
             "owner": "methodologist",
+            "title": "Author or revise isolated experiment code",
             "inputs": [
               "agent/validated-proposal.json",
               "agent/code-context.md",
@@ -262,8 +262,9 @@
           },
           {
             "id": "materialize_candidate",
-            "title": "Validate and materialize the candidate bundle",
             "owner": "methodologist",
+            "runtime": "script",
+            "title": "Validate and materialize the candidate bundle",
             "inputs": [
               "agent/candidate-bundle.json",
               "inputs/locks.json"
@@ -272,7 +273,9 @@
               "agent/candidate/manifest.json",
               "reports/candidate-materialization.md"
             ],
-            "runtime": "script",
+            "validators": [
+              "required_output_exists"
+            ],
             "command": {
               "cmd": "<node>",
               "args": [
@@ -281,15 +284,13 @@
                 "materialize-candidate",
                 "."
               ]
-            },
-            "validators": [
-              "required_output_exists"
-            ]
+            }
           },
           {
             "id": "candidate_execution_approval",
-            "title": "Approve generated code before execution",
             "owner": "methodologist",
+            "runtime": "script",
+            "title": "Approve generated code before execution",
             "inputs": [
               "agent/candidate/manifest.json",
               "reports/candidate-materialization.md"
@@ -298,7 +299,12 @@
               "reports/candidate-approval.md"
             ],
             "requires_human_approval": true,
-            "runtime": "script",
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Review every generated file and execute it only on a dedicated worker or container with no unrelated credentials or data. Path confinement is not an operating-system sandbox."
+            ],
             "command": {
               "cmd": "<node>",
               "args": [
@@ -308,13 +314,7 @@
                 ".",
                 "candidate"
               ]
-            },
-            "validators": [
-              "required_output_exists"
-            ],
-            "instructions": [
-              "Review every generated file and execute it only on a dedicated worker or container with no unrelated credentials or data. Path confinement is not an operating-system sandbox."
-            ]
+            }
           },
           {
             "id": "test_candidate",
@@ -372,8 +372,9 @@
       },
       {
         "id": "revision_approval",
-        "title": "Approve candidate before full trials",
         "owner": "methodologist",
+        "runtime": "script",
+        "title": "Approve candidate before full trials",
         "inputs": [
           "agent/candidate/manifest.json",
           "agent/smoke-results.json",
@@ -383,7 +384,9 @@
           "reports/revision-approval.md"
         ],
         "requires_human_approval": true,
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -393,15 +396,13 @@
             ".",
             "revision"
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       },
       {
         "id": "suite_plan",
-        "title": "Materialize approved suite and trial matrix",
         "owner": "methodologist",
+        "runtime": "script",
+        "title": "Materialize approved suite and trial matrix",
         "inputs": [
           "reports/experiment-design.md",
           "inputs/locks.json",
@@ -412,7 +413,9 @@
           "runs/study-level-1.json",
           "runs/study-level-2.json"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -421,10 +424,7 @@
             "suite-plan",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       },
       {
         "type": "foreach",
@@ -566,8 +566,9 @@
       },
       {
         "id": "aggregate_results",
-        "title": "Aggregate paired study results",
         "owner": "result-auditor",
+        "runtime": "script",
+        "title": "Aggregate paired study results",
         "inputs": [
           "runs/suite-plan.json",
           "inputs/locks.json",
@@ -576,7 +577,12 @@
         "outputs": [
           "results/raw-results.json"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -585,18 +591,13 @@
             "aggregate",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ],
-        "instructions": [
-          "Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."
-        ]
+        }
       },
       {
         "id": "audit_results",
-        "title": "Certify result provenance",
         "owner": "result-auditor",
+        "runtime": "script",
+        "title": "Certify result provenance",
         "inputs": [
           "results/raw-results.json",
           "inputs/locks.json"
@@ -605,7 +606,9 @@
           "results/experiment-manifest.json",
           "reports/result-audit.md"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -614,15 +617,12 @@
             "audit",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       },
       {
         "id": "interpret_results",
-        "title": "Interpret audited comparisons",
         "owner": "experiment-lead",
+        "title": "Interpret audited comparisons",
         "inputs": [
           "results/raw-results.json",
           "results/experiment-manifest.json",
@@ -648,8 +648,9 @@
       },
       {
         "id": "validate_result_interpretation",
-        "title": "Validate conclusions against confidence intervals",
         "owner": "result-auditor",
+        "runtime": "script",
+        "title": "Validate conclusions against confidence intervals",
         "inputs": [
           "agent/result-interpretation.json",
           "results/raw-results.json"
@@ -658,7 +659,9 @@
           "agent/result-interpretation-validation.json",
           "reports/result-interpretation.md"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -667,15 +670,13 @@
             "validate-result-interpretation",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       },
       {
         "id": "report",
-        "title": "Package result hand-off",
         "owner": "experiment-reporter",
+        "runtime": "script",
+        "title": "Package result hand-off",
         "inputs": [
           "results/experiment-manifest.json",
           "reports/result-audit.md"
@@ -683,7 +684,9 @@
         "outputs": [
           "reports/experiment-report.md"
         ],
-        "runtime": "script",
+        "validators": [
+          "required_output_exists"
+        ],
         "command": {
           "cmd": "<node>",
           "args": [
@@ -692,10 +695,7 @@
             "report",
             "."
           ]
-        },
-        "validators": [
-          "required_output_exists"
-        ]
+        }
       }
     ]
   }

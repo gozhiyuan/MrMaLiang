@@ -17,10 +17,10 @@ For a real experiment-backed paper, the required sequence is:
 7. Review candidate tests and one-seed smoke output, then separately approve full trials.
 8. Inspect the result audit, then rerun `maliang run` to perform the verified handoff and start manuscript work.
 
-The nanoGPT and self-play empirical-paper blueprints are executable agentic
+The Nanochat and self-play empirical-paper blueprints are executable agentic
 release candidates, not precomputed demonstrations. Their real results require
 the documented inputs, local executor environment, approvals, and compute. The
-older prescribed nanoGPT, self-play, and ProteinGym protocols remain incubating
+older prescribed Nanochat, self-play, and ProteinGym protocols remain incubating
 contract examples. A successful dry-run, fake-runner test, or scaffold is never
 presented as a scientific result.
 
@@ -30,7 +30,7 @@ presented as a scientific result.
 | --- | --- | --- |
 | Long survey | Node 22, MalaClaw, selected writing/research runtime, LaTeX/PDF tools | `GITHUB_TOKEN` for higher GitHub discovery limits |
 | Repository survey | Survey requirements, Git, reachable pinned repository, license/attribution review | `GITHUB_TOKEN` for discovery or private repository access |
-| nanoGPT agentic paper | Python/PyTorch, pinned nanoGPT/data inputs, design, code-execution, and full-trial approvals | Dedicated local CUDA worker/container; agentic remote execution is not automatic |
+| Nanochat agentic paper | Python/PyTorch, pinned Nanochat commit, reviewed tokenizer/data snapshots and GPU image, design, code-execution, and full-trial approvals | Reviewed Modal Sandbox adapter or a dedicated local CUDA worker/container |
 | Self-play agentic paper | Python/model access, fixed prompts/evaluator/heldout split, design, code-execution, and full-trial approvals | Dedicated local CUDA worker/container; model/API costs must be separately budgeted |
 | Prescribed ProteinGym/AutoScientists | Pinned inputs, reviewed launcher, assay/data access | Reviewed Modal adapter and upstream AutoScientists credentials |
 
