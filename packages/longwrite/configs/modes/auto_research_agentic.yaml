@@ -9,7 +9,6 @@ artifact_type: research_paper
 default_workflow_profile: deep
 default_runtime:
   executor: malaclaw
-  agent_runtime: codex
 default_agents:
   - research-lead
   - source-curator

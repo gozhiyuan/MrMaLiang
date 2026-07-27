@@ -18,13 +18,10 @@ export const LongWriteModeDef = z
     default_runtime: z
       .object({
         executor: z.string().default("malaclaw"),
-        agent_runtime: z.enum(["openclaw", "claude-code", "codex", "clawteam"]).default("codex"),
       })
       .strict()
       .default({}),
     default_agents: z.array(z.string()).default([]),
-    pack: z.string().default("manuscript-writing"),
-    entry_team: z.string().default("manuscript-writing"),
     artifacts: z
       .object({
         required: z.array(z.string()).default([]),

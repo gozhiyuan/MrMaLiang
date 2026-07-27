@@ -14,6 +14,8 @@ export function runtimeProfilesDir(): string {
   return process.env.LONGWRITE_RUNTIME_PROFILES_DIR ?? path.join(packageRoot(), "configs", "runtime-profiles");
 }
 
-export function templatesDir(): string {
-  return process.env.LONGWRITE_TEMPLATES_DIR ?? path.join(packageRoot(), "templates");
+/** LongWrite-owned role profiles. These are prompt context, not MalaClaw
+ * provisioner templates and are never copied as an installable catalog. */
+export function roleProfilesDir(): string {
+  return process.env.LONGWRITE_ROLE_PROFILES_DIR ?? path.join(packageRoot(), "role-profiles");
 }

@@ -10,7 +10,7 @@ describe("LongWrite workflow modules (MM-4.2)", () => {
     const stages = LONGWRITE_WORKFLOW_MODULES.flatMap((module) =>
       useModule(module, { config: { cli } as never }));
 
-    const manifest = defineWorkflow({ id: "module-smoke", stages }).manifest({ runtime: "openclaw" });
+    const manifest = defineWorkflow({ id: "module-smoke", stages }).manifest();
     // The engine must not be able to tell a module-produced stage from a
     // hand-written one: it parses as an ordinary manifest or not at all.
     expect(() => Manifest.parse(manifest)).not.toThrow();

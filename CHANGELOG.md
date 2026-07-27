@@ -4,9 +4,9 @@
 
 ### Requires
 
-- **MalaClaw >= 1.1.0.** Compiled manifests depend on the foreach
-  command-template fix; on 1.0.2 every study execution receives a literal
-  `{{item.id}}` and fails. `runtime-compatibility.json` raises the floor.
+- **MalaClaw >= 2.0.0.** Compiled manifests use the durable-flow-only contract.
+  `runtime-compatibility.json` raises the floor; older runtimes are rejected
+  before a run can execute under an incompatible manifest schema.
 
 ### Added
 

@@ -23,8 +23,8 @@ describe("compileModeToManifest", () => {
       researchProvider: "seed",
     });
 
-    expect(manifest.runtime).toBe("codex");
-    expect(manifest.packs).toEqual([{ id: "manuscript-writing" }]);
+    expect(manifest.runtime).toBeUndefined();
+    expect(manifest.project.attached_agents).toContain("research-lead");
     expect((manifest.workflow as Record<string, unknown>).mode).toBe("auto_research_agentic");
     expect((manifest.workflow as Record<string, unknown>).artifact_type).toBe("research_paper");
     expect(((manifest.workflow as { stages: Array<{ id: string }> }).stages).map((s) => s.id))
@@ -509,7 +509,7 @@ describe("compileModeToManifest", () => {
       researchProvider: "seed",
       runtimeProfile,
     });
-    expect(manifest.runtime).toBe("codex");
+    expect(manifest.runtime).toBeUndefined();
     const workflow = manifest.workflow as { runtime_policy?: { primary?: string }; model_tiers?: Record<string, unknown>; stages: Array<Record<string, unknown>> };
     expect(workflow.runtime_policy?.primary).toBe("codex");
     expect(Object.keys(workflow.model_tiers ?? {})).toEqual(expect.arrayContaining(["advisor", "reviewer", "executor"]));
@@ -537,7 +537,7 @@ describe("compileModeToManifest", () => {
       topic: "A memory city",
       runtimeProfile,
     });
-    expect(manifest.runtime).toBe("claude-code");
+    expect(manifest.runtime).toBeUndefined();
     const stages = (manifest.workflow as { runtime_policy?: { primary?: string }; stages: Array<Record<string, unknown>> }).stages;
     expect((manifest.workflow as { runtime_policy?: { primary?: string } }).runtime_policy?.primary).toBe("claude-code");
     expect(stages.find((s) => s.id === "premise")?.model_tier).toBe("advisor");
@@ -551,7 +551,6 @@ describe("compileModeToManifest", () => {
       loadRuntimeProfile("claude_first"),
       loadRuntimeProfile("claude_advisor_sonnet"),
     ]);
-    expect(legacy.agent_runtime).toBe(preferred.agent_runtime);
     expect(legacy.workflow).toEqual(preferred.workflow);
   });
 

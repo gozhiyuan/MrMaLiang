@@ -7,7 +7,6 @@ description: >
 artifact_type: book
 default_runtime:
   executor: malaclaw
-  agent_runtime: codex
 default_agents:
   - research-lead
   - outline-architect

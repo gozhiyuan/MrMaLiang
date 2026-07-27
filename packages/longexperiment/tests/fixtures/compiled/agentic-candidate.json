@@ -2,20 +2,14 @@
   "version": 1,
   "project": {
     "id": "memory-ablation",
-    "description": "LongExperiment: Memory helps planning."
+    "description": "LongExperiment: Memory helps planning.",
+    "attached_agents": [
+      "experiment-lead",
+      "methodologist",
+      "result-auditor",
+      "experiment-reporter"
+    ]
   },
-  "agents": [
-    "experiment-lead",
-    "methodologist",
-    "result-auditor",
-    "experiment-reporter"
-  ],
-  "packs": [
-    {
-      "id": "experiment-workflow"
-    }
-  ],
-  "runtime": "codex",
   "workflow": {
     "external_inputs": [
       "experiment.yaml",

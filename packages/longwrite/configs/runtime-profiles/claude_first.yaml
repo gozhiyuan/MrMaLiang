@@ -4,7 +4,6 @@ name: Claude First
 description: >
   Keep the LLM-owned workflow in Claude Code, using its advisor tier for
   planning/revision and its reviewer/executor tiers where configured.
-agent_runtime: claude-code
 workflow:
   runtime_policy:
     primary: claude-code

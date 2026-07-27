@@ -2,19 +2,14 @@
   "version": 1,
   "project": {
     "id": "self-play-small-model",
-    "description": "LongExperiment: Verifier noise reduces self-play improvement before held-out performance degrades."
+    "description": "LongExperiment: Verifier noise reduces self-play improvement before held-out performance degrades.",
+    "attached_agents": [
+      "experiment-lead",
+      "methodologist",
+      "result-auditor",
+      "experiment-reporter"
+    ]
   },
-  "agents": [
-    "experiment-lead",
-    "methodologist",
-    "result-auditor",
-    "experiment-reporter"
-  ],
-  "packs": [
-    {
-      "id": "experiment-workflow"
-    }
-  ],
   "workflow": {
     "external_inputs": [
       "experiment.yaml",

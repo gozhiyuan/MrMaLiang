@@ -2,19 +2,14 @@
   "version": 1,
   "project": {
     "id": "proteingym-autoscientists",
-    "description": "LongExperiment: An approved representation change improves ProteinGym fitness prediction over a pinned public baseline."
+    "description": "LongExperiment: An approved representation change improves ProteinGym fitness prediction over a pinned public baseline.",
+    "attached_agents": [
+      "experiment-lead",
+      "methodologist",
+      "result-auditor",
+      "experiment-reporter"
+    ]
   },
-  "agents": [
-    "experiment-lead",
-    "methodologist",
-    "result-auditor",
-    "experiment-reporter"
-  ],
-  "packs": [
-    {
-      "id": "experiment-workflow"
-    }
-  ],
   "workflow": {
     "external_inputs": [
       "experiment.yaml",

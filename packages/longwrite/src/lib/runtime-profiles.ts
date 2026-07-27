@@ -10,7 +10,6 @@ const RuntimeProfileDef = z
     version: z.number().default(1),
     name: z.string(),
     description: z.string().optional(),
-    agent_runtime: z.enum(["openclaw", "claude-code", "codex", "clawteam"]).optional(),
     workflow: z
       .object({
         runtime_policy: z.record(z.unknown()).optional(),

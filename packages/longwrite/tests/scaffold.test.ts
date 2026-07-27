@@ -15,13 +15,13 @@ async function makeWorkspaceRoot(): Promise<string> {
 }
 
 afterEach(async () => {
-  delete process.env.LONGWRITE_TEMPLATES_DIR;
+  delete process.env.LONGWRITE_ROLE_PROFILES_DIR;
   while (tempDirs.length > 0) await fs.rm(tempDirs.pop()!, { recursive: true, force: true });
 });
 
 describe("scaffoldWorkspace", () => {
   it("creates a self-contained workspace", async () => {
-    process.env.LONGWRITE_TEMPLATES_DIR = path.resolve("templates");
+    process.env.LONGWRITE_ROLE_PROFILES_DIR = path.resolve("role-profiles");
     const root = await makeWorkspaceRoot();
     const target = path.join(root, "survey");
     const mode = await loadMode("auto_research_agentic");
@@ -73,12 +73,12 @@ describe("scaffoldWorkspace", () => {
     const recall = manifest.workflow.stages.find((s: { id: string }) => s.id === "recall");
     expect(recall.command.args).toContain("semantic_scholar");
     expect(manifest.workflow.stages.some((s: { id: string }) => s.id === "draft_sections")).toBe(true);
-    await fs.access(path.join(target, "templates", "agents", "research-lead.yaml"));
-    await fs.access(path.join(target, "templates", "packs", "manuscript-writing.yaml"));
+    await fs.access(path.join(target, "roles", "research-lead.md"));
+    await expect(fs.access(path.join(target, "templates"))).rejects.toThrow();
   });
 
   it("refuses to overwrite an existing malaclaw.yaml", async () => {
-    process.env.LONGWRITE_TEMPLATES_DIR = path.resolve("templates");
+    process.env.LONGWRITE_ROLE_PROFILES_DIR = path.resolve("role-profiles");
     const root = await makeWorkspaceRoot();
     const target = path.join(root, "survey");
     await fs.mkdir(target, { recursive: true });

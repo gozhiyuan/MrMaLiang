@@ -69,7 +69,7 @@ describe("LongExperiment executable suite", () => {
     const ids = manifest.workflow.stages.map((stage: { id: string }) => stage.id);
     expect(ids).toEqual(["pin_inputs", "assert_authorization", "experiment_search_plan", "experiment_research_context", "experiment_proposal_loop", "design_approval", "candidate_revision_loop", "revision_approval", "suite_plan", "study_level_1", "aggregate_results", "audit_results", "interpret_results", "validate_result_interpretation", "report"]);
     expect(manifest.workflow.runtime).toBeUndefined();
-    expect(manifest.runtime).toBe("codex");
+    expect(manifest.project.attached_agents).toContain("experiment-lead");
     expect(manifest.workflow.stages.find((stage: { id: string }) => stage.id === "experiment_proposal_loop")).toMatchObject({ type: "loop", max_rounds: 2, on_exhaustion: "fail" });
     expect(manifest.workflow.stages.find((stage: { id: string }) => stage.id === "candidate_revision_loop")).toMatchObject({ type: "loop", max_rounds: 3, on_exhaustion: "fail" });
     expect(manifest.workflow.stages.find((stage: { id: string }) => stage.id === "design_approval").requires_human_approval).toBe(true);

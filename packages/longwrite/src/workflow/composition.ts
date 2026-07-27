@@ -1537,14 +1537,12 @@ export function compileModeToManifest(
   const workflow = applyStageOverrides(applyRuntimeProfile(adaptiveWorkflow, opts.runtimeProfile), opts.stageOverrides);
   return {
     version: 1,
-    runtime: opts.runtimeProfile?.agent_runtime ?? mode.default_runtime.agent_runtime,
     project: {
       id: opts.projectId,
       name: opts.projectName ?? opts.projectId,
       description: opts.topic ? `${mode.name} project: ${opts.topic}` : mode.description,
-      entry_team: mode.entry_team,
+      attached_agents: mode.default_agents,
     },
-    packs: [{ id: mode.pack }],
     workflow: {
       mode: mode.id,
       artifact_type: mode.artifact_type,
