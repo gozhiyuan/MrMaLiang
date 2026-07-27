@@ -2,19 +2,14 @@
   "version": 1,
   "project": {
     "id": "nanochat-ablation",
-    "description": "LongExperiment: A predeclared training modification improves held-out validation bits per byte against the pinned Nanochat baseline."
+    "description": "LongExperiment: A predeclared training modification improves held-out validation bits per byte against the pinned Nanochat baseline.",
+    "attached_agents": [
+      "experiment-lead",
+      "methodologist",
+      "result-auditor",
+      "experiment-reporter"
+    ]
   },
-  "agents": [
-    "experiment-lead",
-    "methodologist",
-    "result-auditor",
-    "experiment-reporter"
-  ],
-  "packs": [
-    {
-      "id": "experiment-workflow"
-    }
-  ],
   "workflow": {
     "external_inputs": [
       "experiment.yaml",

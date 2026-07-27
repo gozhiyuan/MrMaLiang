@@ -4,7 +4,6 @@ name: Codex First
 description: >
   Use Claude as a high-judgment advisor for strategy, outline, review, and
   routing, while routing bulk execution and file-editing work to Codex.
-agent_runtime: codex
 workflow:
   runtime_policy:
     primary: codex

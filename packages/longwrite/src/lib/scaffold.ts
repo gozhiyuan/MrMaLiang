@@ -3,7 +3,7 @@ import path from "node:path";
 import { stringify as stringifyYaml, parse as parseAgentYaml } from "yaml";
 import type { LongWriteModeDef } from "./mode-schema.js";
 import { compileModeToManifest, manifestToYaml } from "./compiler.js";
-import { templatesDir } from "./paths.js";
+import { roleProfilesDir } from "./paths.js";
 import type { ResearchProviderId } from "./research/providers.js";
 import { dimensionsForArtifact } from "./writing/scorecard.js";
 import { writeNovelStage } from "./writing/novel.js";
@@ -335,15 +335,12 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
   await fs.writeFile(manifestPath, manifestToYaml(manifest), "utf-8");
   created.push("malaclaw.yaml");
 
-  await fs.cp(templatesDir(), path.join(targetDir, "templates"), { recursive: true });
-  created.push("templates/");
-
-  // Compile each agent template into roles/<id>.md — MalaClaw injects these
+  // Compile LongWrite-owned role profiles into roles/<id>.md — MalaClaw injects these
   // into every stage prompt for the matching owner, so owners are real
   // personas with boundaries, not labels.
   const rolesDir = path.join(targetDir, "roles");
   await fs.mkdir(rolesDir, { recursive: true });
-  const agentTemplateDir = path.join(targetDir, "templates", "agents");
+  const agentTemplateDir = roleProfilesDir();
   for (const entry of (await fs.readdir(agentTemplateDir)).filter((e) => e.endsWith(".yaml")).sort()) {
     const agent = parseAgentTemplate(await fs.readFile(path.join(agentTemplateDir, entry), "utf-8"));
     if (!agent) continue;

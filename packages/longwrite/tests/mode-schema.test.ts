@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
 import { LongWriteModeDef } from "../src/lib/mode-schema.js";
 import { listModeIds, loadAllModes, loadMode } from "../src/lib/modes.js";
 
@@ -42,10 +41,7 @@ describe("LongWriteModeDef", () => {
       artifact_type: "paper",
       workflow: { stages: [{ id: "intake", owner: "lead" }] },
     });
-    expect(mode.pack).toBe("manuscript-writing");
-    expect(mode.entry_team).toBe("manuscript-writing");
     expect(mode.default_runtime.executor).toBe("malaclaw");
-    expect(mode.default_runtime.agent_runtime).toBe("codex");
   });
 
   it("rejects unknown domain keys but allows workflow passthrough", () => {
@@ -91,19 +87,10 @@ describe("mode loader", () => {
     await expect(loadMode("nope")).rejects.toThrow(/custom/);
   });
 
-  it("template YAML files have required ids and one team entry point", async () => {
-    const root = path.resolve("templates");
-    for (const subdir of ["agents", "teams", "packs"]) {
-      const entries = await fs.readdir(path.join(root, subdir));
-      for (const entry of entries.filter((e) => e.endsWith(".yaml"))) {
-        const raw = await fs.readFile(path.join(root, subdir, entry), "utf-8");
-        expect(parseYaml(raw).id).toBeTruthy();
-      }
-    }
-
-    const team = parseYaml(await fs.readFile(path.join(root, "teams", "manuscript-writing.yaml"), "utf-8"));
-    expect(team.members.filter((m: { entry_point?: boolean }) => m.entry_point).length).toBe(1);
-    const pack = parseYaml(await fs.readFile(path.join(root, "packs", "manuscript-writing.yaml"), "utf-8"));
-    expect(pack.teams).toContain("manuscript-writing");
+  it("ships role profiles without a MalaClaw provisioner catalog", async () => {
+    const root = path.resolve("role-profiles");
+    const entries = await fs.readdir(root);
+    expect(entries).toContain("research-lead.yaml");
+    await expect(fs.access(path.resolve("templates"))).rejects.toThrow();
   });
 });

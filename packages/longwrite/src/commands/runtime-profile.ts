@@ -9,7 +9,6 @@ export async function runRuntimeProfileList(): Promise<void> {
   for (const profile of profiles) {
     console.log(`  ${profile.name} (${profile.id})`);
     console.log(`    ${profile.description ?? ""}`);
-    console.log(`    agent runtime: ${profile.agent_runtime ?? "mode default"}`);
   }
 }
 

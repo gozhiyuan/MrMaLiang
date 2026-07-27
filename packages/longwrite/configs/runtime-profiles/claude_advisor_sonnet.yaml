@@ -4,7 +4,6 @@ name: Claude First (legacy alias)
 description: >
   Backward-compatible alias for claude_first. Prefer claude_first in new
   workspaces and documentation.
-agent_runtime: claude-code
 workflow:
   runtime_policy:
     primary: claude-code

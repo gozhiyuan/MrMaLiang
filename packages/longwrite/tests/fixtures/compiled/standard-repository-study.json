@@ -1,17 +1,20 @@
 {
   "version": 1,
-  "runtime": "codex",
   "project": {
     "id": "repo-study",
     "name": "Repository Study",
     "description": "AutoResearch Agentic project: Agent orchestration frameworks",
-    "entry_team": "manuscript-writing"
+    "attached_agents": [
+      "research-lead",
+      "source-curator",
+      "analyst",
+      "outline-architect",
+      "chapter-writer",
+      "skeptical-reviewer",
+      "editor",
+      "artifact-builder"
+    ]
   },
-  "packs": [
-    {
-      "id": "manuscript-writing"
-    }
-  ],
   "workflow": {
     "mode": "auto_research_agentic",
     "artifact_type": "research_paper",

@@ -180,7 +180,7 @@ export async function runUnifiedPreflight(workspace: string, runtime: string | u
 
 /** Single source of truth for the supported MalaClaw range. */
 async function supportedMalaClawRange(): Promise<{ minimum: number[]; majorBelow: number; label: string }> {
-  const fallback = { minimum: [1, 1, 0], majorBelow: 2, label: ">=1.1.0 <2.0.0" };
+  const fallback = { minimum: [2, 0, 0], majorBelow: 3, label: ">=2.0.0 <3.0.0" };
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const raw = await fs.readFile(path.resolve(here, "..", "..", "..", "runtime-compatibility.json"), "utf-8");

@@ -346,15 +346,12 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
  * not per-pilot policy, so they must not drift between compilation paths. */
 function assembleManifest(config: ExperimentConfig, stages: Array<Record<string, unknown>>): Record<string, unknown> {
   return {
-    version: 1, project: { id: config.project.id, description: `LongExperiment: ${config.hypothesis}` },
-    agents: ["experiment-lead", "methodologist", "result-auditor", "experiment-reporter"], packs: [{ id: "experiment-workflow" }],
-    // Manifest-level `runtime` selects the *provisioning* adapter
-    // (openclaw | claude-code | codex | clawteam) — it is not a worker runtime.
-    // Emitting "script" here produced a manifest the engine refused to parse,
-    // so `malaclaw validate` failed on every prescribed workspace. A prescribed
-    // experiment runs entirely through per-stage `runtime: script`, so it has no
-    // provisioning opinion and correctly falls back to the schema default.
-    ...(config.authoring.mode === "agentic" ? { runtime: "codex" } : {}),
+    version: 1,
+    project: {
+      id: config.project.id,
+      description: `LongExperiment: ${config.hypothesis}`,
+      attached_agents: ["experiment-lead", "methodologist", "result-auditor", "experiment-reporter"],
+    },
     workflow: {
       external_inputs: ["experiment.yaml", "experiment_brief.md"], max_parallel: config.execution.max_parallel_trials,
       run_limits: { max_active_run_minutes: config.execution.max_active_run_minutes, ...(config.execution.max_recorded_tokens ? { max_recorded_tokens: config.execution.max_recorded_tokens } : {}), on_limit: "pause" },

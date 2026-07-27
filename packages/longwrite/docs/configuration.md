@@ -138,7 +138,6 @@ profile or edit `malaclaw.yaml` directly.
 ```yaml
 id: codex_first
 name: Codex First
-agent_runtime: codex
 workflow:
   runtime_policy:
     primary: codex
@@ -165,7 +164,6 @@ Field reference:
 | `version` | no | Profile version, defaults to `1`. |
 | `name` | yes | Display name. |
 | `description` | no | Human-readable summary. |
-| `agent_runtime` | no | Top-level MalaClaw provisioning/runtime target written into `malaclaw.yaml`. |
 | `workflow.runtime_policy` | no | Merged into generated MalaClaw `workflow.runtime_policy`. |
 | `workflow.model_tiers` | no | Merged into generated MalaClaw `workflow.model_tiers`. |
 | `workflow.stage_model_tiers` | no | Map of stage id to model tier. Script-owned stages are left alone. |
@@ -223,11 +221,8 @@ description: Optional human-readable description.
 artifact_type: research_paper
 default_runtime:
   executor: malaclaw
-  agent_runtime: codex
 default_agents:
   - research-lead
-pack: manuscript-writing
-entry_team: manuscript-writing
 artifacts:
   required:
     - project_brief.md
@@ -256,10 +251,7 @@ Field reference:
 | `description` | no | string | Human-readable summary. |
 | `artifact_type` | yes | string | Writing artifact category. Currently not enum-restricted. |
 | `default_runtime.executor` | no | string, defaults to `malaclaw` | Intended executor. Current implementation expects MalaClaw. |
-| `default_runtime.agent_runtime` | no | `openclaw`, `claude-code`, `codex`, or `clawteam`; defaults to `codex` | Default agent runtime copied into generated manifests. |
-| `default_agents` | no | string array | Domain-level agent ids used by the mode. |
-| `pack` | no | string, defaults to `manuscript-writing` | MalaClaw pack id included in generated `malaclaw.yaml`. |
-| `entry_team` | no | string, defaults to `manuscript-writing` | MalaClaw project entry team. |
+| `default_agents` | no | string array | Explicit MalaClaw workflow owners written to `project.attached_agents`. |
 | `artifacts.required` | no | string array | Domain-level expected artifacts. |
 | `artifacts.optional` | no | string array | Domain-level optional artifacts. |
 | `workflow` | yes | object with non-empty `stages`; other keys pass through | MalaClaw workflow definition. |
@@ -268,9 +260,9 @@ The mode schema is strict for LongWrite-owned fields: unknown top-level keys are
 rejected. The `workflow` block is intentionally not duplicated in LongWrite;
 MalaClaw owns workflow validation through `malaclaw validate`.
 
-`default_runtime.agent_runtime` is the default written into generated
-`malaclaw.yaml`. The runtime selected at execution time can still be overridden
-with `longwrite run <workspace> --runtime <runtime>`.
+Runtime profiles only configure workflow runtime policy and model tiers. The
+runtime selected at execution time can still be overridden with
+`longwrite run <workspace> --runtime <runtime>`.
 
 ### `artifact_type`
 
@@ -1093,11 +1085,10 @@ To add a new writing mode:
 
 1. Add `configs/modes/<id>.yaml`.
 2. Keep `id` equal to the filename stem.
-3. Use a known `default_runtime.agent_runtime`.
-4. Define a MalaClaw-compatible `workflow.stages` block.
-5. Add or reuse templates under `templates/` if the mode needs new agents.
-6. Add deterministic helpers and validators if the mode needs domain checks.
-7. Run:
+3. Define a MalaClaw-compatible `workflow.stages` block.
+4. Add or reuse role profiles under `role-profiles/` if the mode needs new personas.
+5. Add deterministic helpers and validators if the mode needs domain checks.
+6. Run:
 
 ```bash
 maliang writing mode show <id>
