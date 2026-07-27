@@ -13,9 +13,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: gozhiyuan/MalaClaw
-          # Immutable 1.1.0 release commit. It exports malaclaw/sdk and fixes
-          # foreach command-template resolution, both required by this release.
-          ref: 30f52e3c782b7a82b0c1cb86959ac7a22e6bc9c4
+          # Immutable 2.0 contract commit. It provides the durable
+          # project.attached_agents manifest boundary required by this release.
+          ref: 09643e46b32833fff3fd5c10f09743c8efcf5890
           path: .dependencies/MalaClaw
       - uses: actions/setup-node@v4
         with:
