@@ -3,7 +3,7 @@
   "malaclaw": {
     "supported": ">=2.0.0 <3.0.0",
     "tested_with": "2.1.0",
-    "note": "Pinned by release tag (v2.1.0) rather than commit sha: the supported range is semver, so CI should track releases, not commits. Requires >=2.0.0 for the foreach command-template fix; on 1.0.2 every study execution receives a literal {{item.id}} and fails."
+    "note": "Pinned in CI to the immutable commit behind release v2.1.0 (a tag is mutable, and CI runs npm lifecycle scripts against whatever it checks out). The pin moves on MalaClaw releases, not commits. Requires >=2.0.0 for the foreach command-template fix; on 1.0.2 every study execution receives a literal {{item.id}} and fails."
   },
   "ir_version": 1,
   "module_protocol": 1,
