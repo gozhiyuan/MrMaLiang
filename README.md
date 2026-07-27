@@ -200,14 +200,15 @@ Required for a real survey or manuscript run:
 Required only for agent-authored experiment flagships:
 
 - Pinned code/model/benchmark inputs and a declared trial budget
-- Python/PyTorch and suitable local hardware for the selected workload
-- Human approval of the proposal, generated code before any test/smoke
+- A reviewed Modal adapter and provider account for the selected workload. The
+  checked-in runtime profile selects the maintained GPU base and overlay; normal
+  researchers do not build or publish a container image.
+- Human approval of the proposal, generated code before any remote test/smoke
   execution, and full-trial compute after smoke
 
-The two agentic empirical flagships currently run their generated Python
-entrypoints on the MalaClaw worker host. Modal is supported by the prescribed
-remote-job runner contract, but is not automatically substituted for these
-agent-authored entrypoints. Surveys never need Modal.
+The two agentic empirical flagships run generated candidate code only through
+their Modal remote-job adapter. The control plane validates and materializes
+the candidate but does not execute it locally. Surveys never need Modal.
 
 ## Shared optional integrations and environment
 
@@ -301,11 +302,24 @@ materializes the matching workspace configuration.
 | --- | --- | --- |
 | [Long agentic survey](docs/flagships/long-agentic-survey.md) | `maliang init llm-memory-agentic --blueprint long-agentic-survey` | Codex/Claude; no GPU |
 | [Repository survey](docs/flagships/repository-survey.md) | `maliang init repo-study --blueprint repository-survey --repository <Git-URL-or-local-Git-path>` | Codex/Claude; no GPU |
-| [nanoGPT agentic empirical paper](docs/flagships/nanogpt-agentic-empirical-paper.md) | `maliang init nanogpt-agentic-paper --blueprint nanogpt-agentic-empirical-paper` | Codex/Claude + local Python/PyTorch compute |
-| [Self-play autonomous empirical paper](docs/flagships/self-play-autonomous-empirical-paper.md) | `maliang init self-play-agentic-paper --blueprint self-play-autonomous-empirical-paper` | Codex/Claude + local model/benchmark compute |
+| [Nanochat agentic empirical paper](docs/flagships/nanochat-agentic-empirical-paper.md) | `maliang init nanochat-agentic-paper --blueprint nanochat-agentic-empirical-paper` | Codex/Claude + reviewed Modal adapter |
+| [Self-play autonomous empirical paper](docs/flagships/self-play-autonomous-empirical-paper.md) | `maliang init self-play-agentic-paper --blueprint self-play-autonomous-empirical-paper` | Codex/Claude + reviewed Modal adapter |
+
+The commands above already select the current public templates through each
+blueprint: `paper.survey` for surveys and `paper.empirical` for empirical
+papers. Do not replace them with an `experiment.*` template. The empirical
+blueprints now use generalized Modal remote-job profiles with a workspace-owned,
+locked `uv` adapter: verify its provider-fake tests, run one bounded GPU smoke,
+and issue a config-bound lease before running them. The adoption procedure is in [Flagship platform
+adoption](docs/flagships/platform-adoption.md).
+
+The runtime catalog is platform-maintained: it pins the shared CUDA/PyTorch
+base and any approved workload overlay. A researcher authenticates Modal and
+runs an approved blueprint; they do not manage images, registries, or provider
+credentials inside the research workspace.
 
 Recommended validation order: survey smoke → long survey → repository survey →
-nanoGPT local pilot → self-play local pilot. The first two are validated writing
+Nanochat remote pilot → self-play remote pilot. The first two are validated writing
 flagships. The empirical workflows are executable release candidates with
 complete contracts and runbooks, but they do not ship precomputed scientific
 results; promote a result only after a real run passes every audit and paper
@@ -342,13 +356,13 @@ context and comparison.
 ### Run a repository experiment and empirical paper
 
 ```bash
-maliang init nanogpt-agentic-paper \
-  --blueprint nanogpt-agentic-empirical-paper
-maliang preflight nanogpt-agentic-paper --runtime codex
-maliang run nanogpt-agentic-paper --runtime codex
+maliang init nanochat-agentic-paper \
+  --blueprint nanochat-agentic-empirical-paper
+maliang preflight nanochat-agentic-paper --runtime codex
+maliang run nanochat-agentic-paper --runtime codex
 ```
 
-This path first uses literature and the pinned nanoGPT codebase to propose and
+This path first uses literature and the pinned Nanochat codebase to propose and
 test a bounded intervention. After explicit design and full-trial approvals,
 LongExperiment freezes and audits the multi-seed result; only then can LongWrite
 use it as empirical evidence. Follow the dedicated runbook before spending
@@ -459,7 +473,7 @@ following projects and published frameworks:
 - [MalaClaw](https://github.com/gozhiyuan/MalaClaw) — durable agent-workflow runtime
 - [Deli AutoResearch / AutoResearch V2](https://victorchen96.github.io/auto_research/framework.html) — long-horizon autonomous research reference
 - [AutoScientists](https://github.com/mims-harvard/AutoScientists) — external autonomous-science runner integration
-- [nanoGPT](https://github.com/karpathy/nanoGPT) — pinned ablation benchmark/codebase
+- [Nanochat](https://github.com/karpathy/nanochat.git) — pinned ablation benchmark/codebase
 - [ProteinGym](https://github.com/OATML-Markslab/ProteinGym) — public protein-fitness benchmark
 
 ## Documentation

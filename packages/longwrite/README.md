@@ -47,6 +47,7 @@ to the correct component directory; do not invoke or install a global
 
 ## Documentation
 
+- [Paper workflow operator skill](./skills/paper-workflow/SKILL.md)
 - [Quickstart](./docs/quickstart.md)
 - [Flagship runbook hub](../../docs/flagships/README.md)
 - [Full AutoResearch Agentic Survey Flagship](../../docs/flagships/long-agentic-survey.md)

@@ -26,6 +26,18 @@ experiment uses a from-scratch profile.
 runner. `paper.empirical-import` accepts no authoring mode because it executes
 nothing.
 
+## Flagship mapping
+
+The four documented flagships already use the public template that matches
+their contract: the two surveys use `paper.survey`, and the two empirical
+papers use `paper.empirical`. Keep invoking them with `--blueprint`; a
+blueprint adds pinned inputs and measured targets that `--template` alone does
+not encode. The agentic empirical blueprints use generalized remote-job
+profiles and require a reviewed Modal adapter plus a config-bound authorization
+lease before execution. See [Flagship platform
+adoption](./flagships/platform-adoption.md) before changing their runner or
+authorization settings.
+
 ## Other product templates
 
 | Template | LongWrite | LongExperiment | Result |
@@ -33,7 +45,7 @@ nothing.
 | `writing.novel` | yes | no | Novel workspace |
 | `writing.technical-book` | yes | no | Technical-book workspace |
 | `experiment.standalone` | no | yes | Audited experiment suite without a manuscript |
-| `experiment.nanogpt-ablation` | no | yes | Incubating prescribed nanoGPT protocol |
+| `experiment.nanochat-ablation` | no | yes | Incubating prescribed Nanochat protocol |
 | `experiment.self-play-small-model` | no | yes | Incubating prescribed self-play protocol |
 | `experiment.proteingym-autoscientists` | no | yes | Incubating external-runner protocol |
 

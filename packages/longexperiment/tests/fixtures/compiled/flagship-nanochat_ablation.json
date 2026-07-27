@@ -1,0 +1,356 @@
+{
+  "version": 1,
+  "project": {
+    "id": "nanochat-ablation",
+    "description": "LongExperiment: A predeclared training modification improves held-out validation bits per byte against the pinned Nanochat baseline."
+  },
+  "agents": [
+    "experiment-lead",
+    "methodologist",
+    "result-auditor",
+    "experiment-reporter"
+  ],
+  "packs": [
+    {
+      "id": "experiment-workflow"
+    }
+  ],
+  "workflow": {
+    "external_inputs": [
+      "experiment.yaml",
+      "experiment_brief.md"
+    ],
+    "max_parallel": 2,
+    "run_limits": {
+      "max_active_run_minutes": 1440,
+      "on_limit": "pause"
+    },
+    "stages": [
+      {
+        "id": "pin_inputs",
+        "owner": "methodologist",
+        "runtime": "script",
+        "title": "Materialize immutable inputs",
+        "inputs": [
+          "experiment.yaml"
+        ],
+        "outputs": [
+          "inputs/locks.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Resolve only configured immutable revisions. Do not accept tags, branches, HEAD, or operator placeholders as research evidence."
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "pin-inputs",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "design",
+        "owner": "experiment-lead",
+        "runtime": "script",
+        "title": "Design experiment",
+        "inputs": [
+          "experiment.yaml",
+          "experiment_brief.md"
+        ],
+        "outputs": [
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ],
+        "requires_human_approval": true,
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "design",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "prepare_worktrees",
+        "owner": "methodologist",
+        "runtime": "script",
+        "title": "Prepare isolated candidate worktrees",
+        "inputs": [
+          "experiment.yaml",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "worktrees/manifest.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "worktrees",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "suite_plan",
+        "owner": "methodologist",
+        "runtime": "script",
+        "title": "Materialize approved suite and trial matrix",
+        "inputs": [
+          "reports/experiment-design.md",
+          "inputs/locks.json",
+          "worktrees/manifest.json"
+        ],
+        "outputs": [
+          "runs/suite-plan.json",
+          "runs/study-level-1.json",
+          "runs/study-level-2.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "suite-plan",
+            "."
+          ]
+        }
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_1",
+        "title": "Execute and audit dependency level 1",
+        "foreach": "runs/study-level-1.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "worktrees/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "run-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "instructions": [
+              "Run the configured runner for this one study only. The runner receives LONGEXPERIMENT_STUDY_ID, LONGEXPERIMENT_SEEDS, LONGEXPERIMENT_CONDITIONS, immutable input locks, and a required raw-result output path.",
+              "Never fabricate result JSON. A nonzero runner exit or missing raw-results artifact fails this study."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "type": "foreach",
+        "id": "study_level_2",
+        "title": "Execute and audit dependency level 2",
+        "foreach": "runs/study-level-2.items",
+        "item_name": "study",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "execute",
+            "owner": "methodologist",
+            "inputs": [
+              "runs/suite-plan.json",
+              "inputs/locks.json",
+              "worktrees/manifest.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "logs/studies/{{item.id}}/runner.log"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "run-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "instructions": [
+              "Run the configured runner for this one study only. The runner receives LONGEXPERIMENT_STUDY_ID, LONGEXPERIMENT_SEEDS, LONGEXPERIMENT_CONDITIONS, immutable input locks, and a required raw-result output path.",
+              "Never fabricate result JSON. A nonzero runner exit or missing raw-results artifact fails this study."
+            ]
+          },
+          {
+            "id": "audit",
+            "owner": "result-auditor",
+            "inputs": [
+              "results/studies/{{item.id}}/raw-results.json",
+              "inputs/locks.json"
+            ],
+            "outputs": [
+              "results/studies/{{item.id}}/audit.json"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longexperiment-cli>",
+                "stage",
+                "audit-study",
+                ".",
+                "{{item.id}}"
+              ]
+            },
+            "validators": [
+              "required_output_exists"
+            ],
+            "instructions": [
+              "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "aggregate_results",
+        "owner": "result-auditor",
+        "runtime": "script",
+        "title": "Aggregate paired study results",
+        "inputs": [
+          "runs/suite-plan.json",
+          "inputs/locks.json",
+          "results/studies/*/audit.json"
+        ],
+        "outputs": [
+          "results/raw-results.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "instructions": [
+          "Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "aggregate",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "audit_results",
+        "owner": "result-auditor",
+        "runtime": "script",
+        "title": "Certify result provenance",
+        "inputs": [
+          "results/raw-results.json",
+          "inputs/locks.json"
+        ],
+        "outputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "audit",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "owner": "experiment-reporter",
+        "runtime": "script",
+        "title": "Package result hand-off",
+        "inputs": [
+          "results/experiment-manifest.json",
+          "reports/result-audit.md"
+        ],
+        "outputs": [
+          "reports/experiment-report.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longexperiment-cli>",
+            "stage",
+            "report",
+            "."
+          ]
+        }
+      }
+    ]
+  }
+}

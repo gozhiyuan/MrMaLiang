@@ -9,6 +9,12 @@ import { ExperimentConfig } from "./lib/schema.js";
 import { scaffoldExperimentWorkspace, scaffoldFlagshipWorkspace } from "./lib/scaffold.js";
 import { writeAggregateResultsStage, writeAuditStage, writeDesignStage, writePinInputsStage, writeReportStage, writeStudyAuditStage, writeSuitePlanStage, writeWorktreesStage, runStudyStage } from "./lib/stages.js";
 import { materializeAgentCandidateStage, prepareAgentResearchContextStage, runAgenticStudyStage, smokeAgentCandidateStage, testAgentCandidateStage, validateAgentProposalStage, validateAgentResultInterpretationStage, writeAgentApprovalStage } from "./lib/agentic.js";
+import { assertAuthorizedForUnattendedRun, issueLease } from "./lib/authorization.js";
+import { readLineage } from "./lib/lineage.js";
+import { initializeResearchState, readResearchState, updateResearchState } from "./lib/research-state.js";
+import { ExperimentPilot } from "./lib/schema.js";
+import { reconcileClaims } from "./lib/reproduction/claims.js";
+import { auditBaseline, auditRoundCandidate, materializeRoundCandidates, promoteRound, researchInit, runCandidateStage, validateRoundPlan, verifyCandidateStage, writeResearchFindings } from "./lib/research-round.js";
 
 function slugFromDir(dir: string): string {
   const base = path.basename(path.resolve(dir));
@@ -84,6 +90,77 @@ program.command("validate <workspace>")
     console.log(`Stages: ${manifest.workflow.stages.map((stage) => stage.id).join(" -> ")}`);
   });
 
+program.command("authorize <workspace>")
+  .description("Issue a bounded, config-bound unattended execution lease")
+  .requiredOption("--unattended", "Confirm that this is an unattended authorization")
+  .requiredOption("--max-trials <n>", "Maximum trial records allowed", Number)
+  .requiredOption("--max-gpu-hours <n>", "Maximum GPU hours allowed", Number)
+  .requiredOption("--max-wall-hours <n>", "Maximum wall-clock hours allowed", Number)
+  .requiredOption("--expires-in <hours>", "Lease lifetime in hours", Number)
+  .requiredOption("--approved-by <identity>", "Human approving this lease")
+  .option("--max-storage-gb <n>", "Maximum artifact storage in GB", Number)
+  .option("--max-cost-usd <n>", "Maximum provider cost in USD", Number)
+  .option("--allowed-host <host...>", "Allowed network host(s)")
+  .option("--yes", "Write the lease after reviewing these limits")
+  .action(async (workspace, options) => {
+    if (!options.yes) throw new Error("Refusing to issue an unattended lease without --yes");
+    const lease = await issueLease(path.resolve(workspace), {
+      maxTrials: options.maxTrials, maxGpuHours: options.maxGpuHours, maxWallHours: options.maxWallHours,
+      expiresInHours: options.expiresIn, approvedBy: options.approvedBy,
+      ...(options.maxStorageGb !== undefined ? { maxStorageGb: options.maxStorageGb } : {}),
+      ...(options.maxCostUsd !== undefined ? { maxCostUsd: options.maxCostUsd } : {}),
+      ...(options.allowedHost ? { allowedHosts: options.allowedHost } : {}),
+    });
+    console.log(JSON.stringify(lease, null, 2));
+  });
+
+program.command("lineage <workspace>").description("Inspect the immutable experiment lineage graph").action(async (workspace) => {
+  console.log(JSON.stringify(await readLineage(path.resolve(workspace)), null, 2));
+});
+program.command("champion <workspace>").description("Show the current deterministic champion").action(async (workspace) => {
+  const graph = await readLineage(path.resolve(workspace));
+  const champion = graph.nodes.find((node) => node.id === graph.champion_node_id);
+  if (!champion) throw new Error("lineage has no champion node");
+  console.log(JSON.stringify(champion, null, 2));
+});
+program.command("dead-ends <workspace>").description("List retained failed/discarded candidates").action(async (workspace) => {
+  const graph = await readLineage(path.resolve(workspace));
+  console.log(JSON.stringify(graph.nodes.filter((node) => node.kind === "dead_end"), null, 2));
+});
+
+const researchState = program.command("research-state").description("Inspect and update the portable generalized-research state");
+researchState.command("init <workspace>")
+  .description("Initialize state before a bounded generalized-research run")
+  .requiredOption("--pilot <pilot>", "repository_optimization, survey_pilot_study, or paper_reproduction")
+  .requiredOption("--champion <nodeId>", "Initial lineage champion node id")
+  .action(async (workspace, options) => {
+    const pilot = ExperimentPilot.parse(options.pilot);
+    console.log(JSON.stringify(await initializeResearchState(path.resolve(workspace), { pilot, champion_node_id: options.champion }), null, 2));
+  });
+researchState.command("show <workspace>")
+  .description("Print the current generalized-research state")
+  .action(async (workspace) => {
+    console.log(JSON.stringify(await readResearchState(path.resolve(workspace)), null, 2));
+  });
+researchState.command("update <workspace>")
+  .description("Atomically update the active generalized-research state")
+  .option("--status <status>", "planned, running, paused, completed, or blocked")
+  .option("--round <n>", "Current completed/active round", Number)
+  .option("--champion <nodeId>", "Current champion node id")
+  .option("--stagnation-rounds <n>", "Consecutive rounds without promotion", Number)
+  .option("--stop-reason <reason>", "Durable reason for a stopped run")
+  .action(async (workspace, options) => {
+    const update = {
+      ...(options.status !== undefined ? { status: options.status } : {}),
+      ...(options.round !== undefined ? { current_round: options.round } : {}),
+      ...(options.champion !== undefined ? { champion_node_id: options.champion } : {}),
+      ...(options.stagnationRounds !== undefined ? { stagnation_rounds: options.stagnationRounds } : {}),
+      ...(options.stopReason !== undefined ? { stop_reason: options.stopReason } : {}),
+    };
+    if (Object.keys(update).length === 0) throw new Error("Provide at least one state field to update.");
+    console.log(JSON.stringify(await updateResearchState(path.resolve(workspace), update), null, 2));
+  });
+
 const stage = program.command("stage").description("Internal deterministic stage commands used by generated workflows");
 
 stage.command("design <workspace>").action(async (workspace) => {
@@ -94,6 +171,19 @@ stage.command("design <workspace>").action(async (workspace) => {
 stage.command("pin-inputs <workspace>").action(async (workspace) => {
   const resolved = path.resolve(workspace);
   await writePinInputsStage(resolved, await readConfig(resolved));
+});
+
+stage.command("assert-authorization <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const lease = await assertAuthorizedForUnattendedRun(resolved);
+  await fs.mkdir(path.join(resolved, "reports"), { recursive: true });
+  await fs.writeFile(path.join(resolved, "reports", "authorization.md"), [
+    "# Execution Authorization", "",
+    lease
+      ? `Valid unattended lease bound to config SHA-256: ${lease.config_sha256}`
+      : "Interactive execution: explicit approval gates remain required.",
+    "",
+  ].join("\n"), "utf8");
 });
 
 stage.command("worktrees <workspace>").action(async (workspace) => {
@@ -128,6 +218,72 @@ stage.command("suite-plan <workspace>").action(async (workspace) => {
 
 stage.command("report <workspace>").action(async (workspace) => {
   await writeReportStage(path.resolve(workspace));
+});
+
+// Generalized research loop (LE-4.3). Each command is deterministic and is the
+// only writer of the artifact it owns; agents contribute proposals, never state.
+stage.command("research-init <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const { commit_sha } = await researchInit(resolved, await readConfig(resolved));
+  console.log(`baseline frozen at ${commit_sha}`);
+});
+
+stage.command("run-candidate <workspace> <candidateId>").action(async (workspace, candidateId) => {
+  const resolved = path.resolve(workspace);
+  await runCandidateStage(resolved, await readConfig(resolved), candidateId);
+});
+
+stage.command("verify-candidate <workspace> <candidateId>").action(async (workspace, candidateId) => {
+  const resolved = path.resolve(workspace);
+  const result = await verifyCandidateStage(resolved, await readConfig(resolved), candidateId);
+  console.log(`${candidateId} committed as ${result.commit_sha.slice(0, 12)} (${result.changed.join(", ")})`);
+});
+
+stage.command("audit-baseline <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const audit = await auditBaseline(resolved, await readConfig(resolved));
+  console.log(`baseline metric ${audit.primary_metric}`);
+});
+
+stage.command("validate-round-plan <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const plan = await validateRoundPlan(resolved, await readConfig(resolved));
+  console.log(`${plan.round_id}: ${plan.candidates.length} candidate(s) accepted, ${plan.rejected.length} rejected`);
+});
+
+stage.command("materialize-candidates <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const plan = await materializeRoundCandidates(resolved, await readConfig(resolved));
+  console.log(`materialized ${plan.candidates.length} candidate branch(es) for ${plan.round_id}`);
+});
+
+stage.command("audit-candidate <workspace> <candidateId>").action(async (workspace, candidateId) => {
+  const resolved = path.resolve(workspace);
+  const audit = await auditRoundCandidate(resolved, await readConfig(resolved), candidateId);
+  console.log(`${candidateId}: ${audit.status}${audit.primary_metric === undefined ? "" : ` (${audit.primary_metric})`}`);
+});
+
+stage.command("promote-round <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const promotion = await promoteRound(resolved, await readConfig(resolved));
+  console.log(`${promotion.round_id}: champion ${promotion.champion_node_id}${promotion.stop ? ` (stopping: ${promotion.stop_reason})` : ""}`);
+});
+
+stage.command("research-report <workspace>").action(async (workspace) => {
+  await writeResearchFindings(path.resolve(workspace));
+});
+
+stage.command("reconcile-claims <workspace>").action(async (workspace) => {
+  const resolved = path.resolve(workspace);
+  const [paperText, candidates] = await Promise.all([
+    fs.readFile(path.join(resolved, "paper", "text.txt"), "utf8"),
+    fs.readFile(path.join(resolved, "reproduction", "claims-candidates.json"), "utf8"),
+  ]);
+  const parsed: unknown = JSON.parse(candidates);
+  if (!Array.isArray(parsed)) throw new Error("reproduction/claims-candidates.json must be an array");
+  const claims = reconcileClaims(paperText, parsed);
+  await fs.mkdir(path.join(resolved, "reproduction"), { recursive: true });
+  await fs.writeFile(path.join(resolved, "reproduction", "claims.json"), JSON.stringify({ version: 1, claims }, null, 2) + "\n", "utf8");
 });
 
 stage.command("research-context <workspace>").action(async (workspace) => {

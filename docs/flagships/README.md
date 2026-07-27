@@ -10,10 +10,10 @@ and generated MalaClaw stage commands are implementation details.
 | --- | --- | --- | --- |
 | [Long agentic survey](./long-agentic-survey.md) | `paper.survey` | survey · literature · none | The [blueprint](../../examples/flagships/long-agentic-survey/) seed/dry-run rehearsal passes. |
 | [Repository survey](./repository-survey.md) | `paper.survey` + repository | survey · repository · none | The [blueprint](../../examples/flagships/repository-survey/) repository and revision are chosen. |
-| [nanoGPT agentic empirical paper](./nanogpt-agentic-empirical-paper.md) | `paper.empirical` + repository | empirical · repository · run · agentic | Dedicated worker, design/code approvals, local smoke, and compute review pass. |
+| [Nanochat agentic empirical paper](./nanochat-agentic-empirical-paper.md) | `paper.empirical` + repository | empirical · repository · run · agentic | Dedicated worker, design/code approvals, local smoke, and compute review pass. |
 | [Self-play autonomous empirical paper](./self-play-autonomous-empirical-paper.md) | `paper.empirical` | empirical · literature · run · agentic | Dedicated worker, model/benchmark access, design/code approvals, local smoke, and compute review pass. |
 
-Start with the survey, then the repository survey, then the nanoGPT pilot. The
+Start with the survey, then the repository survey, then the Nanochat pilot. The
 survey workflows are validated writing flagships. The two empirical workflows
 are executable release candidates: their agentic graphs, approval gates,
 statistics, handoff, and configurations are tested, but this repository does not

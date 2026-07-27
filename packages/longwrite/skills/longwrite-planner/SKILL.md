@@ -5,6 +5,10 @@ description: Use when a user wants to plan, scaffold, or customize a long-form w
 
 # LongWrite Planner
 
+For a paper project that is already selected or underway, hand off to the
+`paper-workflow` skill. It owns the unified survey/empirical operator path;
+this skill remains focused on the initial planning conversation.
+
 You help a user go from "I want to write X" to a scaffolded, validated
 LongWrite workspace with a workflow tuned to their project. You do the
 planning conversation; the `maliang` and `malaclaw` CLIs do the work.

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { readMaliangProject } from "./project.js";
 import { componentSubdir } from "./forward.js";
@@ -61,9 +62,12 @@ async function runRuntimeChecks(workspace: string): Promise<ComponentReport> {
   } catch {
     malaclawVersion = "";
   }
+  // The supported range lives in runtime-compatibility.json. Hardcoding it here
+  // created two sources of truth that silently disagreed when the floor rose.
+  const supported = await supportedMalaClawRange();
   const malaclawParts = malaclawVersion.match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
-  const compatibleMalaClaw = Boolean(malaclawParts && malaclawParts[0] === 1 && (malaclawParts[1] > 0 || malaclawParts[2] >= 2));
-  checks.push({ id: "malaclaw", pass: compatibleMalaClaw, finding: malaclawVersion ? `MalaClaw ${malaclawVersion} (supported >=1.0.2 <2.0.0)` : "MalaClaw >=1.0.2 <2.0.0 must be available on PATH" });
+  const compatibleMalaClaw = Boolean(malaclawParts && atLeast(malaclawParts, supported.minimum) && malaclawParts[0] < supported.majorBelow);
+  checks.push({ id: "malaclaw", pass: compatibleMalaClaw, finding: malaclawVersion ? `MalaClaw ${malaclawVersion} (supported ${supported.label})` : `MalaClaw ${supported.label} must be available on PATH` });
   return { status: statusFor(checks), checks };
 }
 
@@ -172,4 +176,29 @@ export async function runUnifiedPreflight(workspace: string, runtime: string | u
   await fs.writeFile(path.join(reportsDir, "maliang-preflight.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
 
   return report;
+}
+
+/** Single source of truth for the supported MalaClaw range. */
+async function supportedMalaClawRange(): Promise<{ minimum: number[]; majorBelow: number; label: string }> {
+  const fallback = { minimum: [1, 1, 0], majorBelow: 2, label: ">=1.1.0 <2.0.0" };
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const raw = await fs.readFile(path.resolve(here, "..", "..", "..", "runtime-compatibility.json"), "utf-8");
+    const range = String(JSON.parse(raw)?.malaclaw?.supported ?? "");
+    const min = range.match(/>=\s*(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+    const below = Number(range.match(/<\s*(\d+)\./)?.[1]);
+    if (!min || !Number.isFinite(below)) return fallback;
+    return { minimum: min, majorBelow: below, label: range };
+  } catch {
+    return fallback;
+  }
+}
+
+function atLeast(actual: number[], minimum: number[]): boolean {
+  for (let index = 0; index < minimum.length; index += 1) {
+    const a = actual[index] ?? 0;
+    if (a > minimum[index]) return true;
+    if (a < minimum[index]) return false;
+  }
+  return true;
 }

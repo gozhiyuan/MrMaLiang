@@ -1,0 +1,50 @@
+version: 1
+project:
+  id: autoresearch-optimization
+  name: Bounded AutoResearch optimization pilot
+pilot: repository_optimization
+profile: existing_code
+authoring:
+  mode: prescribed
+hypothesis: A small, evaluator-preserving batch-ordering change can improve the fixed heldout training metric.
+inputs:
+  code:
+    - id: autoresearch
+      source: https://github.com/karpathy/autoresearch.git
+      revision: 228791fb499afffb54b46200aca536f79142f117
+      materialize: git
+evaluation:
+  primary_metric: heldout_loss
+  direction: minimize
+  baseline_id: baseline
+  control: frozen evaluator, fixed data split, seeds, and GPU class
+  seeds: [11, 23]
+  statistical_test: paired bootstrap confidence interval
+suite:
+  id: bounded-autoresearch
+  max_rounds: 2
+  studies:
+    - id: baseline
+      kind: training_ablation
+      conditions: [baseline]
+      acceptance_criteria: [baseline evaluator result recorded]
+    - id: candidate
+      kind: training_ablation
+      depends_on: [baseline]
+      conditions: [candidate]
+      acceptance_criteria: [candidate preserves evaluator integrity]
+runner:
+  kind: modal
+  app_path: adapters/modal/autoresearch.py
+  function_ref: autoresearch.run
+  gpu: A10G
+  max_gpu_hours: 2
+  adapter_command: python adapters/modal/adapter.py
+execution:
+  max_trials: 10
+  max_active_run_minutes: 180
+  max_parallel_trials: 1
+  requires_design_approval: true
+  requires_revision_approval: true
+  candidate_worktrees: []
+  enabled_optional_actions: []

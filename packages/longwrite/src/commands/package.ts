@@ -1,5 +1,5 @@
 import path from "node:path";
-import { packagePublicationWorkspace, validatePublicationWorkspace } from "../lib/publication.js";
+import { packagePublicationWorkspace, validatePublicationWorkspace, writeUnpackagedSubmissionNotice } from "../lib/publication.js";
 import { loadProjectConfigIfExists } from "../lib/project-config.js";
 
 function printChecks(report: Awaited<ReturnType<typeof validatePublicationWorkspace>>): void {
@@ -29,7 +29,13 @@ export async function runPackagePublication(workspaceDir: string): Promise<void>
     // allowing that no-spend test path to finish; live release runs enforce it.
     const config = await loadProjectConfigIfExists(resolved);
     if (config?.research.provider === "seed") {
-      console.error(`seed provider: publication package advisory only (${error instanceof Error ? error.message : String(error)})`);
+      const reasons = (error instanceof Error ? error.message : String(error)).split("\n").filter(Boolean);
+      console.error(`seed provider: publication package advisory only (${reasons.join("; ")})`);
+      // Still honor the stage's declared output, flagged as not release-ready,
+      // so the rehearsal finishes without the engine reporting a stage that
+      // produced nothing as a success.
+      const notice = await writeUnpackagedSubmissionNotice(resolved, reasons);
+      console.error(`  wrote ${notice} with release_ready: false`);
       return;
     }
     throw error;

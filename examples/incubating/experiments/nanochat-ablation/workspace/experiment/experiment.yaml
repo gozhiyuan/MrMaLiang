@@ -1,0 +1,18 @@
+version: 1
+project: { id: nanochat-ablation, name: Nanochat Controlled Ablation }
+profile: existing_code
+hypothesis: A predeclared training modification improves held-out validation bits per byte against the pinned Nanochat baseline.
+inputs:
+  code:
+    - { id: nanochat, source: https://github.com/karpathy/nanochat.git, revision: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd, license: MIT }
+evaluation: { primary_metric: validation_bits_per_byte, direction: minimize, baseline_id: pinned-baseline, control: fixed Nanochat commit, tokenizer/data snapshots, depth, training budget, evaluator, and hardware class, seeds: [11, 23, 47], statistical_test: paired bootstrap confidence interval, heldout_split: validation }
+suite:
+  id: nanochat-controlled-ablation
+  max_rounds: 3
+  studies:
+    - { id: baseline, kind: training_ablation, conditions: [pinned-baseline], acceptance_criteria: [reproduce pinned baseline] }
+    - { id: candidate, kind: training_ablation, depends_on: [baseline], conditions: [candidate], acceptance_criteria: [test approved worktree revision against baseline] }
+    - { id: replication, kind: training_ablation, depends_on: [candidate], optional_action: replicate_condition, acceptance_criteria: [repeat promising candidate across all seeds] }
+    - { id: horizon, kind: horizon_extension, depends_on: [candidate], optional_action: extend_horizon, acceptance_criteria: [evaluate longer training horizon] }
+runner: { kind: command, command: python3 templates/runners/nanochat.py }
+execution: { max_trials: 18, max_active_run_minutes: 1440, max_parallel_trials: 2, requires_design_approval: true, requires_revision_approval: true }

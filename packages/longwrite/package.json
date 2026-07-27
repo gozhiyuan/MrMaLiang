@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/longwrite",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Long-form writing agent workflows on the MalaClaw flow engine",
   "type": "module",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "skills/",
     "configs/",
     "templates/",
+    "python/",
     "dashboard-extension/",
     "README.md",
     "LICENSE"
@@ -30,7 +31,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@mr-maliang/research-protocol": "^0.2.0",
+    "@mr-maliang/research-protocol": "^0.3.0",
     "@clack/prompts": "^1.7.0",
     "commander": "^12.1.0",
     "marked": "^15.0.7",
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.5.4",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "malaclaw": "file:../../.dependencies/MalaClaw"
   }
 }

@@ -5,6 +5,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { type ExperimentConfig, ExperimentManifest, StudyRawResults, TrialRecord } from "./schema.js";
 import { publicationEligible } from "./flagships.js";
+import { addCandidateNode, initializeLineage, readLineage, startRound } from "./lineage.js";
+import { freezeBaseline, materializeCandidateWorktree } from "./git-lineage.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -115,21 +117,48 @@ export async function writeWorktreesStage(workspace: string, config: ExperimentC
   const locks = await readJson<InputLocks>(path.join(workspace, "inputs", "locks.json"));
   const byId = new Map(locks.inputs.map((entry) => [entry.id, entry]));
   const created: Array<{ id: string; input_id: string; revision: string; path: string; resolved_revision: string; role: string }> = [];
+  const lineageEnabled = Boolean(config.pilot);
+  let lineageInitialized = false;
   for (const candidate of config.execution.candidate_worktrees) {
     const lock = byId.get(candidate.input_id);
     if (!lock?.materialized_path) throw new Error(`candidate worktree ${candidate.id} requires materialized Git input ${candidate.input_id}`);
     if (!isCommitPin(candidate.revision)) throw new Error(`candidate worktree ${candidate.id} revision must be an immutable commit/hash`);
     const repo = path.join(workspace, lock.materialized_path);
     const target = path.join(workspace, "worktrees", candidate.id);
-    try { await fs.access(target); }
-    catch {
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await command("git", ["fetch", "--depth", "1", "origin", candidate.revision], repo);
-      await command("git", ["worktree", "add", "--detach", target, "FETCH_HEAD"], repo);
+    let resolved: string;
+    let branch = `experiments/${candidate.id}`;
+    try {
+      await fs.access(target);
+      resolved = await command("git", ["rev-parse", "HEAD"], target);
+      branch = await command("git", ["branch", "--show-current"], target) || branch;
+    } catch {
+      if (lineageEnabled) {
+        const materialized = await materializeCandidateWorktree(repo, workspace, candidate.id, branch, candidate.revision);
+        resolved = materialized.commit_sha;
+        branch = materialized.branch;
+      } else {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await command("git", ["fetch", "--depth", "1", "origin", candidate.revision], repo);
+        await command("git", ["worktree", "add", "--detach", target, "FETCH_HEAD"], repo);
+        resolved = await command("git", ["rev-parse", "HEAD"], target);
+      }
     }
-    const resolved = await command("git", ["rev-parse", "HEAD"], target);
     if (!resolved.startsWith(candidate.revision)) throw new Error(`candidate ${candidate.id} resolved ${resolved}, expected ${candidate.revision}`);
     created.push({ id: candidate.id, input_id: candidate.input_id, revision: candidate.revision, path: `worktrees/${candidate.id}`, resolved_revision: resolved, role: candidate.role });
+
+    if (lineageEnabled) {
+      if (!lineageInitialized) {
+        const baseline = await freezeBaseline(repo);
+        await initializeLineage(workspace, { id: "baseline", round_id: "baseline", branch: baseline.branch, commit_sha: baseline.commit_sha, status: "completed" });
+        const graph = await readLineage(workspace);
+        if (!graph.rounds.some((round) => round.id === "round-1")) await startRound(workspace, { id: "round-1", parent_node_id: graph.champion_node_id, proposal_ids: [] });
+        lineageInitialized = true;
+      }
+      const graph = await readLineage(workspace);
+      if (!graph.nodes.some((node) => node.id === candidate.id)) {
+        await addCandidateNode(workspace, { id: candidate.id, parent_id: graph.champion_node_id, round_id: "round-1", branch, commit_sha: resolved, status: "materialized" });
+      }
+    }
   }
   await writeJson(path.join(workspace, "worktrees", "manifest.json"), { version: 1, worktrees: created });
 }
@@ -219,7 +248,9 @@ export async function writeStudyAuditStage(workspace: string, config: Experiment
 
 function mean(values: number[]): number { return values.reduce((total, value) => total + value, 0) / values.length; }
 function percentile(values: number[], q: number): number { const sorted = [...values].sort((a, b) => a - b); const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1)))); return sorted[index]; }
-function deterministicBootstrap(deltas: number[], repeats = 2000): { lower: number; upper: number } {
+/** Mirror of the versioned Python scientific helper. TypeScript retains the
+ * final audit boundary while parity tests prevent statistical drift. */
+export function deterministicBootstrap(deltas: number[], repeats = 2000): { lower: number; upper: number } {
   let state = 0x9e3779b9;
   const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return ((state >>> 0) % 1_000_000) / 1_000_000; };
   const samples: number[] = [];

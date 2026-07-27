@@ -65,12 +65,12 @@ Use the dedicated runbook for the chosen template before creating a real run:
 - [Flagship runbook hub](./flagships/README.md)
 - [Long agentic survey](./flagships/long-agentic-survey.md)
 - [Repository survey](./flagships/repository-survey.md)
-- [nanoGPT agentic empirical paper](./flagships/nanogpt-agentic-empirical-paper.md)
+- [Nanochat agentic empirical paper](./flagships/nanochat-agentic-empirical-paper.md)
 - [Self-play autonomous empirical paper](./flagships/self-play-autonomous-empirical-paper.md)
 
 The survey paths are the safest first live runs. The empirical paths are
 executable release candidates: use `maliang preflight <workspace>`, review both
 approval gates, and start on locally controlled compute. The older standalone
-nanoGPT, self-play, and ProteinGym prescribed-runner examples remain incubating.
+Nanochat, self-play, and ProteinGym prescribed-runner examples remain incubating.
 Follow [Remote GPU with Modal](./remote-gpu-modal.md) only when a reviewed remote
 adapter—not an agentic local entrypoint—is selected.

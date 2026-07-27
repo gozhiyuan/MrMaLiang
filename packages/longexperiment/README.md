@@ -48,7 +48,7 @@ or container without unrelated credentials or data.
 
 Profiles (`existing_code`, `public_benchmark`, `from_scratch`) and suite configs compose with
 this shared flow. The three full examples are the small-model self-play,
-nanoGPT ablation, and ProteinGym/AutoScientists-compatible prescribed suites,
+Nanochat ablation, and ProteinGym/AutoScientists-compatible prescribed suites,
 plus the two public agentic empirical configurations in
 [`configs/flagships/`](configs/flagships/). The prescribed suites remain
 incubating examples; the public paper flagships are documented in the root hub.
@@ -84,8 +84,10 @@ operator cancels a paused job.
 Modal is not required: a reviewed local or other-provider command runner is
 also valid. If Modal is selected, use the complete
 [MrMaLiang remote-GPU setup guide](../../docs/remote-gpu-modal.md) before
-authorizing compute; the checked-in flagships do not contain credentials or a
-generic detached-CLI shortcut.
+authorizing compute. The flagship profiles select a maintained, versioned GPU
+runtime catalog automatically; normal operators authenticate Modal but do not
+build or publish images. The checked-in flagships do not contain credentials or
+a generic detached-CLI shortcut.
 
 ## AutoScientists
 

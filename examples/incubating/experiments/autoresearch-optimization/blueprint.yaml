@@ -1,0 +1,6 @@
+mutable_paths: [train.py]
+protected_paths: [prepare.py, program.md, evaluator/]
+max_candidates: 10
+max_rounds: 2
+gpu: A10G
+promotion: paired heldout improvement outside the confidence interval

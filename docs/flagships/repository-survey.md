@@ -21,6 +21,10 @@ input, creates only `writing/`, and records `experimentSource: none`. A
 repository alone can therefore never trigger LongExperiment. The repository is
 software evidence; it never counts toward the scholarly bibliography gates.
 
+This blueprint already selects `paper.survey`; no migration to an experiment
+template or a generalized LongExperiment profile is needed. See [flagship
+platform adoption](./platform-adoption.md) for the execution-boundary policy.
+
 ## Exact workflow
 
 ```mermaid

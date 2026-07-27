@@ -1,12 +1,15 @@
 {
   "name": "@mr-maliang/maliang",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Unified CLI for MrMaLiang writing and experiment workflows",
   "type": "module",
   "bin": {
     "maliang": "dist/cli.js"
   },
-  "files": ["dist/", "templates/"],
+  "files": [
+    "dist/",
+    "templates/"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "pretest": "npm run build",

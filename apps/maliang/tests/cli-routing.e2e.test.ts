@@ -127,9 +127,9 @@ describe("maliang command surface", () => {
   });
 
   it("does not expose incubating experiment protocols as flagship blueprints", () => {
-    const result = run(["init", path.join(temporaryRoot, "retired-blueprint"), "--blueprint", "nanogpt-ablation"]);
+    const result = run(["init", path.join(temporaryRoot, "retired-blueprint"), "--blueprint", "nanochat-ablation"]);
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}${result.stderr}`).toContain("Unknown release-ready flagship blueprint: nanogpt-ablation");
+    expect(`${result.stdout}${result.stderr}`).toContain("Unknown release-ready flagship blueprint: nanochat-ablation");
   });
 
   it("rejects a workspace whose research axes no longer match its template", async () => {
@@ -154,6 +154,17 @@ describe("maliang command surface", () => {
     expect(project.components).toEqual({ experiment: { workspace: "experiment" }, writing: { workspace: "writing" } });
     const experiment = parse(await fs.readFile(path.join(workspace, "experiment", "experiment.yaml"), "utf8")) as any;
     expect(experiment.authoring).toMatchObject({ mode: "agentic", max_revision_rounds: 3 });
+    expect(experiment).toMatchObject({
+      pilot: "survey_pilot_study",
+      runner: { kind: "modal", adapter_command: "uv run --project templates/adapters/modal python templates/adapters/modal/agentic_adapter.py" },
+      execution: { authorization: { mode: "unattended", lease_path: ".longexperiment/authorization.json" } },
+    });
+    await expect(fs.access(path.join(workspace, "experiment", "templates", "adapters", "modal", "agentic_adapter.py"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(workspace, "experiment", "templates", "adapters", "modal", "remote_runner.py"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(workspace, "experiment", "templates", "adapters", "modal", "uv.lock"))).resolves.toBeUndefined();
+    const manifest = await fs.readFile(path.join(workspace, "experiment", "malaclaw.yaml"), "utf8");
+    expect(manifest).toContain("LONGEXPERIMENT_REMOTE_PHASE='candidate_test'");
+    expect(manifest).toContain("LONGEXPERIMENT_REMOTE_PHASE='candidate_smoke'");
     expect(experiment.outputs.longwrite_workspace).toBe("../writing");
     const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;
     expect(writing.research).toMatchObject({ paper_kind: "empirical", paper_profile: "literature_survey" });
@@ -227,7 +238,7 @@ describe("maliang command surface", () => {
     const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).stdout.trim();
 
     const workspace = path.join(temporaryRoot, "repository-empirical");
-    const result = run(["init", workspace, "--blueprint", "nanogpt-agentic-empirical-paper", "--repository", repository]);
+    const result = run(["init", workspace, "--blueprint", "nanochat-agentic-empirical-paper", "--repository", repository]);
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
     const experiment = parse(await fs.readFile(path.join(workspace, "experiment", "experiment.yaml"), "utf8")) as any;
     const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;

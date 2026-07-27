@@ -1,5 +1,6 @@
 version: 1
 project: { id: self-play-autonomous-empirical, name: Self-Play Autonomous Empirical Paper }
+pilot: survey_pilot_study
 profile: from_scratch
 authoring:
   mode: agentic
@@ -35,7 +36,13 @@ suite:
       acceptance_criteria:
         - "execute baseline and agent-authored self-play method for every declared seed"
         - "use the fixed held-out evaluator and report paired uncertainty"
-runner: { kind: command }
+runner:
+  kind: modal
+  app_path: templates/adapters/modal/agentic_adapter.py
+  function_ref: agentic.execute_phase
+  gpu: L40S
+  max_gpu_hours: 24
+  adapter_command: uv run --project templates/adapters/modal python templates/adapters/modal/agentic_adapter.py
 execution:
   max_trials: 8
   max_active_run_minutes: 1440
@@ -43,6 +50,7 @@ execution:
   max_parallel_trials: 1
   requires_design_approval: true
   requires_revision_approval: true
+  authorization: { mode: unattended, lease_path: .longexperiment/authorization.json, isolation: ephemeral_container }
   candidate_worktrees: []
   enabled_optional_actions: []
 outputs: {}

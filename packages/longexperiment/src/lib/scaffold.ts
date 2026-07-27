@@ -58,7 +58,10 @@ export async function scaffoldExperimentWorkspace(opts: ScaffoldOptions): Promis
     "This workspace controls an experiment runner through MalaClaw. It does not claim to reproduce an external runner's private or task-specific internal agent graph.", "",
   ].join("\n"), "utf-8");
   await fs.writeFile(path.join(opts.targetDir, "malaclaw.yaml"), manifestYaml(raw), "utf-8");
-  await fs.cp(path.join(packageRoot, "templates"), path.join(opts.targetDir, "templates"), { recursive: true });
+  await fs.cp(path.join(packageRoot, "templates"), path.join(opts.targetDir, "templates"), {
+    recursive: true,
+    filter: (source) => ![".venv", "__pycache__"].includes(path.basename(source)),
+  });
   return [...dirs.map((dir) => `${dir}/`), "experiment.yaml", "experiment_brief.md", "malaclaw.yaml", "templates/"];
 }
 
@@ -78,6 +81,9 @@ export async function scaffoldFlagshipWorkspace(targetDir: string, config: Exper
     "## Flagship execution contract", "", "Review experiment.yaml, runner-specific environment variables, immutable input pins, and budget before approving the design. The run must produce per-study records; LongExperiment verifies results rather than accepting a self-reported summary.", "",
   ].join("\n"), "utf8");
   await fs.writeFile(path.join(targetDir, "malaclaw.yaml"), manifestYaml(config), "utf8");
-  await fs.cp(path.join(packageRoot, "templates"), path.join(targetDir, "templates"), { recursive: true });
+  await fs.cp(path.join(packageRoot, "templates"), path.join(targetDir, "templates"), {
+    recursive: true,
+    filter: (source) => ![".venv", "__pycache__"].includes(path.basename(source)),
+  });
   return [...dirs.map((dir) => `${dir}/`), "experiment.yaml", "experiment_brief.md", "malaclaw.yaml", "templates/"];
 }

@@ -38,7 +38,7 @@ impossible-combination guards in `apps/maliang/src/templates.ts` and project
 validation.
 
 Novel and technical-book workflows use LongWrite but do not imply research or
-experiment capabilities. Prescribed nanoGPT, self-play, and ProteinGym examples
+experiment capabilities. Prescribed Nanochat, self-play, and ProteinGym examples
 under `examples/incubating/` are contract fixtures until promoted explicitly;
 do not describe them as release-ready flagships.
 
@@ -115,7 +115,7 @@ Requirements:
 
 - Node.js 22 or newer.
 - npm workspaces.
-- MalaClaw `>=1.0.2 <2.0.0` on `PATH` for integration rehearsals.
+- MalaClaw `>=1.1.0 <2.0.0` on `PATH` for integration rehearsals.
 
 Common commands from the repository root:
 

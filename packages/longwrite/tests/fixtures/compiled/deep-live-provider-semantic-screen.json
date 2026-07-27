@@ -1,0 +1,3752 @@
+{
+  "version": 1,
+  "runtime": "codex",
+  "project": {
+    "id": "deep-live",
+    "name": "Deep Live Survey",
+    "description": "AutoResearch Agentic project: Long-horizon agent memory",
+    "entry_team": "manuscript-writing"
+  },
+  "packs": [
+    {
+      "id": "manuscript-writing"
+    }
+  ],
+  "workflow": {
+    "mode": "auto_research_agentic",
+    "artifact_type": "research_paper",
+    "stages": [
+      {
+        "id": "intake",
+        "title": "Project intake",
+        "owner": "research-lead",
+        "outputs": [
+          "project_brief.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ]
+      },
+      {
+        "id": "search_planner",
+        "title": "Search planning",
+        "owner": "source-curator",
+        "inputs": [
+          "project_brief.md"
+        ],
+        "outputs": [
+          "sources/search-plan.json"
+        ],
+        "instructions": [
+          "Write strict JSON matching {\"version\":1,\"topic\":\"...\",\"query_variants\":[...],\"taxonomy_cells\":[{\"cell\":\"...\",\"query_variants\":[\"...\",\"...\",\"...\"]}],\"exclusion_terms\":[],\"venue_priorities\":[],\"source_types\":[...]}. Preserve every project taxonomy coverage cell verbatim as a taxonomy_cells[].cell; each cell must have at least 3 distinct query variants.",
+          "Cover method families, evaluation/benchmark terms, prior surveys, and application variants. Prefer queries that can retrieve both recent and foundational work."
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "search-plan",
+              "."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "recall",
+        "title": "Literature recall",
+        "owner": "source-curator",
+        "inputs": [
+          "project_brief.md"
+        ],
+        "tools": [
+          "web_search",
+          "arxiv_search",
+          "dblp_lookup"
+        ],
+        "outputs": [
+          "sources/raw_results.jsonl",
+          "sources/deduped_sources.jsonl",
+          "sources/reference-seeds.json",
+          "reports/reference-seeds.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "recall",
+            ".",
+            "--topic",
+            "Long-horizon agent memory",
+            "--provider",
+            "openalex",
+            "--target-candidates",
+            "400",
+            "--query-budget",
+            "50"
+          ]
+        }
+      },
+      {
+        "id": "snowball_recall",
+        "title": "Citation-network expansion",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/snowball_results.jsonl",
+          "sources/deduped_sources.jsonl",
+          "reports/snowball.md"
+        ],
+        "allow_unchanged_outputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "snowball",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "enrich",
+        "title": "Metadata enrichment",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/deduped_sources.jsonl",
+          "sources/metadata-upgrades.jsonl",
+          "reports/metadata-enrichment.md"
+        ],
+        "allow_unchanged_outputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "enrich",
+            ".",
+            "--max-sources",
+            "20"
+          ]
+        }
+      },
+      {
+        "id": "venue_upgrade",
+        "title": "Venue and acceptance metadata upgrade",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/deduped_sources.jsonl",
+          "sources/venue-upgrades.jsonl",
+          "reports/venue-upgrade.md"
+        ],
+        "allow_unchanged_outputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "venue-upgrade",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "score",
+        "title": "Source scoring",
+        "owner": "analyst",
+        "inputs": [
+          "sources/deduped_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/scored_sources.jsonl"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "score",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "classify",
+        "title": "Source depth classification",
+        "owner": "analyst",
+        "inputs": [
+          "sources/scored_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/classified_sources.jsonl",
+          "sources/bibliography.bib",
+          "sources/citation_plan.jsonl",
+          "reports/research-tooling.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "classify",
+            ".",
+            "--topic",
+            "Long-horizon agent memory"
+          ]
+        }
+      },
+      {
+        "id": "semantic_candidate_select",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Select bounded abstract-screening candidates",
+        "inputs": [
+          "sources/classified_sources.jsonl",
+          "sources/search-plan.json"
+        ],
+        "outputs": [
+          "sources/semantic-screening-candidates.json",
+          "sources/metadata-classified_sources.jsonl"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "select-semantic-candidates",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "semantic_screen",
+        "owner": "analyst",
+        "title": "Screen bounded candidates from titles and abstracts",
+        "inputs": [
+          "sources/semantic-screening-candidates.json"
+        ],
+        "skills": [
+          "sources/semantic-screening-candidates.json"
+        ],
+        "instructions": [
+          "Read only the bounded candidate metadata in sources/semantic-screening-candidates.json. Write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}.",
+          "This is abstract-level semantic triage, not a claim-evidence judgment. Assess every candidate; source_id and taxonomy_cells must come from the supplied artifact/configuration. Do not invent findings, quotes, pages, venues, acceptance status, or source IDs.",
+          "Use these exact enums: chapter_role is protagonist, comparison, background, or exclude; semantic_relevance is high, medium, or low; recommended_depth is A, B, C, or D (use D—not none—for excluded material); fulltext_priority is the JSON boolean true or false (never high, medium, low, null, or a string). An excluded source must set fulltext_priority false. Use A/B only when the abstract indicates a central/comparative role; final A/B still requires validated full-text evidence."
+        ],
+        "outputs": [
+          "sources/semantic-screening.json",
+          "reports/semantic-screen-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "research",
+              "repair-semantic-screen",
+              "."
+            ]
+          }
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "identity_reconcile",
+        "title": "Source identity and provenance reconciliation",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/source-identities.jsonl",
+          "reports/source-identities.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "reconcile-identities",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "fulltext",
+        "title": "Full-text ingestion",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "fulltext/manifest.json",
+          "reports/fulltext.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "fulltext",
+            ".",
+            "--max-sources",
+            "100",
+            "--no-pdf-download"
+          ]
+        }
+      },
+      {
+        "id": "evidence_index",
+        "title": "Evidence corpus indexing",
+        "owner": "source-curator",
+        "inputs": [
+          "sources/classified_sources.jsonl",
+          "fulltext/manifest.json"
+        ],
+        "outputs": [
+          "evidence/chunks.jsonl",
+          "evidence/index.sqlite",
+          "evidence/manifest.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "evidence",
+            "index",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "source_evidence_candidate_select",
+        "owner": "source-curator",
+        "runtime": "script",
+        "title": "Select approved full-text sources for claim extraction",
+        "inputs": [
+          "sources/semantic-screening.json",
+          "fulltext/manifest.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/source-evidence-candidates.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "select-source-evidence-candidates",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "source_evidence_extract",
+        "owner": "analyst",
+        "title": "Extract source-level evidence from retrieved full text",
+        "inputs": [
+          "sources/source-evidence-candidates.json",
+          "evidence/chunks.jsonl"
+        ],
+        "optional_inputs": [
+          "fulltext/*.md"
+        ],
+        "skills": [
+          "sources/source-evidence-candidates.json",
+          "evidence/chunks.jsonl",
+          "fulltext/*.md"
+        ],
+        "instructions": [
+          "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}.",
+          "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must copy an exact contiguous run of at least four normalized words from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
+          "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The validator checks every excerpt against the retrieved text before accepting this attempt and controls final A/B depth."
+        ],
+        "outputs": [
+          "evidence/source-packets.json",
+          "reports/source-evidence-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "research",
+              "repair-source-evidence",
+              "."
+            ]
+          }
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "finalize_evidence_depth",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Finalize citation depth from semantic and full-text evidence",
+        "inputs": [
+          "sources/metadata-classified_sources.jsonl",
+          "sources/semantic-screening.json",
+          "evidence/source-packets.json"
+        ],
+        "outputs": [
+          "sources/classified_sources.jsonl",
+          "sources/bibliography.bib",
+          "sources/citation_plan.jsonl",
+          "reports/evidence-depth-finalization.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "finalize-evidence-depth",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "corpus_gate_assessment",
+        "owner": "source-curator",
+        "runtime": "script",
+        "title": "Measure final evidence-backed corpus coverage before recovery",
+        "inputs": [
+          "sources/classified_sources.jsonl",
+          "sources/search-plan.json"
+        ],
+        "outputs": [
+          "reports/corpus-gates.json",
+          "reports/corpus-gates.md",
+          "reports/metrics.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "corpus-gates",
+            ".",
+            "--advisory"
+          ]
+        }
+      },
+      {
+        "type": "loop",
+        "id": "corpus_evidence_recovery_loop",
+        "title": "Recover missing validated core evidence before outlining",
+        "max_rounds": 2,
+        "stop_when": "corpus_gate_pass >= 1",
+        "on_exhaustion": "fail",
+        "stages": [
+          {
+            "id": "corpus_recovery_plan",
+            "owner": "analyst",
+            "title": "Plan one bounded evidence recovery from failed corpus gates",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "reports/corpus-gates.json",
+              "reports/corpus-gates.md",
+              "sources/semantic-screening.json",
+              "fulltext/manifest.json",
+              "reports/evidence-depth-finalization.md"
+            ],
+            "skills": [
+              "reports/corpus-gates.md",
+              "sources/semantic-screening.json",
+              "sources/source-evidence-candidates.json",
+              "fulltext/manifest.json",
+              "reports/evidence-depth-finalization.md"
+            ],
+            "instructions": [
+              "Read the failed deterministic corpus-gate report and the current semantic/full-text evidence records. Write ONLY reports/corpus-recovery-plan.json as an AgenticActionPlan object: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}.",
+              "Select exactly one action: tool=targeted_research_expansion. Its finding_ids may name only failed IDs from reports/corpus-gates.json. It must include core_sources with target at least the configured gate. Diagnose why potential A/B sources failed to become evidence-backed (taxonomy coverage, semantic triage, open full-text availability, or insufficient support), and name focused retrieval terms/venues/source types in the finding summary so the bounded deterministic expansion can derive queries.",
+              "Do not lower any gate, widen scope into generic bibliography growth, invent sources/claims/URLs, or select outline/prose/visual actions. This is a two-round evidence recovery, not a request to draft the paper."
+            ],
+            "outputs": [
+              "reports/corpus-recovery-plan.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-corpus-recovery-plan",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "corpus_recovery_expand",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Expand research through the validated recovery plan",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "reports/corpus-recovery-plan.json"
+            ],
+            "outputs": [
+              "reports/research-expansion.md",
+              "sources/semantic-screening-candidates.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "expand",
+                ".",
+                "--action-plan",
+                "reports/corpus-recovery-plan.json"
+              ]
+            }
+          },
+          {
+            "id": "corpus_recovery_semantic_screen",
+            "owner": "analyst",
+            "title": "Re-screen expanded candidates for evidence recovery",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "sources/semantic-screening-candidates.json"
+            ],
+            "skills": [
+              "sources/semantic-screening-candidates.json",
+              "reports/corpus-gates.md"
+            ],
+            "instructions": [
+              "Read only the bounded candidate metadata and current corpus-gate report. Write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}. Reassess every supplied candidate using title/abstract evidence.",
+              "Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D; fulltext_priority true|false. Prioritize open, directly relevant sources that can close the named gate, but do not promote a source without abstract support. Final A/B still requires validated full-text evidence."
+            ],
+            "outputs": [
+              "sources/semantic-screening.json",
+              "reports/semantic-screen-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-semantic-screen",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "corpus_recovery_fulltext",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by recovered semantic screening",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "fulltext/manifest.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "fulltext",
+                ".",
+                "--max-sources",
+                "100",
+                "--no-pdf-download"
+              ]
+            }
+          },
+          {
+            "id": "corpus_recovery_evidence_index",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild the evidence index after corpus recovery",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "fulltext/manifest.json"
+            ],
+            "outputs": [
+              "evidence/chunks.jsonl",
+              "evidence/index.sqlite"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "index",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "corpus_recovery_source_candidate_select",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select recovered full-text sources for claim extraction",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "fulltext/manifest.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "sources/source-evidence-candidates.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "select-source-evidence-candidates",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "corpus_recovery_source_evidence_extract",
+            "owner": "analyst",
+            "title": "Extract validated evidence from recovered full text",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl"
+            ],
+            "optional_inputs": [
+              "fulltext/*.md"
+            ],
+            "skills": [
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl",
+              "fulltext/*.md"
+            ],
+            "instructions": [
+              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
+              "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Explain comparison dimensions and limitations faithfully so the deterministic validator can finalize citation depth."
+            ],
+            "outputs": [
+              "evidence/source-packets.json",
+              "reports/source-evidence-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-source-evidence",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "corpus_recovery_finalize_evidence_depth",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize recovered citation depth from validated evidence",
+            "when": "corpus_gate_pass < 1",
+            "inputs": [
+              "sources/metadata-classified_sources.jsonl",
+              "sources/semantic-screening.json",
+              "evidence/source-packets.json"
+            ],
+            "outputs": [
+              "sources/classified_sources.jsonl",
+              "sources/bibliography.bib",
+              "sources/citation_plan.jsonl",
+              "reports/evidence-depth-finalization.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "finalize-evidence-depth",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "corpus_recovery_assessment",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-measure corpus gates after evidence recovery",
+            "inputs": [
+              "sources/classified_sources.jsonl",
+              "sources/search-plan.json"
+            ],
+            "outputs": [
+              "reports/corpus-gates.json",
+              "reports/corpus-gates.md",
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "corpus-gates",
+                ".",
+                "--advisory"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "corpus_gates",
+        "title": "Full-mode corpus breadth gates",
+        "owner": "analyst",
+        "inputs": [
+          "sources/classified_sources.jsonl",
+          "sources/source-identities.jsonl"
+        ],
+        "outputs": [
+          "reports/corpus-gates.json",
+          "reports/corpus-gates.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "corpus-gates",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "outline",
+        "title": "Outline",
+        "owner": "outline-architect",
+        "inputs": [
+          "project_brief.md",
+          "sources/classified_sources.jsonl",
+          "evidence/source-packets.json",
+          "reports/corpus-gates.md"
+        ],
+        "optional_inputs": [
+          "feedback/outline-revision.md",
+          "sources/semantic-screening.json",
+          "reports/evidence-depth-finalization.md"
+        ],
+        "outputs": [
+          "outline.md",
+          "outline.json"
+        ],
+        "instructions": [
+          "When feedback/outline-revision.md is present, treat it as the human's requested changes for this outline revision. Implement it while preserving the evidence-first scope and emit matching outline.md and outline.json.",
+          "Every outline.json section MUST include: id, title, role, target_words, purpose, keywords (at least two strings), and source_ids. keywords are the retrieval terms used for its section evidence packet.",
+          "For a survey contract, assign exactly these role values where applicable: introduction_gap_contributions, multi_axis_taxonomy, method_family (at least two sections), related_work_differentiation, limitations_future_work, or body. Include each required role at least once, and use body only for remaining sections.",
+          "Use evidence/source-packets.json as the compact deep-reading dossier: organize sections around supported contributions, comparisons, tensions, and limitations rather than bibliography order. Do not claim to have read or synthesize a source beyond its supplied packet.",
+          "For every substantive outline section, select source_ids that can support its intended argument and make the section purpose state the comparative or analytical question it resolves. Preserve explicit taxonomy coverage and leave unresolved evidence gaps visible rather than papering them over."
+        ],
+        "requires_human_approval": false,
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ],
+        "skills": [
+          "evidence/source-packets.json",
+          "reports/corpus-gates.md",
+          "sources/semantic-screening.json"
+        ]
+      },
+      {
+        "type": "loop",
+        "id": "outline_quality_loop",
+        "title": "Review and revise the evidence-aware outline",
+        "max_rounds": 3,
+        "stop_when": "outline_readiness >= 1",
+        "on_exhaustion": "fail",
+        "stages": [
+          {
+            "id": "outline_survey_contract",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit outline survey contract",
+            "inputs": [
+              "outline.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "reports/survey-contract.json",
+              "reports/survey-contract.md",
+              "tables/related-work-matrix.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "survey-contract",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "outline_structure_audit",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit outline structure",
+            "inputs": [
+              "outline.json"
+            ],
+            "outputs": [
+              "reports/structure-audit.json",
+              "reports/structure-audit.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "structure",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "outline_review",
+            "owner": "skeptical-reviewer",
+            "title": "Critique outline against source evidence",
+            "inputs": [
+              "outline.md",
+              "outline.json",
+              "reports/survey-contract.md",
+              "evidence/source-packets.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "optional_inputs": [
+              "reports/structure-audit.md",
+              "sources/semantic-screening.json",
+              "reports/corpus-gates.md",
+              "feedback/outline-revision.md"
+            ],
+            "skills": [
+              "outline.json",
+              "reports/survey-contract.md",
+              "reports/structure-audit.md",
+              "evidence/source-packets.json",
+              "sources/classified_sources.jsonl",
+              "reports/corpus-gates.md"
+            ],
+            "instructions": [
+              "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
+              "Review the outline as a research argument, not a table of contents. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
+              "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval."
+            ],
+            "outputs": [
+              "reviews/outline-review.json",
+              "reports/outline-review-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-outline-review",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "outline_readiness_score",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Score deterministic outline readiness",
+            "inputs": [
+              "reviews/outline-review.json",
+              "reports/survey-contract.json"
+            ],
+            "optional_inputs": [
+              "reports/structure-audit.json"
+            ],
+            "outputs": [
+              "reports/outline-readiness.md",
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "score-outline-readiness",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "outline_revise",
+            "owner": "outline-architect",
+            "title": "Revise outline from evidence-aware critique",
+            "inputs": [
+              "project_brief.md",
+              "outline.md",
+              "outline.json",
+              "reviews/outline-review.json",
+              "reports/outline-readiness.md",
+              "evidence/source-packets.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "optional_inputs": [
+              "feedback/outline-revision.md",
+              "sources/semantic-screening.json",
+              "reports/corpus-gates.md"
+            ],
+            "skills": [
+              "outline.json",
+              "reviews/outline-review.json",
+              "reports/survey-contract.md",
+              "reports/structure-audit.md",
+              "evidence/source-packets.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "instructions": [
+              "Rewrite outline.md and outline.json to address every major/critical review finding with the smallest evidence-grounded structural change. Preserve valid sections when there are no blocking findings; do not add generic filler or a revision log to reader-facing outline artifacts.",
+              "Every outline.json section must retain id, title, role, target_words, purpose, at least two keywords, and source_ids. Use only current classified source IDs. Keep the paper's organizing argument explicit: taxonomy, comparisons, limitations, and evidence gaps must be structurally visible before drafting begins."
+            ],
+            "outputs": [
+              "outline.md",
+              "outline.json"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "outline_approval_gate",
+        "owner": "outline-architect",
+        "runtime": "script",
+        "title": "Human approval of re-audited outline",
+        "inputs": [
+          "outline.md",
+          "outline.json",
+          "reports/outline-readiness.md",
+          "reports/metrics.json"
+        ],
+        "outputs": [
+          "reports/outline-approval.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "requires_human_approval": true,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "outline-approval",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "allocate_evidence",
+        "title": "Outline-to-evidence allocation",
+        "owner": "source-curator",
+        "inputs": [
+          "outline.json",
+          "evidence/index.sqlite",
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "evidence/coverage.json",
+          "evidence/section-*.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "evidence",
+            "allocate",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "initial_artifact_plan",
+        "owner": "analyst",
+        "title": "Choose evidence-aware artifacts before drafting",
+        "inputs": [
+          "project_brief.md",
+          "outline.md",
+          "outline.json",
+          "evidence/source-packets.json",
+          "sources/classified_sources.jsonl",
+          "evidence/coverage.json"
+        ],
+        "optional_inputs": [
+          "sources/semantic-screening.json",
+          "reports/corpus-gates.md",
+          "reports/outline-readiness.md"
+        ],
+        "skills": [
+          "project_brief.md",
+          "outline.json",
+          "evidence/source-packets.json",
+          "sources/classified_sources.jsonl",
+          "evidence/coverage.json"
+        ],
+        "instructions": [
+          "Write ONLY reviews/artifact-plan.json as {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?]}]}. It is a creative strategy record, not a request to write TeX, code, coordinates, dates, or results.",
+          "Choose only source-grounded artifacts that materially improve the approved outline. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot. A formalization must clarify a sourced definition, objective, comparison, or analytical claim; it is never decorative mathematics. A comparison_matrix or timeline requires a target section and at least three representative classified source IDs. An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. A metadata_plot uses publication_year, citation_depth, or venue and derives values from verified workspace metadata.",
+          "For a long survey, use the configured visual quality targets as an artifact budget: select enough independent comparison/table, metadata, timeline, or diagram intents for the visual planner to meet them, but do not duplicate weak inventory tables. The visual planner will turn these intents into a strict source-bound figure-spec contract.",
+          "empirical_pilot is legal only when research.paper_kind is empirical. It creates a preregistration request with hypothesis, control, and trial acceptance criterion; it never invents findings and does not render an empirical result plot until LongExperiment provides verified result data.",
+          "Choose at most five intents. Do not invent source IDs, sections, taxonomy cells, numerical values, experimental results, or unsupported equations. Use an empty intents array when no artifact is justified."
+        ],
+        "outputs": [
+          "reviews/artifact-plan.json",
+          "reports/artifact-plan-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "review",
+              "repair-artifact-plan",
+              "."
+            ]
+          }
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "visual_plan",
+        "title": "Plan placed figures and tables",
+        "owner": "artifact-builder",
+        "inputs": [
+          "outline.json",
+          "evidence/coverage.json",
+          "sources/classified_sources.jsonl",
+          "reviews/artifact-plan.json"
+        ],
+        "outputs": [
+          "figures/placement-plan.json"
+        ],
+        "instructions": [
+          "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes (each label at most 48 characters) and only edges that express the survey's actual organizing relationship (edge labels at most 36 characters). In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files.",
+          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables.",
+          "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section.",
+          "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
+          "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph."
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "optional_inputs": [
+          "reports/artifact-plan-repair.md"
+        ],
+        "skills": [
+          "reviews/artifact-plan.json",
+          "evidence/source-packets.json"
+        ]
+      },
+      {
+        "id": "draft_sections",
+        "title": "Draft sections",
+        "type": "foreach",
+        "foreach": "outline.sections",
+        "item_name": "section",
+        "max_parallel": 2,
+        "steps": [
+          {
+            "id": "draft",
+            "owner": "chapter-writer",
+            "inputs": [
+              "project_brief.md",
+              "outline.md",
+              "outline.json",
+              "sources/classified_sources.jsonl",
+              "evidence/section-{{section.id}}.json",
+              "reviews/artifact-plan.json"
+            ],
+            "optional_inputs": [
+              "fulltext/*.md",
+              "reports/artifact-plan-repair.md"
+            ],
+            "skills": [
+              "project_brief.md",
+              "outline.json",
+              "evidence/section-{{section.id}}.json",
+              "reviews/artifact-plan.json",
+              "evidence/source-packets.json"
+            ],
+            "instructions": [
+              "Follow the injected project brief for audience, target length, and style. Do not cite a URL/file directly from the brief: recognized scholarly links enter through authoritative reference seeds and may be cited only after they appear in the section evidence packet; all other links/files remain contextual leads. Cite factual claims only with exact packet chunk ids.",
+              "Write complete reader-facing prose for this section, aiming for its outline.json target_words allocation. Do not emit a scaffold, source inventory, or a shorter placeholder merely because later revision exists.",
+              "Do not emit Markdown pipe tables, hand-numbered Table/Figure references, or prose pretending to be a diagram. The artifact builder owns captions, labels, table layout, and rendered figures; explain the comparison or relationship in prose and let the placed artifact carry the formal reference.",
+              "Use inline `$...$` or display `$$...$$` notation only when it formalizes a sourced definition, objective, comparison, or analytical claim that materially helps the reader. Define every symbol in nearby prose; never add decorative equations or imply a theorem/experiment not supported by the evidence packet.",
+              "For research prose, cite only exact chunk ids from the injected evidence packet: [source:<source-id>:p<paragraph>]. A generic [source:<source-id>] marker is not enough for publication validation.",
+              "Do not cite a source merely because it appears in source_ids. If no packet chunk supports a factual claim, remove or qualify the claim.",
+              "Read only the pre-draft artifact intents that name this section. If a validated formalization is selected, decide its exact source-grounded notation from the evidence packet, define every symbol nearby, and omit it if a useful formalization cannot be supported. Do not add arbitrary mathematics. Explain nearby planned figures/tables in prose, but leave their labels, captions, data, and placement to the artifact builder."
+            ],
+            "outputs": [
+              "chapters/{{section.id}}.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "draft",
+                "section",
+                "."
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "citation_ledger",
+        "title": "Citation evidence ledger",
+        "owner": "analyst",
+        "inputs": [
+          "chapters/*.md",
+          "evidence/coverage.json"
+        ],
+        "outputs": [
+          "evidence/citation-ledger.jsonl"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "evidence",
+            "consolidate",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "evidence_audit",
+        "title": "Audit citation evidence before review",
+        "owner": "analyst",
+        "inputs": [
+          "evidence/citation-ledger.jsonl"
+        ],
+        "outputs": [
+          "reports/evidence-audit.json",
+          "reports/evidence-audit.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "evidence",
+            "audit",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "abstract",
+        "title": "Write research-paper abstract",
+        "owner": "editor",
+        "inputs": [
+          "project_brief.md",
+          "outline.md",
+          "chapters/*.md"
+        ],
+        "optional_inputs": [
+          "evidence/coverage.json"
+        ],
+        "skills": [
+          "project_brief.md",
+          "outline.md"
+        ],
+        "instructions": [
+          "Write paper/abstract.md as 150--250 words of reader-facing survey prose: the research problem, scope and selection basis, organizing contribution, main synthesis, and principal limitation or open question. Do not mention LongWrite, agents, prompts, or workflow mechanics. Do not use citations, source markers, headings other than an optional '# Abstract', or unsupported claims."
+        ],
+        "outputs": [
+          "paper/abstract.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ]
+      },
+      {
+        "id": "initial_build",
+        "title": "Build review manuscript",
+        "owner": "artifact-builder",
+        "inputs": [
+          "chapters/*.md",
+          "paper/abstract.md"
+        ],
+        "optional_inputs": [
+          "sources/bibliography.bib"
+        ],
+        "outputs": [
+          "figures/figure-plan.md",
+          "figures/manifest.json",
+          "figures/*.svg",
+          "paper/main.tex",
+          "paper/references.bib",
+          "paper/sections/*.tex",
+          "paper/figures/*.tex",
+          "paper/tables/*.tex",
+          "build/manuscript.pdf"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "build",
+            "research",
+            "."
+          ]
+        },
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "figures",
+              "."
+            ]
+          },
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "latex",
+              "."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "render_visual_review",
+        "title": "Render caption-bearing PDF pages for multimodal visual review",
+        "owner": "artifact-builder",
+        "inputs": [
+          "build/manuscript.pdf"
+        ],
+        "outputs": [
+          "reports/visual-render-manifest.json",
+          "reports/visual-review/*.png"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "build",
+            "visual-review",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "visual_review",
+        "title": "Inspect rendered figures and tables for reader-facing legibility",
+        "owner": "skeptical-reviewer",
+        "runtime": "codex",
+        "inputs": [
+          "reports/visual-render-manifest.json",
+          "build/manuscript.pdf"
+        ],
+        "image_inputs": [
+          "reports/visual-review/*.png"
+        ],
+        "skills": [
+          "reports/visual-render-manifest.json",
+          "figures/manifest.json"
+        ],
+        "instructions": [
+          "Inspect the attached PNG pages as visual input, not merely their filenames or PDF text. Check every rendered page for overlapping labels/arrows/nodes, clipping, illegibly small text, unsafe contrast, table overflow/truncation, misplaced captions, and visual claims that the reader cannot verify.",
+          "Write reviews/visual-qa.json as strict JSON: {version:1,render_manifest_sha256:<sha256 of reports/visual-render-manifest.json including its trailing newline>,status:pass|fail,inspected_pages:[every rendered page number],observations:[{page,observation}],findings:[{id,severity:minor|major|critical,page,summary,remediation}],summary}. Every page needs a concrete observation. status: pass is legal only with no major/critical finding; status: fail requires at least one major/critical finding.",
+          "This is a visual QA record, not a prose review. Do not edit figures, TeX, or manuscript text. A major or critical defect must name the page and an actionable renderer/placement repair.",
+          "Also write reviews/visual-qa.md as a concise reader-facing summary of the observations and findings."
+        ],
+        "outputs": [
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ],
+        "retry": {
+          "max_attempts": 2
+        },
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "visual-review",
+              "."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "baseline_review",
+        "title": "Baseline simulated peer review",
+        "owner": "skeptical-reviewer",
+        "inputs": [
+          "project_brief.md",
+          "outline.md",
+          "outline.json",
+          "chapters/*.md",
+          "build/manuscript.pdf",
+          "figures/manifest.json"
+        ],
+        "optional_inputs": [
+          "evidence/coverage.json",
+          "evidence/citation-ledger.jsonl",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "feedback/user-feedback.md",
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ],
+        "skills": [
+          "project_brief.md",
+          "outline.json",
+          "evidence/coverage.json",
+          "evidence/citation-ledger.jsonl",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "feedback/user-feedback.md",
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ],
+        "instructions": [
+          "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations.",
+          "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation.",
+          "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved.",
+          "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler.",
+          "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
+        ],
+        "outputs": [
+          "reviews/review-round-001.md",
+          "reviews/scorecard.json"
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "scorecard",
+              "."
+            ]
+          },
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "review",
+              "score",
+              "."
+            ]
+          }
+        ]
+      },
+      {
+        "id": "quality_loop",
+        "type": "loop",
+        "title": "Review, route, revise, and rebuild",
+        "max_rounds": 5,
+        "stop_when": "review_score >= 8.0",
+        "on_exhaustion": "succeed",
+        "stages": [
+          {
+            "id": "artifact_plan",
+            "owner": "analyst",
+            "title": "Choose source-grounded analytical artifacts",
+            "inputs": [
+              "reviews/scorecard.json",
+              "reports/evidence-audit.md",
+              "outline.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "optional_inputs": [
+              "reports/metrics.json",
+              "evidence/coverage.json",
+              "feedback/user-feedback.md"
+            ],
+            "skills": [
+              "reviews/scorecard.json",
+              "reports/evidence-audit.md",
+              "outline.json",
+              "sources/classified_sources.jsonl",
+              "evidence/coverage.json"
+            ],
+            "instructions": [
+              "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified.",
+              "The current artifact-plan contract additionally permits timeline and architecture_diagram intents. A timeline needs a target section and at least three classified source IDs; an architecture diagram follows this profile's requirement: An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. The visual renderer derives dates from metadata and never accepts handwritten coordinates or result values.",
+              "Schema: {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?}]}]}. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot.",
+              "Formalization is a request for the chapter writer to introduce a compact definition/objective with locally defined symbols; it requires a target section and supporting classified source ids. Do not request decorative mathematics.",
+              "comparison_matrix requires representative source ids. metadata_plot must select publication_year, citation_depth, or venue and a target section; its renderer derives values only from verified workspace metadata. timeline requires a target section and at least three classified source ids; its renderer derives dates and labels only from verified workspace metadata. An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. taxonomy_recall must name one configured taxonomy cell and target woven A/B evidence.",
+              "empirical_pilot is legal only when research.paper_kind is empirical. It must state a hypothesis, control, and trial acceptance criterion. It creates a preregistration request only; LongWrite does not execute an experiment until the configured LongExperiment integration is available.",
+              "Choose at most five intents. Do not invent source ids, sections, taxonomy cells, commands, experimental results, or plot values."
+            ],
+            "outputs": [
+              "reviews/artifact-plan.json",
+              "reports/artifact-plan-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-artifact-plan",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "action_plan",
+            "owner": "analyst",
+            "title": "Plan bounded remediation actions",
+            "inputs": [
+              "reviews/scorecard.json",
+              "reports/evidence-audit.md",
+              "reviews/artifact-plan.json"
+            ],
+            "optional_inputs": [
+              "reports/metrics.json",
+              "feedback/user-feedback.md",
+              "reports/claim-gate.md",
+              "reports/artifact-plan-repair.md"
+            ],
+            "skills": [
+              "reviews/scorecard.json",
+              "reports/metrics.json",
+              "reports/evidence-audit.md",
+              "feedback/user-feedback.md",
+              "reports/claim-gate.md",
+              "reviews/artifact-plan.json"
+            ],
+            "instructions": [
+              "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
+              "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
+              "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
+              "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
+              "Select reopen_outline only when incremental chapter revision cannot address the review finding. Its rationale must name the defective organizing claim and evidence-backed replacement. It may co-occur with targeted_research_expansion: the dispatcher refreshes and validates the literature before it reopens the outline in the same bounded round.",
+              "Output ownership is strict: revise_sections may change only chapters/*.md, paper/abstract.md, and reviews/revision-report.md. Never assign it a generated table/figure, placement, caption, rendered-PDF, bibliography-presentation, TeX, or build defect. Assign those findings to revise_visual_plan so the artifact builder can write the durable placement contract before the normal rebuild.",
+              "If one finding spans prose and an artifact, split it into two findings (or attach the same finding id to both actions) and keep each action rationale within that action's declared outputs. Do not ask a prose action to hand off uneditable work as a blocker.",
+              "Select each tool at most once per plan. Combine all findings owned by the same tool into that tool's single action; its output contract is shared across those findings.",
+              "Every action must name at least one finding id and at least one quantitative acceptance criterion. Select the smallest sufficient set; do not invent commands, paths, tool ids, or model settings.",
+              "If a finding requires an operator decision, select request_operator_clarification as the ONLY action. Put the exact question in its rationale; never guess the answer."
+            ],
+            "outputs": [
+              "reviews/action-plan.json",
+              "reports/action-plan-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-action-plan",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            }
+          },
+          {
+            "id": "action_plan_split",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Order remediation actions by evidence dependency",
+            "inputs": [
+              "reviews/action-plan.json"
+            ],
+            "outputs": [
+              "reviews/research-action-plan.json",
+              "reviews/outline-action-plan.json",
+              "reviews/revision-action-plan.json",
+              "reports/action-plan-split.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "split-action-plan",
+                "."
+              ]
+            }
+          },
+          {
+            "type": "action_dispatch",
+            "id": "research_action_dispatch",
+            "title": "Execute evidence-expansion actions before revision",
+            "owner": "analyst",
+            "plan_path": "reviews/research-action-plan.json",
+            "allowed_actions": [
+              "targeted_research_expansion"
+            ],
+            "max_actions": 1,
+            "outputs": [
+              "reports/action-dispatch-research.json"
+            ]
+          },
+          {
+            "id": "quality_dispatch_metrics",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Record whether an evidence expansion was dispatched this round",
+            "inputs": [
+              "reports/action-dispatch-research.json"
+            ],
+            "outputs": [
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "dispatch-metrics",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "quality_semantic_screen",
+            "owner": "analyst",
+            "title": "Refresh abstract screening after a selected evidence expansion",
+            "inputs": [
+              "reports/action-dispatch-research.json",
+              "sources/semantic-screening-candidates.json"
+            ],
+            "optional_inputs": [
+              "sources/semantic-screening.json",
+              "reports/research-expansion.md"
+            ],
+            "skills": [
+              "reports/action-dispatch-research.json",
+              "sources/semantic-screening-candidates.json",
+              "sources/semantic-screening.json",
+              "reports/research-expansion.md"
+            ],
+            "instructions": [
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Re-screen every current bounded candidate from titles and abstracts and write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}.",
+              "This is abstract-level semantic triage, not a claim-evidence judgment. Assess only supplied candidate source IDs and configured taxonomy cells. Do not invent claims, quotations, pages, venues, acceptance status, or source IDs. Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D (D, never none); and fulltext_priority true|false as a JSON boolean. Final A/B depth still requires retrieved full text and validated source evidence."
+            ],
+            "outputs": [
+              "sources/semantic-screening.json",
+              "reports/semantic-screen-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-semantic-screen",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_fulltext_refresh",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by refreshed semantic screening",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "fulltext/manifest.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "fulltext",
+                ".",
+                "--max-sources",
+                "100",
+                "--no-pdf-download"
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_evidence_index_refresh",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild local evidence index from refreshed full text",
+            "inputs": [
+              "fulltext/manifest.json"
+            ],
+            "outputs": [
+              "evidence/chunks.jsonl",
+              "evidence/index.sqlite"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "index",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_source_evidence_candidate_select",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select refreshed full-text sources for claim extraction",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "fulltext/manifest.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "sources/source-evidence-candidates.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "select-source-evidence-candidates",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_source_evidence_extract",
+            "owner": "analyst",
+            "title": "Refresh source-level evidence packets after an expansion",
+            "inputs": [
+              "reports/action-dispatch-research.json",
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl"
+            ],
+            "optional_inputs": [
+              "evidence/source-packets.json",
+              "fulltext/*.md"
+            ],
+            "skills": [
+              "reports/action-dispatch-research.json",
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl",
+              "evidence/source-packets.json",
+              "fulltext/*.md"
+            ],
+            "instructions": [
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
+              "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one."
+            ],
+            "outputs": [
+              "evidence/source-packets.json",
+              "reports/source-evidence-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-source-evidence",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_finalize_evidence_depth",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize refreshed citation depth from source evidence",
+            "inputs": [
+              "sources/metadata-classified_sources.jsonl",
+              "sources/semantic-screening.json",
+              "evidence/source-packets.json"
+            ],
+            "outputs": [
+              "sources/classified_sources.jsonl",
+              "sources/bibliography.bib",
+              "sources/citation_plan.jsonl",
+              "reports/evidence-depth-finalization.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "finalize-evidence-depth",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_corpus_gates",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-evaluate corpus gates on refreshed citation depth",
+            "inputs": [
+              "sources/classified_sources.jsonl",
+              "sources/search-plan.json"
+            ],
+            "outputs": [
+              "reports/corpus-gates.json",
+              "reports/corpus-gates.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "corpus-gates",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_allocate_evidence",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate section evidence from refreshed corpus",
+            "inputs": [
+              "outline.json",
+              "evidence/chunks.jsonl",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "evidence/coverage.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "allocate",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "type": "action_dispatch",
+            "id": "outline_action_dispatch",
+            "title": "Execute structural outline-reopen actions after evidence refresh",
+            "owner": "analyst",
+            "plan_path": "reviews/outline-action-plan.json",
+            "allowed_actions": [
+              "reopen_outline"
+            ],
+            "max_actions": 1,
+            "outputs": [
+              "reports/action-dispatch-outline.json"
+            ]
+          },
+          {
+            "id": "quality_outline_survey_contract",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline against the survey contract",
+            "inputs": [
+              "outline.json",
+              "reports/action-dispatch-outline.json"
+            ],
+            "outputs": [
+              "reports/survey-contract.json",
+              "reports/survey-contract.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "survey-contract",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "quality_outline_structure_audit",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline for structural coherence",
+            "inputs": [
+              "outline.json",
+              "reports/action-dispatch-outline.json"
+            ],
+            "outputs": [
+              "reports/structure-audit.json",
+              "reports/structure-audit.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "structure",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "quality_outline_reopen_validate",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Validate an outline reopening before downstream revision",
+            "inputs": [
+              "reviews/action-plan.json",
+              "reports/survey-contract.json",
+              "reports/structure-audit.json"
+            ],
+            "outputs": [
+              "reports/outline-reopen.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "validate-outline-reopen",
+                ".",
+                "--action-plan",
+                "reviews/action-plan.json"
+              ]
+            }
+          },
+          {
+            "id": "quality_reallocate_outline_evidence",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate evidence after a validated outline reopening",
+            "inputs": [
+              "outline.json",
+              "evidence/chunks.jsonl",
+              "sources/classified_sources.jsonl",
+              "reports/outline-reopen.md"
+            ],
+            "outputs": [
+              "evidence/coverage.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "allocate",
+                "."
+              ]
+            }
+          },
+          {
+            "type": "action_dispatch",
+            "id": "action_dispatch",
+            "title": "Execute prose and visual repair actions from refreshed evidence",
+            "owner": "analyst",
+            "plan_path": "reviews/revision-action-plan.json",
+            "allowed_actions": [
+              "revise_sections",
+              "revise_visual_plan",
+              "request_operator_clarification"
+            ],
+            "max_actions": 3,
+            "outputs": [
+              "reports/action-dispatch.json"
+            ]
+          },
+          {
+            "id": "consolidate_citations",
+            "title": "Refresh citation evidence ledger",
+            "owner": "analyst",
+            "inputs": [
+              "chapters/*.md",
+              "evidence/coverage.json"
+            ],
+            "outputs": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "consolidate",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "evidence_audit",
+            "title": "Audit revised citation evidence",
+            "owner": "analyst",
+            "inputs": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "outputs": [
+              "reports/evidence-audit.json",
+              "reports/evidence-audit.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "audit",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "claim_judge",
+            "title": "Double-review citation-backed sampled claims",
+            "owner": "skeptical-reviewer",
+            "inputs": [
+              "chapters/*.md",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md"
+            ],
+            "skills": [
+              "evidence/section-*.json",
+              "evidence/citation-ledger.jsonl"
+            ],
+            "instructions": [
+              "Deterministically sample substantive cited claims from every section. Use stable sample ids like claim-001.",
+              "Write reviews/claim-judgments.jsonl with TWO independent JSONL judgments per sample_id, reviewer_id values reviewer_a and reviewer_b, and fields {sample_id,reviewer_id,source_id,chapter,claim,evidence_locators,prompt_hash,model,runtime,verdict,rationale}. verdict must be entailed, partial, or unsupported.",
+              "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
+            ],
+            "outputs": [
+              "reviews/claim-judgments.jsonl",
+              "reports/claim-judgment-repair.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-claims",
+                  "."
+                ]
+              }
+            ]
+          },
+          {
+            "id": "claim_score",
+            "title": "Score claim support gate",
+            "owner": "analyst",
+            "inputs": [
+              "reviews/claim-judgments.jsonl"
+            ],
+            "outputs": [
+              "reports/claim-gate.md",
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "claims",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "rebuild",
+            "title": "Rebuild manuscript",
+            "owner": "artifact-builder",
+            "inputs": [
+              "chapters/*.md",
+              "paper/abstract.md"
+            ],
+            "optional_inputs": [
+              "sources/bibliography.bib",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/remediation-plan.json"
+            ],
+            "outputs": [
+              "figures/figure-plan.md",
+              "figures/manifest.json",
+              "figures/*.svg",
+              "data/*.csv",
+              "tables/*.md",
+              "paper/main.tex",
+              "paper/sections/*.tex",
+              "paper/figures/*.tex",
+              "paper/tables/*.tex",
+              "build/manuscript.pdf"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "build",
+                "research",
+                "."
+              ]
+            },
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "figures",
+                  "."
+                ]
+              },
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "latex",
+                  "."
+                ]
+              }
+            ]
+          },
+          {
+            "id": "render_visual_review",
+            "title": "Render rebuilt caption pages for multimodal visual review",
+            "owner": "artifact-builder",
+            "inputs": [
+              "build/manuscript.pdf"
+            ],
+            "outputs": [
+              "reports/visual-render-manifest.json",
+              "reports/visual-review/*.png"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "build",
+                "visual-review",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "visual_review",
+            "title": "Inspect rebuilt figures and tables for reader-facing legibility",
+            "owner": "skeptical-reviewer",
+            "runtime": "codex",
+            "inputs": [
+              "reports/visual-render-manifest.json",
+              "build/manuscript.pdf"
+            ],
+            "image_inputs": [
+              "reports/visual-review/*.png"
+            ],
+            "skills": [
+              "reports/visual-render-manifest.json",
+              "figures/manifest.json"
+            ],
+            "instructions": [
+              "Inspect the attached PNG pages as visual input. Check every rendered page for overlapping labels/arrows/nodes, clipping, illegibly small text, unsafe contrast, table overflow/truncation, misplaced captions, and visual claims that a reader cannot verify.",
+              "Write reviews/visual-qa.json as strict JSON: {version:1,render_manifest_sha256:<sha256 of reports/visual-render-manifest.json including its trailing newline>,status:pass|fail,inspected_pages:[every rendered page number],observations:[{page,observation}],findings:[{id,severity:minor|major|critical,page,summary,remediation}],summary}. Every page needs a concrete observation. status: pass is legal only with no major/critical finding; status: fail requires at least one major/critical finding.",
+              "Also write reviews/visual-qa.md as a concise reader-facing summary. Do not edit figures, TeX, or manuscript text."
+            ],
+            "outputs": [
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "visual-review",
+                  "."
+                ]
+              }
+            ]
+          },
+          {
+            "id": "review",
+            "title": "Simulated peer review of rebuilt manuscript",
+            "owner": "skeptical-reviewer",
+            "inputs": [
+              "project_brief.md",
+              "outline.md",
+              "outline.json",
+              "chapters/*.md",
+              "build/manuscript.pdf",
+              "figures/manifest.json"
+            ],
+            "optional_inputs": [
+              "evidence/coverage.json",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/word-metrics.md",
+              "feedback/user-feedback.md",
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md",
+              "reviews/action-plan.json",
+              "reviews/artifact-plan.json"
+            ],
+            "skills": [
+              "project_brief.md",
+              "outline.json",
+              "evidence/coverage.json",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/word-metrics.md",
+              "feedback/user-feedback.md",
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md",
+              "reviews/action-plan.json",
+              "reviews/artifact-plan.json"
+            ],
+            "instructions": [
+              "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations.",
+              "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation.",
+              "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved.",
+              "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler.",
+              "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review.",
+              "When reviews/action-plan.json and reviews/artifact-plan.json exist, independently check every selected action and artifact intent against its quantitative acceptance_criteria. Report each unmet criterion as an unresolved finding; do not award credit for a claimed fix without its stated observable result."
+            ],
+            "outputs": [
+              "reviews/review-round-001.md",
+              "reviews/scorecard.json"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "scorecard",
+                  "."
+                ]
+              },
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "score",
+                  "."
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "verify_citations",
+        "title": "Verify cited source URLs",
+        "owner": "source-curator",
+        "inputs": [
+          "chapters/*.md",
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "sources/citation-verification.jsonl",
+          "reports/source-verification.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "verify",
+            ".",
+            "--max-sources",
+            "100"
+          ]
+        }
+      },
+      {
+        "id": "assess",
+        "title": "Literature quality and citation verification",
+        "owner": "analyst",
+        "inputs": [
+          "sources/classified_sources.jsonl",
+          "sources/citation_plan.jsonl",
+          "chapters/*.md",
+          "sources/bibliography.bib"
+        ],
+        "outputs": [
+          "reports/research-assessment.json",
+          "reports/research-assessment.md",
+          "sources/source_upgrade_plan.jsonl"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "assess",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "final_release_assessment",
+        "owner": "artifact-builder",
+        "runtime": "script",
+        "title": "Assess final release gates for bounded recovery",
+        "inputs": [
+          "chapters/*.md",
+          "sources/classified_sources.jsonl",
+          "sources/bibliography.bib",
+          "reviews/scorecard.json"
+        ],
+        "outputs": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/release-gates.json",
+          "reports/metrics.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "validate",
+            "research",
+            ".",
+            "--advisory"
+          ]
+        }
+      },
+      {
+        "type": "loop",
+        "id": "final_release_recovery_loop",
+        "title": "Recover failed final release gates",
+        "max_rounds": 2,
+        "stop_when": "final_release_gate_pass >= 1",
+        "on_exhaustion": "succeed",
+        "stages": [
+          {
+            "id": "final_release_plan",
+            "owner": "analyst",
+            "title": "Plan corrective actions for failed final release gates",
+            "inputs": [
+              "reviews/scorecard.json",
+              "reports/evidence-audit.md",
+              "reviews/artifact-plan.json",
+              "reports/longwrite-validation.json",
+              "reports/longwrite-validation.md"
+            ],
+            "optional_inputs": [
+              "reports/metrics.json",
+              "feedback/user-feedback.md",
+              "reports/claim-gate.md",
+              "reports/artifact-plan-repair.md",
+              "reports/source-verification.md",
+              "reports/research-assessment.md"
+            ],
+            "skills": [
+              "reviews/scorecard.json",
+              "reports/metrics.json",
+              "reports/evidence-audit.md",
+              "feedback/user-feedback.md",
+              "reports/claim-gate.md",
+              "reviews/artifact-plan.json",
+              "reports/longwrite-validation.json",
+              "reports/longwrite-validation.md",
+              "reports/source-verification.md",
+              "reports/research-assessment.md"
+            ],
+            "instructions": [
+              "This is a final-release recovery round. Read reports/longwrite-validation.json first. Its failed check IDs are authoritative: create one finding with the exact ID for every currently failed check, and select allowlisted corrective action(s) that cover every one. Never lower a target, waive a URL/claim/evidence gate, or claim a pass without a new deterministic assessment.",
+              "For a dead cited URL, revise the prose to remove or replace the citation with a currently evidence-backed source, or perform targeted research to obtain such a source; do not edit verification records or invent a replacement URL. For citation-depth quotas, weave a validated B-depth source into each named chapter rather than weakening the quota. For claim support or review score, repair the evidence-backed prose and/or placed artifact that the report and reviewer identify.",
+              "For rendered_visual_review, select revise_visual_plan with rendered_visual_review >= 1, then let the normal rebuild → PNG rendering → Codex visual-review path produce a fresh verdict. Never mark the visual QA JSON as passing by hand or waive a page-specific legibility finding.",
+              "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
+              "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
+              "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
+              "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
+              "Select reopen_outline only when incremental chapter revision cannot address the review finding. Its rationale must name the defective organizing claim and evidence-backed replacement. It may co-occur with targeted_research_expansion: the dispatcher refreshes and validates the literature before it reopens the outline in the same bounded round.",
+              "Output ownership is strict: revise_sections may change only chapters/*.md, paper/abstract.md, and reviews/revision-report.md. Never assign it a generated table/figure, placement, caption, rendered-PDF, bibliography-presentation, TeX, or build defect. Assign those findings to revise_visual_plan so the artifact builder can write the durable placement contract before the normal rebuild.",
+              "If one finding spans prose and an artifact, split it into two findings (or attach the same finding id to both actions) and keep each action rationale within that action's declared outputs. Do not ask a prose action to hand off uneditable work as a blocker.",
+              "Select each tool at most once per plan. Combine all findings owned by the same tool into that tool's single action; its output contract is shared across those findings.",
+              "Every action must name at least one finding id and at least one quantitative acceptance criterion. Select the smallest sufficient set; do not invent commands, paths, tool ids, or model settings.",
+              "If a finding requires an operator decision, select request_operator_clarification as the ONLY action. Put the exact question in its rationale; never guess the answer."
+            ],
+            "outputs": [
+              "reviews/action-plan.json",
+              "reports/action-plan-repair.md",
+              "reports/final-release-plan-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-action-plan",
+                  "."
+                ]
+              },
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-final-release-plan",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "action_plan_split",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Order remediation actions by evidence dependency",
+            "inputs": [
+              "reviews/action-plan.json"
+            ],
+            "outputs": [
+              "reviews/research-action-plan.json",
+              "reviews/outline-action-plan.json",
+              "reviews/revision-action-plan.json",
+              "reports/action-plan-split.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "split-action-plan",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "type": "action_dispatch",
+            "id": "research_action_dispatch",
+            "title": "Execute evidence-expansion actions before revision",
+            "owner": "analyst",
+            "plan_path": "reviews/research-action-plan.json",
+            "allowed_actions": [
+              "targeted_research_expansion"
+            ],
+            "max_actions": 1,
+            "outputs": [
+              "reports/action-dispatch-research.json"
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_dispatch_metrics",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Record whether an evidence expansion was dispatched this round",
+            "inputs": [
+              "reports/action-dispatch-research.json"
+            ],
+            "outputs": [
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "dispatch-metrics",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_semantic_screen",
+            "owner": "analyst",
+            "title": "Refresh abstract screening after a selected evidence expansion",
+            "inputs": [
+              "reports/action-dispatch-research.json",
+              "sources/semantic-screening-candidates.json"
+            ],
+            "optional_inputs": [
+              "sources/semantic-screening.json",
+              "reports/research-expansion.md"
+            ],
+            "skills": [
+              "reports/action-dispatch-research.json",
+              "sources/semantic-screening-candidates.json",
+              "sources/semantic-screening.json",
+              "reports/research-expansion.md"
+            ],
+            "instructions": [
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Re-screen every current bounded candidate from titles and abstracts and write ONLY sources/semantic-screening.json as {version:1,screenings:[{source_id,taxonomy_cells,chapter_role,semantic_relevance,rationale,recommended_depth,fulltext_priority}]}.",
+              "This is abstract-level semantic triage, not a claim-evidence judgment. Assess only supplied candidate source IDs and configured taxonomy cells. Do not invent claims, quotations, pages, venues, acceptance status, or source IDs. Use exactly: chapter_role protagonist|comparison|background|exclude; semantic_relevance high|medium|low; recommended_depth A|B|C|D (D, never none); and fulltext_priority true|false as a JSON boolean. Final A/B depth still requires retrieved full text and validated source evidence."
+            ],
+            "outputs": [
+              "sources/semantic-screening.json",
+              "reports/semantic-screen-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-semantic-screen",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_fulltext_refresh",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by refreshed semantic screening",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "fulltext/manifest.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "fulltext",
+                ".",
+                "--max-sources",
+                "100",
+                "--no-pdf-download"
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_evidence_index_refresh",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild local evidence index from refreshed full text",
+            "inputs": [
+              "fulltext/manifest.json"
+            ],
+            "outputs": [
+              "evidence/chunks.jsonl",
+              "evidence/index.sqlite"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "index",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_source_evidence_candidate_select",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select refreshed full-text sources for claim extraction",
+            "inputs": [
+              "sources/semantic-screening.json",
+              "fulltext/manifest.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "sources/source-evidence-candidates.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "select-source-evidence-candidates",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_source_evidence_extract",
+            "owner": "analyst",
+            "title": "Refresh source-level evidence packets after an expansion",
+            "inputs": [
+              "reports/action-dispatch-research.json",
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl"
+            ],
+            "optional_inputs": [
+              "evidence/source-packets.json",
+              "fulltext/*.md"
+            ],
+            "skills": [
+              "reports/action-dispatch-research.json",
+              "sources/source-evidence-candidates.json",
+              "evidence/chunks.jsonl",
+              "evidence/source-packets.json",
+              "fulltext/*.md"
+            ],
+            "instructions": [
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
+              "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one."
+            ],
+            "outputs": [
+              "evidence/source-packets.json",
+              "reports/source-evidence-repair.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "research",
+                  "repair-source-evidence",
+                  "."
+                ]
+              }
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_finalize_evidence_depth",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize refreshed citation depth from source evidence",
+            "inputs": [
+              "sources/metadata-classified_sources.jsonl",
+              "sources/semantic-screening.json",
+              "evidence/source-packets.json"
+            ],
+            "outputs": [
+              "sources/classified_sources.jsonl",
+              "sources/bibliography.bib",
+              "sources/citation_plan.jsonl",
+              "reports/evidence-depth-finalization.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "finalize-evidence-depth",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_corpus_gates",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-evaluate corpus gates on refreshed citation depth",
+            "inputs": [
+              "sources/classified_sources.jsonl",
+              "sources/search-plan.json"
+            ],
+            "outputs": [
+              "reports/corpus-gates.json",
+              "reports/corpus-gates.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "corpus-gates",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "id": "quality_allocate_evidence",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate section evidence from refreshed corpus",
+            "inputs": [
+              "outline.json",
+              "evidence/chunks.jsonl",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "evidence/coverage.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "allocate",
+                "."
+              ]
+            },
+            "when": "research_expansion_dispatched >= 1"
+          },
+          {
+            "type": "action_dispatch",
+            "id": "outline_action_dispatch",
+            "title": "Execute structural outline-reopen actions after evidence refresh",
+            "owner": "analyst",
+            "plan_path": "reviews/outline-action-plan.json",
+            "allowed_actions": [
+              "reopen_outline"
+            ],
+            "max_actions": 1,
+            "outputs": [
+              "reports/action-dispatch-outline.json"
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_outline_survey_contract",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline against the survey contract",
+            "inputs": [
+              "outline.json",
+              "reports/action-dispatch-outline.json"
+            ],
+            "outputs": [
+              "reports/survey-contract.json",
+              "reports/survey-contract.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "survey-contract",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_outline_structure_audit",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline for structural coherence",
+            "inputs": [
+              "outline.json",
+              "reports/action-dispatch-outline.json"
+            ],
+            "outputs": [
+              "reports/structure-audit.json",
+              "reports/structure-audit.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "structure",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_outline_reopen_validate",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Validate an outline reopening before downstream revision",
+            "inputs": [
+              "reviews/action-plan.json",
+              "reports/survey-contract.json",
+              "reports/structure-audit.json"
+            ],
+            "outputs": [
+              "reports/outline-reopen.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "validate-outline-reopen",
+                ".",
+                "--action-plan",
+                "reviews/action-plan.json"
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "quality_reallocate_outline_evidence",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate evidence after a validated outline reopening",
+            "inputs": [
+              "outline.json",
+              "evidence/chunks.jsonl",
+              "sources/classified_sources.jsonl",
+              "reports/outline-reopen.md"
+            ],
+            "outputs": [
+              "evidence/coverage.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "allocate",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "type": "action_dispatch",
+            "id": "action_dispatch",
+            "title": "Execute prose and visual repair actions from refreshed evidence",
+            "owner": "analyst",
+            "plan_path": "reviews/revision-action-plan.json",
+            "allowed_actions": [
+              "revise_sections",
+              "revise_visual_plan",
+              "request_operator_clarification"
+            ],
+            "max_actions": 3,
+            "outputs": [
+              "reports/action-dispatch.json"
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "consolidate_citations",
+            "title": "Refresh citation evidence ledger",
+            "owner": "analyst",
+            "inputs": [
+              "chapters/*.md",
+              "evidence/coverage.json"
+            ],
+            "outputs": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "consolidate",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "evidence_audit",
+            "title": "Audit revised citation evidence",
+            "owner": "analyst",
+            "inputs": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "outputs": [
+              "reports/evidence-audit.json",
+              "reports/evidence-audit.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "evidence",
+                "audit",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "claim_judge",
+            "title": "Double-review citation-backed sampled claims",
+            "owner": "skeptical-reviewer",
+            "inputs": [
+              "chapters/*.md",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md"
+            ],
+            "skills": [
+              "evidence/section-*.json",
+              "evidence/citation-ledger.jsonl"
+            ],
+            "instructions": [
+              "Deterministically sample substantive cited claims from every section. Use stable sample ids like claim-001.",
+              "Write reviews/claim-judgments.jsonl with TWO independent JSONL judgments per sample_id, reviewer_id values reviewer_a and reviewer_b, and fields {sample_id,reviewer_id,source_id,chapter,claim,evidence_locators,prompt_hash,model,runtime,verdict,rationale}. verdict must be entailed, partial, or unsupported.",
+              "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
+            ],
+            "outputs": [
+              "reviews/claim-judgments.jsonl",
+              "reports/claim-judgment-repair.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "repair-claims",
+                  "."
+                ]
+              }
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "claim_score",
+            "title": "Score claim support gate",
+            "owner": "analyst",
+            "inputs": [
+              "reviews/claim-judgments.jsonl"
+            ],
+            "outputs": [
+              "reports/claim-gate.md",
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "review",
+                "claims",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "rebuild",
+            "title": "Rebuild manuscript",
+            "owner": "artifact-builder",
+            "inputs": [
+              "chapters/*.md",
+              "paper/abstract.md"
+            ],
+            "optional_inputs": [
+              "sources/bibliography.bib",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/remediation-plan.json"
+            ],
+            "outputs": [
+              "figures/figure-plan.md",
+              "figures/manifest.json",
+              "figures/*.svg",
+              "data/*.csv",
+              "tables/*.md",
+              "paper/main.tex",
+              "paper/sections/*.tex",
+              "paper/figures/*.tex",
+              "paper/tables/*.tex",
+              "build/manuscript.pdf"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "build",
+                "research",
+                "."
+              ]
+            },
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "figures",
+                  "."
+                ]
+              },
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "latex",
+                  "."
+                ]
+              }
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "render_visual_review",
+            "title": "Render rebuilt caption pages for multimodal visual review",
+            "owner": "artifact-builder",
+            "inputs": [
+              "build/manuscript.pdf"
+            ],
+            "outputs": [
+              "reports/visual-render-manifest.json",
+              "reports/visual-review/*.png"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "runtime": "script",
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "build",
+                "visual-review",
+                "."
+              ]
+            },
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "visual_review",
+            "title": "Inspect rebuilt figures and tables for reader-facing legibility",
+            "owner": "skeptical-reviewer",
+            "runtime": "codex",
+            "inputs": [
+              "reports/visual-render-manifest.json",
+              "build/manuscript.pdf"
+            ],
+            "image_inputs": [
+              "reports/visual-review/*.png"
+            ],
+            "skills": [
+              "reports/visual-render-manifest.json",
+              "figures/manifest.json"
+            ],
+            "instructions": [
+              "Inspect the attached PNG pages as visual input. Check every rendered page for overlapping labels/arrows/nodes, clipping, illegibly small text, unsafe contrast, table overflow/truncation, misplaced captions, and visual claims that a reader cannot verify.",
+              "Write reviews/visual-qa.json as strict JSON: {version:1,render_manifest_sha256:<sha256 of reports/visual-render-manifest.json including its trailing newline>,status:pass|fail,inspected_pages:[every rendered page number],observations:[{page,observation}],findings:[{id,severity:minor|major|critical,page,summary,remediation}],summary}. Every page needs a concrete observation. status: pass is legal only with no major/critical finding; status: fail requires at least one major/critical finding.",
+              "Also write reviews/visual-qa.md as a concise reader-facing summary. Do not edit figures, TeX, or manuscript text."
+            ],
+            "outputs": [
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "visual-review",
+                  "."
+                ]
+              }
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "review",
+            "title": "Simulated peer review of rebuilt manuscript",
+            "owner": "skeptical-reviewer",
+            "inputs": [
+              "project_brief.md",
+              "outline.md",
+              "outline.json",
+              "chapters/*.md",
+              "build/manuscript.pdf",
+              "figures/manifest.json"
+            ],
+            "optional_inputs": [
+              "evidence/coverage.json",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/word-metrics.md",
+              "feedback/user-feedback.md",
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md",
+              "reviews/action-plan.json",
+              "reviews/artifact-plan.json"
+            ],
+            "skills": [
+              "project_brief.md",
+              "outline.json",
+              "evidence/coverage.json",
+              "evidence/citation-ledger.jsonl",
+              "reports/evidence-audit.md",
+              "reports/word-metrics.md",
+              "feedback/user-feedback.md",
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md",
+              "reviews/action-plan.json",
+              "reviews/artifact-plan.json"
+            ],
+            "instructions": [
+              "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations.",
+              "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation.",
+              "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved.",
+              "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler.",
+              "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review.",
+              "When reviews/action-plan.json and reviews/artifact-plan.json exist, independently check every selected action and artifact intent against its quantitative acceptance_criteria. Report each unmet criterion as an unresolved finding; do not award credit for a claimed fix without its stated observable result."
+            ],
+            "outputs": [
+              "reviews/review-round-001.md",
+              "reviews/scorecard.json"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "validator_commands": [
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "validate",
+                  "scorecard",
+                  "."
+                ]
+              },
+              {
+                "cmd": "<node>",
+                "args": [
+                  "<longwrite-cli>",
+                  "review",
+                  "score",
+                  "."
+                ]
+              }
+            ],
+            "when": "final_release_gate_pass < 1"
+          },
+          {
+            "id": "final_release_verify_citations",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-verify cited URLs after final-release recovery",
+            "inputs": [
+              "chapters/*.md",
+              "sources/classified_sources.jsonl"
+            ],
+            "outputs": [
+              "sources/citation-verification.jsonl",
+              "reports/source-verification.md"
+            ],
+            "validators": [
+              "required_output_exists",
+              "jsonl_parseable"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "verify",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "final_release_assess_research",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Reassess literature and citation quality after recovery",
+            "inputs": [
+              "sources/classified_sources.jsonl",
+              "sources/citation_plan.jsonl",
+              "chapters/*.md",
+              "sources/bibliography.bib"
+            ],
+            "outputs": [
+              "reports/research-assessment.json",
+              "reports/research-assessment.md",
+              "sources/source_upgrade_plan.jsonl"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "assess",
+                "."
+              ]
+            }
+          },
+          {
+            "id": "final_release_assessment",
+            "owner": "artifact-builder",
+            "runtime": "script",
+            "title": "Assess final release gates for bounded recovery",
+            "inputs": [
+              "chapters/*.md",
+              "sources/classified_sources.jsonl",
+              "sources/bibliography.bib",
+              "reviews/scorecard.json"
+            ],
+            "outputs": [
+              "reports/longwrite-validation.json",
+              "reports/longwrite-validation.md",
+              "reports/release-gates.json",
+              "reports/metrics.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "validate",
+                "research",
+                ".",
+                "--advisory"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "final_validate",
+        "title": "Final research validation",
+        "owner": "artifact-builder",
+        "inputs": [
+          "chapters/*.md",
+          "evidence/citation-ledger.jsonl",
+          "reports/evidence-audit.md",
+          "sources/citation-verification.jsonl",
+          "reports/research-assessment.json",
+          "build/manuscript.pdf"
+        ],
+        "outputs": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/release-gates.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "validate",
+            "research",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "package_submission",
+        "title": "Package validated publication source",
+        "owner": "artifact-builder",
+        "inputs": [
+          "paper/main.tex",
+          "paper/references.bib",
+          "build/manuscript.pdf",
+          "reports/longwrite-validation.json",
+          "reports/release-gates.json"
+        ],
+        "outputs": [
+          "build/submission/*/longwrite-submission-manifest.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "publication",
+            "package",
+            "."
+          ]
+        }
+      }
+    ],
+    "tool_catalog": [
+      {
+        "id": "targeted_research_expansion",
+        "owner": "source-curator",
+        "title": "Expand research evidence for an identified coverage gap",
+        "inputs": [
+          "outline.json",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json"
+        ],
+        "outputs": [
+          "reports/research-expansion.md"
+        ],
+        "optional_inputs": [
+          "evidence/coverage.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "max_invocations": 1,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "expand",
+            ".",
+            "--action-plan",
+            "reviews/action-plan.json"
+          ]
+        }
+      },
+      {
+        "id": "reopen_outline",
+        "owner": "outline-architect",
+        "title": "Reopen the approved outline for a structural correction",
+        "inputs": [
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json",
+          "outline.md",
+          "outline.json",
+          "sources/classified_sources.jsonl",
+          "evidence/source-packets.json",
+          "reports/corpus-gates.md"
+        ],
+        "optional_inputs": [
+          "sources/semantic-screening.json",
+          "reports/evidence-depth-finalization.md",
+          "reviews/scorecard.json"
+        ],
+        "skills": [
+          "reviews/action-plan.json",
+          "outline.json",
+          "sources/classified_sources.jsonl",
+          "evidence/source-packets.json",
+          "reports/corpus-gates.md"
+        ],
+        "instructions": [
+          "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and source-packet-backed contributions; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
+          "Write feedback/outline-revision.md with the exact action-plan findings addressed, the structural change, and any remaining evidence limitation. Do not draft chapters, alter figures, fabricate sources, or turn an unresolved empirical question into a result. The following scripts re-audit the outline before downstream evidence allocation."
+        ],
+        "outputs": [
+          "outline.md",
+          "outline.json",
+          "feedback/outline-revision.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ],
+        "requires_human_approval": true,
+        "max_invocations": 1
+      },
+      {
+        "id": "revise_sections",
+        "owner": "editor",
+        "title": "Revise evidence-backed prose and structure",
+        "inputs": [
+          "project_brief.md",
+          "outline.json",
+          "chapters/*.md",
+          "reviews/review-round-001.md",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json"
+        ],
+        "optional_inputs": [
+          "paper/abstract.md",
+          "evidence/section-*.json",
+          "evidence/citation-ledger.jsonl",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "fulltext/*.md",
+          "feedback/user-feedback.md",
+          "reports/action-dispatch.json"
+        ],
+        "skills": [
+          "project_brief.md",
+          "outline.json",
+          "evidence/section-*.json",
+          "evidence/citation-ledger.jsonl",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "feedback/user-feedback.md"
+        ],
+        "instructions": [
+          "Follow the injected project brief for audience, target length, and style. Do not cite a URL/file directly from the brief: recognized scholarly links enter through authoritative reference seeds and may be cited only after they appear in the section evidence packet; all other links/files remain contextual leads. Retain a factual claim only when the evidence packet supports it.",
+          "Treat outline.json target_words as a section contract. Measure the chapter set against the project total and expand every materially short section with evidence-backed analysis, comparisons, and limitations until it approaches its allocation. Do not add filler, unsupported claims, or a revision log to reader-facing prose.",
+          "Repair every cited factual claim flagged by the evidence audit. Replace generic [source:<source-id>] markers with exact chunk ids from the matching evidence packet, for example [source:<source-id>:p12].",
+          "Before finalizing a chapter, make every [source:<source-id>:pN] marker resolve to a source in the current evidence packet and bibliography; remove or rewrite any claim whose marker cannot resolve.",
+          "Remove or explicitly qualify claims with no packet-backed evidence. Never preserve a citation merely because its metadata exists.",
+          "When feedback/user-feedback.md is present, implement its relevant requests without violating the evidence and citation requirements; describe what changed or could not safely change in reviews/revision-report.md.",
+          "Refresh paper/abstract.md when the revision materially changes scope, synthesis, or conclusions. Keep it 150--250 words, reader-facing, citation-free, and free of workflow/process language.",
+          "Do not add Markdown pipe tables, hand-numbered Table/Figure references, prose pretending to be a diagram, or delivery/placement instructions for an artifact builder. Preserve the artifact builder's labeled tables and rendered figures; revise the surrounding explanation instead.",
+          "Use reviews/artifact-plan.json when it selects a formalization. Decide the exact notation and wording from the cited evidence, define every symbol nearby, and omit the formula if the evidence cannot support a useful formalization. Never fabricate an equation, theorem, or experimental result."
+        ],
+        "outputs": [
+          "chapters/*.md",
+          "paper/abstract.md",
+          "reviews/revision-report.md"
+        ],
+        "max_invocations": 1
+      },
+      {
+        "id": "revise_visual_plan",
+        "owner": "artifact-builder",
+        "title": "Repair the placed visual plan from review findings",
+        "inputs": [
+          "outline.json",
+          "evidence/coverage.json",
+          "sources/classified_sources.jsonl",
+          "reviews/artifact-plan.json",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json"
+        ],
+        "outputs": [
+          "figures/placement-plan.json"
+        ],
+        "instructions": [
+          "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes (each label at most 48 characters) and only edges that express the survey's actual organizing relationship (edge labels at most 36 characters). In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files.",
+          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables.",
+          "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section.",
+          "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
+          "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph.",
+          "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. For a substantive method or benchmark table repair, use table_overrides only for method-comparison or benchmark-metadata: each row must have exactly one cell per header and cite one or more existing classified source IDs in source_ids. A validated metadata_plot intent is rendered from verified metadata by the normal artifact builder; do not invent plot values or use Nano Banana as evidence.",
+          "For new survey-native artifacts, use table_specs for source-bound comparison/taxonomy/evidence matrices and timelines for source-selected milestones. The builder validates all source IDs and derives timeline years; do not insert raw TeX, chart code, coordinates, or unsupported numerical results."
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "optional_inputs": [
+          "reports/artifact-plan-repair.md",
+          "reviews/scorecard.json",
+          "reports/action-dispatch.json"
+        ],
+        "skills": [
+          "reviews/artifact-plan.json",
+          "evidence/source-packets.json"
+        ],
+        "max_invocations": 1
+      },
+      {
+        "id": "request_operator_clarification",
+        "owner": "analyst",
+        "title": "Request an operator decision",
+        "inputs": [
+          "reviews/action-plan.json"
+        ],
+        "outputs": [
+          "reviews/clarification-request.md"
+        ],
+        "instructions": [
+          "Write the requested operator question from the validated action plan; do not resolve it or change the manuscript."
+        ],
+        "validators": [
+          "required_output_exists",
+          "non_empty_markdown"
+        ],
+        "runtime": "script",
+        "requires_operator_response": true,
+        "max_invocations": 1,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "request-clarification",
+            ".",
+            "--action-plan",
+            "reviews/action-plan.json"
+          ]
+        }
+      }
+    ]
+  }
+}

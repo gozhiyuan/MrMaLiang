@@ -42,7 +42,7 @@ async function writeStudy(dir: string, id: string, condition: string, values: nu
 
 describe("LongExperiment executable suite", () => {
   it("parses every flagship as pinned, configured suite contract", async () => {
-    for (const name of ["self_play_small_model", "nanogpt_ablation", "proteingym_autoscientists"]) {
+    for (const name of ["self_play_small_model", "nanochat_ablation", "proteingym_autoscientists"]) {
       const raw = parse(await fs.readFile(path.join(packageRoot, "configs", "flagships", `${name}.yaml`), "utf8"));
       const parsed = ExperimentConfig.parse(raw);
       expect(parsed.suite?.studies.length).toBeGreaterThan(1);
@@ -58,7 +58,7 @@ describe("LongExperiment executable suite", () => {
     const manifest = parse(await fs.readFile(path.join(dir, "malaclaw.yaml"), "utf-8"));
     expect(manifest.workflow.stages.map((stage: { id: string }) => stage.id)).toEqual(["pin_inputs", "design", "prepare_worktrees", "suite_plan", "study_level_1", "aggregate_results", "audit_results", "report"]);
     expect(manifest.workflow.stages.find((stage: { id: string }) => stage.id === "study_level_1").type).toBe("foreach");
-    expect(await fs.stat(path.join(dir, "templates", "runners", "nanogpt.py"))).toBeDefined();
+    expect(await fs.stat(path.join(dir, "templates", "runners", "nanochat.py"))).toBeDefined();
   });
 
   it("compiles agentic authoring into proposal, code, smoke, approval, audit, and interpretation contracts", async () => {
@@ -67,7 +67,7 @@ describe("LongExperiment executable suite", () => {
     await scaffoldFlagshipWorkspace(dir, ExperimentConfig.parse(raw));
     const manifest = parse(await fs.readFile(path.join(dir, "malaclaw.yaml"), "utf8"));
     const ids = manifest.workflow.stages.map((stage: { id: string }) => stage.id);
-    expect(ids).toEqual(["pin_inputs", "experiment_search_plan", "experiment_research_context", "experiment_proposal_loop", "design_approval", "candidate_revision_loop", "revision_approval", "suite_plan", "study_level_1", "aggregate_results", "audit_results", "interpret_results", "validate_result_interpretation", "report"]);
+    expect(ids).toEqual(["pin_inputs", "assert_authorization", "experiment_search_plan", "experiment_research_context", "experiment_proposal_loop", "design_approval", "candidate_revision_loop", "revision_approval", "suite_plan", "study_level_1", "aggregate_results", "audit_results", "interpret_results", "validate_result_interpretation", "report"]);
     expect(manifest.workflow.runtime).toBeUndefined();
     expect(manifest.runtime).toBe("codex");
     expect(manifest.workflow.stages.find((stage: { id: string }) => stage.id === "experiment_proposal_loop")).toMatchObject({ type: "loop", max_rounds: 2, on_exhaustion: "fail" });
@@ -77,15 +77,21 @@ describe("LongExperiment executable suite", () => {
     const candidate = manifest.workflow.stages.find((stage: { id: string }) => stage.id === "candidate_revision_loop");
     expect(candidate.stages.map((stage: { id: string }) => stage.id)).toEqual(["author_candidate", "materialize_candidate", "candidate_execution_approval", "test_candidate", "smoke_candidate"]);
     expect(candidate.stages.find((stage: { id: string }) => stage.id === "candidate_execution_approval").requires_human_approval).toBe(true);
+    expect(candidate.stages.find((stage: { id: string; runtime?: string }) => stage.id === "test_candidate").runtime).toBe("remote-job");
+    expect(candidate.stages.find((stage: { id: string; runtime?: string }) => stage.id === "smoke_candidate").runtime).toBe("remote-job");
+    expect(await fs.access(path.join(dir, "templates", "adapters", "modal", "agentic_adapter.py"))).toBeUndefined();
+    expect(await fs.access(path.join(dir, "templates", "adapters", "modal", "images", "nanochat-gpu", "Dockerfile"))).toBeUndefined();
+    expect(await fs.access(path.join(dir, "templates", "adapters", "modal", "images", "nanochat-gpu", "build-image.sh"))).toBeUndefined();
+    expect(await fs.access(path.join(dir, "templates", "adapters", "modal", "runtime-catalog.yaml"))).toBeUndefined();
   });
 
   it("scaffolds a pinned flagship without copying any result artifact", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longexperiment-flagship-")); dirs.push(dir);
-    const raw = parse(await fs.readFile(path.join(packageRoot, "configs", "flagships", "nanogpt_ablation.yaml"), "utf8"));
+    const raw = parse(await fs.readFile(path.join(packageRoot, "configs", "flagships", "nanochat_ablation.yaml"), "utf8"));
     await scaffoldFlagshipWorkspace(dir, ExperimentConfig.parse(raw));
     const written = parse(await fs.readFile(path.join(dir, "experiment.yaml"), "utf8"));
     expect(written.inputs.code[0].revision).toMatch(/^[a-f0-9]{40}$/);
-    await expect(fs.stat(path.join(dir, "templates", "runners", "nanogpt.py"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(dir, "templates", "runners", "nanochat.py"))).resolves.toBeDefined();
     await expect(fs.access(path.join(dir, "results", "experiment-manifest.json"))).rejects.toThrow();
   });
 
