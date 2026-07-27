@@ -31,6 +31,10 @@ const malaclaw = process.env.MALACLAW_SOURCE_DIR
   ? path.join(path.resolve(process.env.MALACLAW_SOURCE_DIR), "dist", "cli.js")
   : null;
 
+if (!malaclaw) {
+  throw new Error("MALACLAW_SOURCE_DIR must point to a built, compatible MalaClaw checkout; execution smoke cannot be skipped");
+}
+
 const failures = [];
 function check(condition, description) {
   if (condition) console.log(`  ok   ${description}`);
@@ -55,7 +59,6 @@ async function scaffoldsValidate(base) {
     const name = `smoke-${index}`;
     const created = await cli(maliang, ["init", name, ...scaffold.args], base);
     if (created.failed) { check(false, `${scaffold.name}: maliang init`); continue; }
-    if (!malaclaw) { console.log(`  skip ${scaffold.name}: MALACLAW_SOURCE_DIR not set`); continue; }
     const validated = await cli(malaclaw, ["validate"], path.join(base, name, scaffold.component));
     check(!validated.failed, `${scaffold.name}: compiled manifest passes malaclaw validate`);
     if (validated.failed) {
@@ -67,7 +70,6 @@ async function scaffoldsValidate(base) {
 /** A prescribed experiment must execute its study foreach, not just compile. */
 async function experimentExecutes(base) {
   console.log("\nprescribed experiment executes its study foreach");
-  if (!malaclaw) { console.log("  skip: MALACLAW_SOURCE_DIR not set"); return; }
   const name = "smoke-exec";
   const created = await cli(maliang, ["init", name, "--template", "experiment.standalone", "--hypothesis", "A bounded search beats the frozen baseline"], base);
   if (created.failed) { check(false, "maliang init standalone experiment"); return; }
