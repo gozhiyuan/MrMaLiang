@@ -63,13 +63,9 @@
           "experiment_brief.md",
           "inputs/locks.json"
         ],
-        "optional_inputs": [
-          "../writing/project_brief.md"
-        ],
         "skills": [
           "experiment.yaml",
-          "experiment_brief.md",
-          "../writing/project_brief.md"
+          "experiment_brief.md"
         ],
         "instructions": [
           "Write ONLY agent/search-plan.json. Design bounded scholarly queries that identify prior methods, controls, benchmarks, negative results, and evaluation risks relevant to this experiment objective.",

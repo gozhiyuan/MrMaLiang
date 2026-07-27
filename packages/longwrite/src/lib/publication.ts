@@ -163,6 +163,36 @@ export async function packagePublicationWorkspace(workspaceDir: string): Promise
     package_instructions: "Upload the contents of this directory as the TeX source bundle; do not include build logs or placeholder PDFs.",
   };
   const manifestPath = path.join(destination, "longwrite-submission-manifest.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+  await fs.writeFile(manifestPath, `${JSON.stringify({ ...manifest, release_ready: true }, null, 2)}\n`, "utf-8");
   return [path.relative(root, destination), path.relative(root, manifestPath)];
+}
+
+/**
+ * Record that packaging was attempted and refused.
+ *
+ * A seed/dry-run rehearsal exercises graph wiring, so it must be able to
+ * finish — but the stage still declares a submission manifest as its output.
+ * Writing nothing left that output unproduced, which the engine now correctly
+ * refuses to call success. Writing a manifest flagged `release_ready: false`
+ * keeps the declared contract honest while making it impossible to mistake a
+ * rehearsal bundle for a real submission: it carries no paper sources at all,
+ * only the reasons packaging was declined.
+ */
+export async function writeUnpackagedSubmissionNotice(workspaceDir: string, reasons: string[]): Promise<string> {
+  const root = path.resolve(workspaceDir);
+  const config = await loadProjectConfig(root);
+  const destination = path.join(root, "build", "submission", config.publication.target);
+  await fs.rm(destination, { recursive: true, force: true });
+  await fs.mkdir(destination, { recursive: true });
+  const manifestPath = path.join(destination, "longwrite-submission-manifest.json");
+  await fs.writeFile(manifestPath, `${JSON.stringify({
+    version: 1,
+    target: config.publication.target,
+    release_ready: false,
+    packaged: false,
+    reason: "Release gates did not pass; no submission source bundle was produced.",
+    blocking_findings: reasons,
+    package_instructions: "This directory is NOT a submission bundle. Resolve the blocking findings and re-run publication package.",
+  }, null, 2)}\n`, "utf-8");
+  return path.relative(root, manifestPath);
 }

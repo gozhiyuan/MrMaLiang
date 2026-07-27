@@ -58,7 +58,10 @@ function candidateExecution(config: ExperimentConfig, idExpression: string): Rec
   }
   return {
     runtime: "script",
-    command: longexperimentCommand(["stage", "run-study", ".", idExpression]),
+    // `run-study` resolves ids against runs/suite-plan.json, which the research
+    // loop never builds — its unit of work is a candidate commit, not a
+    // declared study.
+    command: longexperimentCommand(["stage", "run-candidate", ".", idExpression]),
     instructions: [
       "Run the fixed evaluator against this candidate worktree only. Never alter the pinned inputs, evaluator, or run command between siblings.",
       "Never fabricate result JSON. A nonzero runner exit or missing raw-results artifact fails this candidate.",
@@ -169,8 +172,13 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
     stages.push(
       agentStage({
         id: "experiment_search_plan", title: "Plan pre-experiment literature recall", owner: "experiment-lead",
-        inputs: ["experiment.yaml", "experiment_brief.md", "inputs/locks.json"], optional_inputs: ["../writing/project_brief.md"],
-        skills: ["experiment.yaml", "experiment_brief.md", "../writing/project_brief.md"],
+        // Workspace-relative only. `../writing/project_brief.md` reached out of
+        // the experiment workspace, which MalaClaw's safe-path rule rejects —
+        // so every agentic manifest failed `malaclaw validate`. The paper's
+        // objective already reaches this stage through experiment_brief.md,
+        // which `maliang init` writes into this workspace.
+        inputs: ["experiment.yaml", "experiment_brief.md", "inputs/locks.json"],
+        skills: ["experiment.yaml", "experiment_brief.md"],
         instructions: [
           "Write ONLY agent/search-plan.json. Design bounded scholarly queries that identify prior methods, controls, benchmarks, negative results, and evaluation risks relevant to this experiment objective.",
           "Schema: {version:1,topic,query_variants:[...],exclusion_terms:[],venue_priorities:[],source_types:[paper|preprint|survey|benchmark|blog],taxonomy_cells:[],rationale}. Use 6-12 distinct query_variants and never invent search results.",
@@ -339,7 +347,14 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
 function assembleManifest(config: ExperimentConfig, stages: Array<Record<string, unknown>>): Record<string, unknown> {
   return {
     version: 1, project: { id: config.project.id, description: `LongExperiment: ${config.hypothesis}` },
-    agents: ["experiment-lead", "methodologist", "result-auditor", "experiment-reporter"], packs: [{ id: "experiment-workflow" }], runtime: config.authoring.mode === "agentic" ? "codex" : "script",
+    agents: ["experiment-lead", "methodologist", "result-auditor", "experiment-reporter"], packs: [{ id: "experiment-workflow" }],
+    // Manifest-level `runtime` selects the *provisioning* adapter
+    // (openclaw | claude-code | codex | clawteam) — it is not a worker runtime.
+    // Emitting "script" here produced a manifest the engine refused to parse,
+    // so `malaclaw validate` failed on every prescribed workspace. A prescribed
+    // experiment runs entirely through per-stage `runtime: script`, so it has no
+    // provisioning opinion and correctly falls back to the schema default.
+    ...(config.authoring.mode === "agentic" ? { runtime: "codex" } : {}),
     workflow: {
       external_inputs: ["experiment.yaml", "experiment_brief.md"], max_parallel: config.execution.max_parallel_trials,
       run_limits: { max_active_run_minutes: config.execution.max_active_run_minutes, ...(config.execution.max_recorded_tokens ? { max_recorded_tokens: config.execution.max_recorded_tokens } : {}), on_limit: "pause" },

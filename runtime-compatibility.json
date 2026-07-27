@@ -1,16 +1,17 @@
 {
   "version": 1,
   "malaclaw": {
-    "supported": ">=1.0.2 <2.0.0",
-    "tested_with": "1.0.2"
+    "supported": ">=1.1.0 <2.0.0",
+    "tested_with": "1.1.0",
+    "note": "Raised from >=1.0.2. Compiled manifests now require the foreach command-template fix; on 1.0.2 every study execution receives a literal {{item.id}} and fails."
   },
   "ir_version": 1,
   "module_protocol": 1,
   "runner_protocol": 1,
   "sdk": {
     "package": "malaclaw/sdk",
-    "supported": ">=1.0.2 <2.0.0",
-    "tested_with": "1.0.2",
+    "supported": ">=1.1.0 <2.0.0",
+    "tested_with": "1.1.0",
     "resolution": "path",
     "note": "The SDK ships as the ./sdk subpath export of the malaclaw package, not as a separate @malaclaw/sdk. It imports the engine's canonical Zod IR, so splitting it out would either duplicate that schema or load two zod instances. MrMaLiang resolves it from the checked-out runtime at .dependencies/MalaClaw."
   }

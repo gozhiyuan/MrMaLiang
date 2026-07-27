@@ -1,6 +1,6 @@
 {
   "name": "mr-maliang",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Unified long-form writing and computational research workflows",
   "type": "module",
@@ -18,6 +18,7 @@
     "test": "npm run test --workspace @mr-maliang/research-protocol && npm run test --workspace @mr-maliang/longexperiment && npm run test --workspace @mr-maliang/longwrite && npm run test --workspace @mr-maliang/maliang",
     "test:integration": "npm run test --workspace @mr-maliang/maliang -- empirical-handoff.e2e.test.ts",
     "maliang": "node apps/maliang/dist/cli.js",
-    "release:check": "npm test && npm run maliang -- template list"
+    "release:check": "npm test && npm run maliang -- template list",
+    "smoke:execution": "node scripts/execution-smoke.mjs"
   }
 }

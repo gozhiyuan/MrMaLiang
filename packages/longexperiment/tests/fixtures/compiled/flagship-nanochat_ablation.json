@@ -15,7 +15,6 @@
       "id": "experiment-workflow"
     }
   ],
-  "runtime": "script",
   "workflow": {
     "external_inputs": [
       "experiment.yaml",

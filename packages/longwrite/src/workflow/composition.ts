@@ -679,8 +679,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           id: "outline_review",
           title: "Critique outline against source evidence",
           owner: "skeptical-reviewer",
-          inputs: ["outline.md", "outline.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "sources/classified_sources.jsonl"],
-          optional_inputs: ["sources/semantic-screening.json", "reports/corpus-gates.md", "feedback/outline-revision.md"],
+          // The structure audit is skipped by the fast workflow profile, so its
+          // report is optional here. Requiring it made every fast-profile
+          // survey fail workflow validation before a single stage ran.
+          inputs: ["outline.md", "outline.json", "reports/survey-contract.md", "evidence/source-packets.json", "sources/classified_sources.jsonl"],
+          optional_inputs: ["reports/structure-audit.md", "sources/semantic-screening.json", "reports/corpus-gates.md", "feedback/outline-revision.md"],
           skills: ["outline.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "sources/classified_sources.jsonl", "reports/corpus-gates.md"],
           instructions: [
             "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
@@ -693,7 +696,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         scriptStage({
           id: "outline_readiness_score",
           title: "Score deterministic outline readiness",
-          owner: "analyst", inputs: ["reviews/outline-review.json", "reports/survey-contract.json", "reports/structure-audit.json"],
+          owner: "analyst", inputs: ["reviews/outline-review.json", "reports/survey-contract.json"],
+          optional_inputs: ["reports/structure-audit.json"],
           outputs: ["reports/outline-readiness.md", "reports/metrics.json"], validators: ["required_output_exists"], runtime: "script",
           command: longwriteCommand(["review", "score-outline-readiness", "."]),
         }),

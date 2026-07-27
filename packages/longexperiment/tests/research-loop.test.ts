@@ -84,7 +84,14 @@ describe("compiled research loop", () => {
 
     const fanout = loop!.stages.find((stage: Record<string, unknown>) => stage.id === "execute_candidates");
     expect(fanout).toMatchObject({ type: "foreach", foreach: "runs/active-round/candidates.items", item_name: "candidate" });
-    expect(fanout.steps.map((step: Record<string, unknown>) => step.id)).toEqual(["execute", "audit"]);
+    // A proposal must become a real, policy-checked commit before it costs
+    // anything: implement -> verify -> execute -> audit. Without implement the
+    // loop re-measured the baseline for every candidate.
+    expect(fanout.steps.map((step: Record<string, unknown>) => step.id)).toEqual(["implement", "verify", "execute", "audit"]);
+    const stepIds = fanout.steps.map((step: Record<string, unknown>) => step.id);
+    expect(stepIds.indexOf("verify")).toBeLessThan(stepIds.indexOf("execute"));
+    // verify is deterministic; an agent never certifies its own diff.
+    expect(fanout.steps[1]).toMatchObject({ id: "verify", runtime: "script" });
 
     // Only the promote stage may write champion state and the stop metric.
     const promote = loop!.stages.find((stage: Record<string, unknown>) => stage.id === "promote");
@@ -130,8 +137,10 @@ describe("round plan validation", () => {
 
     // The round is registered in lineage and the foreach source is written.
     expect((await readLineage(workspace)).rounds.map((round) => round.id)).toContain("round-1");
-    const items = JSON.parse(await fs.readFile(path.join(workspace, "runs", "active-round", "candidates.items.json"), "utf8"));
-    expect(items).toEqual({ items: [{ id: "widen-a" }] });
+    // The foreach source is candidates.json's own `items` array; a sibling
+    // candidates.items.json would never be opened by the engine.
+    const document = JSON.parse(await fs.readFile(path.join(workspace, "runs", "active-round", "candidates.json"), "utf8"));
+    expect(document.items).toEqual([{ id: "widen-a" }]);
   });
 
   it("fails the round when nothing survives validation", async () => {

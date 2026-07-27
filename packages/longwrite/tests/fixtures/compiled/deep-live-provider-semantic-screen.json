@@ -247,8 +247,9 @@
       },
       {
         "id": "semantic_candidate_select",
-        "title": "Select bounded abstract-screening candidates",
         "owner": "analyst",
+        "runtime": "script",
+        "title": "Select bounded abstract-screening candidates",
         "inputs": [
           "sources/classified_sources.jsonl",
           "sources/search-plan.json"
@@ -260,7 +261,6 @@
         "validators": [
           "required_output_exists"
         ],
-        "runtime": "script",
         "command": {
           "cmd": "<node>",
           "args": [
@@ -273,8 +273,8 @@
       },
       {
         "id": "semantic_screen",
-        "title": "Screen bounded candidates from titles and abstracts",
         "owner": "analyst",
+        "title": "Screen bounded candidates from titles and abstracts",
         "inputs": [
           "sources/semantic-screening-candidates.json"
         ],
@@ -391,8 +391,9 @@
       },
       {
         "id": "source_evidence_candidate_select",
-        "title": "Select approved full-text sources for claim extraction",
         "owner": "source-curator",
+        "runtime": "script",
+        "title": "Select approved full-text sources for claim extraction",
         "inputs": [
           "sources/semantic-screening.json",
           "fulltext/manifest.json",
@@ -404,7 +405,6 @@
         "validators": [
           "required_output_exists"
         ],
-        "runtime": "script",
         "command": {
           "cmd": "<node>",
           "args": [
@@ -417,8 +417,8 @@
       },
       {
         "id": "source_evidence_extract",
-        "title": "Extract source-level evidence from retrieved full text",
         "owner": "analyst",
+        "title": "Extract source-level evidence from retrieved full text",
         "inputs": [
           "sources/source-evidence-candidates.json",
           "evidence/chunks.jsonl"
@@ -460,8 +460,9 @@
       },
       {
         "id": "finalize_evidence_depth",
-        "title": "Finalize citation depth from semantic and full-text evidence",
         "owner": "analyst",
+        "runtime": "script",
+        "title": "Finalize citation depth from semantic and full-text evidence",
         "inputs": [
           "sources/metadata-classified_sources.jsonl",
           "sources/semantic-screening.json",
@@ -477,7 +478,6 @@
           "required_output_exists",
           "jsonl_parseable"
         ],
-        "runtime": "script",
         "command": {
           "cmd": "<node>",
           "args": [
@@ -490,8 +490,9 @@
       },
       {
         "id": "corpus_gate_assessment",
-        "title": "Measure final evidence-backed corpus coverage before recovery",
         "owner": "source-curator",
+        "runtime": "script",
+        "title": "Measure final evidence-backed corpus coverage before recovery",
         "inputs": [
           "sources/classified_sources.jsonl",
           "sources/search-plan.json"
@@ -504,7 +505,6 @@
         "validators": [
           "required_output_exists"
         ],
-        "runtime": "script",
         "command": {
           "cmd": "<node>",
           "args": [
@@ -526,8 +526,8 @@
         "stages": [
           {
             "id": "corpus_recovery_plan",
-            "title": "Plan one bounded evidence recovery from failed corpus gates",
             "owner": "analyst",
+            "title": "Plan one bounded evidence recovery from failed corpus gates",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "reports/corpus-gates.json",
@@ -571,8 +571,9 @@
           },
           {
             "id": "corpus_recovery_expand",
-            "title": "Expand research through the validated recovery plan",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Expand research through the validated recovery plan",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "reports/corpus-recovery-plan.json"
@@ -584,7 +585,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -599,8 +599,8 @@
           },
           {
             "id": "corpus_recovery_semantic_screen",
-            "title": "Re-screen expanded candidates for evidence recovery",
             "owner": "analyst",
+            "title": "Re-screen expanded candidates for evidence recovery",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "sources/semantic-screening-candidates.json"
@@ -637,8 +637,9 @@
           },
           {
             "id": "corpus_recovery_fulltext",
-            "title": "Ingest full text selected by recovered semantic screening",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by recovered semantic screening",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "sources/semantic-screening.json",
@@ -650,7 +651,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -666,8 +666,9 @@
           },
           {
             "id": "corpus_recovery_evidence_index",
-            "title": "Rebuild the evidence index after corpus recovery",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild the evidence index after corpus recovery",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "fulltext/manifest.json"
@@ -679,7 +680,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -692,8 +692,9 @@
           },
           {
             "id": "corpus_recovery_source_candidate_select",
-            "title": "Select recovered full-text sources for claim extraction",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select recovered full-text sources for claim extraction",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "sources/semantic-screening.json",
@@ -706,7 +707,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -719,8 +719,8 @@
           },
           {
             "id": "corpus_recovery_source_evidence_extract",
-            "title": "Extract validated evidence from recovered full text",
             "owner": "analyst",
+            "title": "Extract validated evidence from recovered full text",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "sources/source-evidence-candidates.json",
@@ -762,8 +762,9 @@
           },
           {
             "id": "corpus_recovery_finalize_evidence_depth",
-            "title": "Finalize recovered citation depth from validated evidence",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize recovered citation depth from validated evidence",
             "when": "corpus_gate_pass < 1",
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
@@ -780,7 +781,6 @@
               "required_output_exists",
               "jsonl_parseable"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -793,8 +793,9 @@
           },
           {
             "id": "corpus_recovery_assessment",
-            "title": "Re-measure corpus gates after evidence recovery",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-measure corpus gates after evidence recovery",
             "inputs": [
               "sources/classified_sources.jsonl",
               "sources/search-plan.json"
@@ -807,7 +808,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -894,8 +894,9 @@
         "stages": [
           {
             "id": "outline_survey_contract",
-            "title": "Audit outline survey contract",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit outline survey contract",
             "inputs": [
               "outline.json",
               "sources/classified_sources.jsonl"
@@ -908,7 +909,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -921,8 +921,9 @@
           },
           {
             "id": "outline_structure_audit",
-            "title": "Audit outline structure",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit outline structure",
             "inputs": [
               "outline.json"
             ],
@@ -933,7 +934,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -946,17 +946,17 @@
           },
           {
             "id": "outline_review",
-            "title": "Critique outline against source evidence",
             "owner": "skeptical-reviewer",
+            "title": "Critique outline against source evidence",
             "inputs": [
               "outline.md",
               "outline.json",
               "reports/survey-contract.md",
-              "reports/structure-audit.md",
               "evidence/source-packets.json",
               "sources/classified_sources.jsonl"
             ],
             "optional_inputs": [
+              "reports/structure-audit.md",
               "sources/semantic-screening.json",
               "reports/corpus-gates.md",
               "feedback/outline-revision.md"
@@ -998,11 +998,14 @@
           },
           {
             "id": "outline_readiness_score",
-            "title": "Score deterministic outline readiness",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Score deterministic outline readiness",
             "inputs": [
               "reviews/outline-review.json",
-              "reports/survey-contract.json",
+              "reports/survey-contract.json"
+            ],
+            "optional_inputs": [
               "reports/structure-audit.json"
             ],
             "outputs": [
@@ -1012,7 +1015,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1025,8 +1027,8 @@
           },
           {
             "id": "outline_revise",
-            "title": "Revise outline from evidence-aware critique",
             "owner": "outline-architect",
+            "title": "Revise outline from evidence-aware critique",
             "inputs": [
               "project_brief.md",
               "outline.md",
@@ -1069,8 +1071,9 @@
       },
       {
         "id": "outline_approval_gate",
-        "title": "Human approval of re-audited outline",
         "owner": "outline-architect",
+        "runtime": "script",
+        "title": "Human approval of re-audited outline",
         "inputs": [
           "outline.md",
           "outline.json",
@@ -1083,7 +1086,7 @@
         "validators": [
           "required_output_exists"
         ],
-        "runtime": "script",
+        "requires_human_approval": true,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -1092,8 +1095,7 @@
             "outline-approval",
             "."
           ]
-        },
-        "requires_human_approval": true
+        }
       },
       {
         "id": "allocate_evidence",
@@ -1124,8 +1126,8 @@
       },
       {
         "id": "initial_artifact_plan",
-        "title": "Choose evidence-aware artifacts before drafting",
         "owner": "analyst",
+        "title": "Choose evidence-aware artifacts before drafting",
         "inputs": [
           "project_brief.md",
           "outline.md",
@@ -1546,8 +1548,8 @@
         "stages": [
           {
             "id": "artifact_plan",
-            "title": "Choose source-grounded analytical artifacts",
             "owner": "analyst",
+            "title": "Choose source-grounded analytical artifacts",
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
@@ -1599,8 +1601,8 @@
           },
           {
             "id": "action_plan",
-            "title": "Plan bounded remediation actions",
             "owner": "analyst",
+            "title": "Plan bounded remediation actions",
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
@@ -1656,8 +1658,9 @@
           },
           {
             "id": "action_plan_split",
-            "title": "Order remediation actions by evidence dependency",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Order remediation actions by evidence dependency",
             "inputs": [
               "reviews/action-plan.json"
             ],
@@ -1670,7 +1673,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1697,8 +1699,9 @@
           },
           {
             "id": "quality_dispatch_metrics",
-            "title": "Record whether an evidence expansion was dispatched this round",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Record whether an evidence expansion was dispatched this round",
             "inputs": [
               "reports/action-dispatch-research.json"
             ],
@@ -1708,7 +1711,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1721,8 +1723,8 @@
           },
           {
             "id": "quality_semantic_screen",
-            "title": "Refresh abstract screening after a selected evidence expansion",
             "owner": "analyst",
+            "title": "Refresh abstract screening after a selected evidence expansion",
             "inputs": [
               "reports/action-dispatch-research.json",
               "sources/semantic-screening-candidates.json"
@@ -1766,8 +1768,9 @@
           },
           {
             "id": "quality_fulltext_refresh",
-            "title": "Ingest full text selected by refreshed semantic screening",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by refreshed semantic screening",
             "inputs": [
               "sources/semantic-screening.json",
               "sources/classified_sources.jsonl"
@@ -1778,7 +1781,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1795,8 +1797,9 @@
           },
           {
             "id": "quality_evidence_index_refresh",
-            "title": "Rebuild local evidence index from refreshed full text",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild local evidence index from refreshed full text",
             "inputs": [
               "fulltext/manifest.json"
             ],
@@ -1807,7 +1810,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1821,8 +1823,9 @@
           },
           {
             "id": "quality_source_evidence_candidate_select",
-            "title": "Select refreshed full-text sources for claim extraction",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select refreshed full-text sources for claim extraction",
             "inputs": [
               "sources/semantic-screening.json",
               "fulltext/manifest.json",
@@ -1834,7 +1837,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1848,8 +1850,8 @@
           },
           {
             "id": "quality_source_evidence_extract",
-            "title": "Refresh source-level evidence packets after an expansion",
             "owner": "analyst",
+            "title": "Refresh source-level evidence packets after an expansion",
             "inputs": [
               "reports/action-dispatch-research.json",
               "sources/source-evidence-candidates.json",
@@ -1895,8 +1897,9 @@
           },
           {
             "id": "quality_finalize_evidence_depth",
-            "title": "Finalize refreshed citation depth from source evidence",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize refreshed citation depth from source evidence",
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
               "sources/semantic-screening.json",
@@ -1912,7 +1915,6 @@
               "required_output_exists",
               "jsonl_parseable"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1926,8 +1928,9 @@
           },
           {
             "id": "quality_corpus_gates",
-            "title": "Re-evaluate corpus gates on refreshed citation depth",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-evaluate corpus gates on refreshed citation depth",
             "inputs": [
               "sources/classified_sources.jsonl",
               "sources/search-plan.json"
@@ -1939,7 +1942,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1953,8 +1955,9 @@
           },
           {
             "id": "quality_allocate_evidence",
-            "title": "Reallocate section evidence from refreshed corpus",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate section evidence from refreshed corpus",
             "inputs": [
               "outline.json",
               "evidence/chunks.jsonl",
@@ -1966,7 +1969,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1994,8 +1996,9 @@
           },
           {
             "id": "quality_outline_survey_contract",
-            "title": "Audit a reopened outline against the survey contract",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline against the survey contract",
             "inputs": [
               "outline.json",
               "reports/action-dispatch-outline.json"
@@ -2007,7 +2010,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2020,8 +2022,9 @@
           },
           {
             "id": "quality_outline_structure_audit",
-            "title": "Audit a reopened outline for structural coherence",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline for structural coherence",
             "inputs": [
               "outline.json",
               "reports/action-dispatch-outline.json"
@@ -2033,7 +2036,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2046,8 +2048,9 @@
           },
           {
             "id": "quality_outline_reopen_validate",
-            "title": "Validate an outline reopening before downstream revision",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Validate an outline reopening before downstream revision",
             "inputs": [
               "reviews/action-plan.json",
               "reports/survey-contract.json",
@@ -2059,7 +2062,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2074,8 +2076,9 @@
           },
           {
             "id": "quality_reallocate_outline_evidence",
-            "title": "Reallocate evidence after a validated outline reopening",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate evidence after a validated outline reopening",
             "inputs": [
               "outline.json",
               "evidence/chunks.jsonl",
@@ -2088,7 +2091,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2493,8 +2495,9 @@
       },
       {
         "id": "final_release_assessment",
-        "title": "Assess final release gates for bounded recovery",
         "owner": "artifact-builder",
+        "runtime": "script",
+        "title": "Assess final release gates for bounded recovery",
         "inputs": [
           "chapters/*.md",
           "sources/classified_sources.jsonl",
@@ -2510,7 +2513,6 @@
         "validators": [
           "required_output_exists"
         ],
-        "runtime": "script",
         "command": {
           "cmd": "<node>",
           "args": [
@@ -2532,8 +2534,8 @@
         "stages": [
           {
             "id": "final_release_plan",
-            "title": "Plan corrective actions for failed final release gates",
             "owner": "analyst",
+            "title": "Plan corrective actions for failed final release gates",
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
@@ -2611,8 +2613,9 @@
           },
           {
             "id": "action_plan_split",
-            "title": "Order remediation actions by evidence dependency",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Order remediation actions by evidence dependency",
             "inputs": [
               "reviews/action-plan.json"
             ],
@@ -2625,7 +2628,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2654,8 +2656,9 @@
           },
           {
             "id": "quality_dispatch_metrics",
-            "title": "Record whether an evidence expansion was dispatched this round",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Record whether an evidence expansion was dispatched this round",
             "inputs": [
               "reports/action-dispatch-research.json"
             ],
@@ -2665,7 +2668,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2679,8 +2681,8 @@
           },
           {
             "id": "quality_semantic_screen",
-            "title": "Refresh abstract screening after a selected evidence expansion",
             "owner": "analyst",
+            "title": "Refresh abstract screening after a selected evidence expansion",
             "inputs": [
               "reports/action-dispatch-research.json",
               "sources/semantic-screening-candidates.json"
@@ -2724,8 +2726,9 @@
           },
           {
             "id": "quality_fulltext_refresh",
-            "title": "Ingest full text selected by refreshed semantic screening",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Ingest full text selected by refreshed semantic screening",
             "inputs": [
               "sources/semantic-screening.json",
               "sources/classified_sources.jsonl"
@@ -2736,7 +2739,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2753,8 +2755,9 @@
           },
           {
             "id": "quality_evidence_index_refresh",
-            "title": "Rebuild local evidence index from refreshed full text",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Rebuild local evidence index from refreshed full text",
             "inputs": [
               "fulltext/manifest.json"
             ],
@@ -2765,7 +2768,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2779,8 +2781,9 @@
           },
           {
             "id": "quality_source_evidence_candidate_select",
-            "title": "Select refreshed full-text sources for claim extraction",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Select refreshed full-text sources for claim extraction",
             "inputs": [
               "sources/semantic-screening.json",
               "fulltext/manifest.json",
@@ -2792,7 +2795,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2806,8 +2808,8 @@
           },
           {
             "id": "quality_source_evidence_extract",
-            "title": "Refresh source-level evidence packets after an expansion",
             "owner": "analyst",
+            "title": "Refresh source-level evidence packets after an expansion",
             "inputs": [
               "reports/action-dispatch-research.json",
               "sources/source-evidence-candidates.json",
@@ -2853,8 +2855,9 @@
           },
           {
             "id": "quality_finalize_evidence_depth",
-            "title": "Finalize refreshed citation depth from source evidence",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Finalize refreshed citation depth from source evidence",
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
               "sources/semantic-screening.json",
@@ -2870,7 +2873,6 @@
               "required_output_exists",
               "jsonl_parseable"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2884,8 +2886,9 @@
           },
           {
             "id": "quality_corpus_gates",
-            "title": "Re-evaluate corpus gates on refreshed citation depth",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-evaluate corpus gates on refreshed citation depth",
             "inputs": [
               "sources/classified_sources.jsonl",
               "sources/search-plan.json"
@@ -2897,7 +2900,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2911,8 +2913,9 @@
           },
           {
             "id": "quality_allocate_evidence",
-            "title": "Reallocate section evidence from refreshed corpus",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate section evidence from refreshed corpus",
             "inputs": [
               "outline.json",
               "evidence/chunks.jsonl",
@@ -2924,7 +2927,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2953,8 +2955,9 @@
           },
           {
             "id": "quality_outline_survey_contract",
-            "title": "Audit a reopened outline against the survey contract",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline against the survey contract",
             "inputs": [
               "outline.json",
               "reports/action-dispatch-outline.json"
@@ -2966,7 +2969,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -2980,8 +2982,9 @@
           },
           {
             "id": "quality_outline_structure_audit",
-            "title": "Audit a reopened outline for structural coherence",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Audit a reopened outline for structural coherence",
             "inputs": [
               "outline.json",
               "reports/action-dispatch-outline.json"
@@ -2993,7 +2996,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3007,8 +3009,9 @@
           },
           {
             "id": "quality_outline_reopen_validate",
-            "title": "Validate an outline reopening before downstream revision",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Validate an outline reopening before downstream revision",
             "inputs": [
               "reviews/action-plan.json",
               "reports/survey-contract.json",
@@ -3020,7 +3023,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3036,8 +3038,9 @@
           },
           {
             "id": "quality_reallocate_outline_evidence",
-            "title": "Reallocate evidence after a validated outline reopening",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Reallocate evidence after a validated outline reopening",
             "inputs": [
               "outline.json",
               "evidence/chunks.jsonl",
@@ -3050,7 +3053,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3405,8 +3407,9 @@
           },
           {
             "id": "final_release_verify_citations",
-            "title": "Re-verify cited URLs after final-release recovery",
             "owner": "source-curator",
+            "runtime": "script",
+            "title": "Re-verify cited URLs after final-release recovery",
             "inputs": [
               "chapters/*.md",
               "sources/classified_sources.jsonl"
@@ -3419,7 +3422,6 @@
               "required_output_exists",
               "jsonl_parseable"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3432,8 +3434,9 @@
           },
           {
             "id": "final_release_assess_research",
-            "title": "Reassess literature and citation quality after recovery",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Reassess literature and citation quality after recovery",
             "inputs": [
               "sources/classified_sources.jsonl",
               "sources/citation_plan.jsonl",
@@ -3448,7 +3451,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3461,8 +3463,9 @@
           },
           {
             "id": "final_release_assessment",
-            "title": "Assess final release gates for bounded recovery",
             "owner": "artifact-builder",
+            "runtime": "script",
+            "title": "Assess final release gates for bounded recovery",
             "inputs": [
               "chapters/*.md",
               "sources/classified_sources.jsonl",
@@ -3478,7 +3481,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -3555,8 +3557,8 @@
     "tool_catalog": [
       {
         "id": "targeted_research_expansion",
-        "title": "Expand research evidence for an identified coverage gap",
         "owner": "source-curator",
+        "title": "Expand research evidence for an identified coverage gap",
         "inputs": [
           "outline.json",
           "reviews/action-plan.json",
@@ -3572,6 +3574,7 @@
           "required_output_exists"
         ],
         "runtime": "script",
+        "max_invocations": 1,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -3582,13 +3585,12 @@
             "--action-plan",
             "reviews/action-plan.json"
           ]
-        },
-        "max_invocations": 1
+        }
       },
       {
         "id": "reopen_outline",
-        "title": "Reopen the approved outline for a structural correction",
         "owner": "outline-architect",
+        "title": "Reopen the approved outline for a structural correction",
         "inputs": [
           "reviews/action-plan.json",
           "reviews/artifact-plan.json",
@@ -3628,8 +3630,8 @@
       },
       {
         "id": "revise_sections",
-        "title": "Revise evidence-backed prose and structure",
         "owner": "editor",
+        "title": "Revise evidence-backed prose and structure",
         "inputs": [
           "project_brief.md",
           "outline.json",
@@ -3677,8 +3679,8 @@
       },
       {
         "id": "revise_visual_plan",
-        "title": "Repair the placed visual plan from review findings",
         "owner": "artifact-builder",
+        "title": "Repair the placed visual plan from review findings",
         "inputs": [
           "outline.json",
           "evidence/coverage.json",
@@ -3715,8 +3717,8 @@
       },
       {
         "id": "request_operator_clarification",
-        "title": "Request an operator decision",
         "owner": "analyst",
+        "title": "Request an operator decision",
         "inputs": [
           "reviews/action-plan.json"
         ],
@@ -3731,6 +3733,8 @@
           "non_empty_markdown"
         ],
         "runtime": "script",
+        "requires_operator_response": true,
+        "max_invocations": 1,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -3741,9 +3745,7 @@
             "--action-plan",
             "reviews/action-plan.json"
           ]
-        },
-        "requires_operator_response": true,
-        "max_invocations": 1
+        }
       }
     ]
   }

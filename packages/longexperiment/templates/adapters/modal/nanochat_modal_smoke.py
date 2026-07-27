@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -90,6 +91,7 @@ execution: {max_trials: 2, max_active_run_minutes: 5, max_parallel_trials: 1, re
     (workspace / "agent" / "candidate" / "project" / "maliang_runner.py").write_text(f'''\
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -130,6 +132,12 @@ def main() -> None:
     parser.add_argument("--execute", action="store_true", help="Confirm the real paid Modal GPU action")
     parser.add_argument("--image", default=DEFAULT_IMAGE, help="Optional immutable maintainer-prebuilt image override")
     parser.add_argument("--poll-seconds", type=int, default=10)
+    # Success deletes the transient workspace, so the one run that touches real
+    # GPU hardware is also the one that leaves nothing to audit. Keeping it is
+    # opt-in: the default stays clean, but a release rehearsal can retain the
+    # collected artifacts as durable evidence.
+    parser.add_argument("--keep-workspace", metavar="DIR",
+                        help="Copy the collected workspace here instead of discarding it")
     options = parser.parse_args()
     if not options.execute:
         raise SystemExit("Refusing to launch a paid Sandbox without --execute")
@@ -164,7 +172,28 @@ def main() -> None:
             if collected["status"] != "succeeded":
                 raise RuntimeError(f"Modal smoke collection did not succeed: {collected.get('message')}")
             artifacts = [json.loads((workspace / output).read_text(encoding="utf-8")) for output in OUTPUTS if output.endswith("nanochat-kernel-smoke.json")]
-            print(json.dumps({"status": "succeeded", "message": "Nanochat GPU kernel smoke completed; transient Sandbox finished and Volume was deleted.", "artifacts": artifacts}, indent=2))
+            kept = None
+            if options.keep_workspace:
+                kept = Path(options.keep_workspace).expanduser().resolve()
+                kept.mkdir(parents=True, exist_ok=True)
+                for output in OUTPUTS:
+                    source = workspace / output
+                    if not source.exists():
+                        continue
+                    target = kept / output
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                (kept / "smoke-provenance.json").write_text(json.dumps({
+                    "version": 1, "job_id": job_id, "nanochat_revision": NANOCHAT_REVISION,
+                    "collected_outputs": [output for output in OUTPUTS if (workspace / output).exists()],
+                }, indent=2) + "\n", encoding="utf-8")
+            print(json.dumps({
+                "status": "succeeded",
+                "message": "Nanochat GPU kernel smoke completed; transient Sandbox finished and Volume was deleted.",
+                "job_id": job_id,
+                "artifacts": artifacts,
+                **({"kept_workspace": str(kept)} if kept else {}),
+            }, indent=2))
         except Exception as error:
             if job_id:
                 try:

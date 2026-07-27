@@ -1,15 +1,19 @@
+import { execFile as execFileCallback } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import type { ExperimentConfig, ResearchLoopPolicy } from "./schema.js";
 import { createTaskProfileRegistry } from "../profiles/index.js";
 import { recordDeadEndEvidence } from "./dead-ends.js";
 import { freezeBaseline, materializeCandidateWorktree } from "./git-lineage.js";
-import { addCandidateNode, completeRound, initializeLineage, markDeadEnd, promoteChampion, readLineage, recordCandidateResult, recordRunStatus, startRound } from "./lineage.js";
+import { addCandidateNode, completeRound, initializeLineage, markDeadEnd, promoteChampion, readLineage, recordCandidateCommit, recordCandidateResult, recordRunStatus, startRound } from "./lineage.js";
 import { deduplicateProposal, ResearchProposal, validateProposalPacket } from "./proposals.js";
 import { initializeResearchState, readResearchState, updateResearchState } from "./research-state.js";
 import { archiveActiveRound, startActiveRound } from "./rounds.js";
+
+const execFile = promisify(execFileCallback);
 
 /**
  * The deterministic half of the generalized research loop (LE-4.3).
@@ -37,6 +41,10 @@ export const RoundPlan = z.object({
   parent_node_id: z.string().min(1),
   candidates: z.array(RoundCandidate),
   rejected: z.array(z.object({ proposal_id: z.string(), reasons: z.array(z.string()) }).strict()),
+  /** The foreach source. `foreach: runs/active-round/candidates.items` makes
+   *  the engine read THIS file and look for an `items` array — a sibling
+   *  `candidates.items.json` is never opened. */
+  items: z.array(z.object({ id: z.string() }).strict()),
 }).strict();
 export type RoundPlan = z.infer<typeof RoundPlan>;
 
@@ -110,10 +118,12 @@ export async function validateRoundPlan(workspace: string, config: ExperimentCon
   }
   if (accepted.length === 0) throw new Error(`round ${plan.round_id} has no proposal that survives critique, novelty, and mutation-policy validation`);
 
-  const validated = RoundPlan.parse({ version: 1, round_id: plan.round_id, parent_node_id: plan.parent_node_id, candidates: accepted, rejected });
+  const validated = RoundPlan.parse({
+    version: 1, round_id: plan.round_id, parent_node_id: plan.parent_node_id,
+    candidates: accepted, rejected, items: accepted.map((candidate) => ({ id: candidate.id })),
+  });
   await startActiveRound(workspace, plan.round_id, validated as unknown as Record<string, unknown>);
   await writeAtomic(activeRound(workspace, "candidates.json"), validated);
-  await writeAtomic(activeRound(workspace, "candidates.items.json"), { items: accepted.map((candidate) => ({ id: candidate.id })) });
   await startRound(workspace, { id: plan.round_id, parent_node_id: plan.parent_node_id, proposal_ids: accepted.map((candidate) => candidate.proposal_id) });
   return validated;
 }
@@ -330,4 +340,109 @@ export async function promoteRound(workspace: string, config: ExperimentConfig):
   });
 
   return { round_id: plan.round_id, winner_node_id: winner?.id ?? null, champion_node_id: winner?.id ?? state.champion_node_id, champion_improvement: championImprovement, stop, ...(stopReason ? { stop_reason: stopReason } : {}) };
+}
+
+/**
+ * Execute one candidate (or the baseline) through the configured runner.
+ *
+ * The research loop deliberately does NOT reuse `run-study`. That command reads
+ * `runs/suite-plan.json` and refuses an id it does not find there — but the
+ * loop never builds a suite plan, because its unit of work is a candidate
+ * commit, not a declared study. Reusing it made `baseline_execute` fail on
+ * every repository-optimization pilot before a single candidate was proposed.
+ *
+ * The evaluator and command are identical for every sibling; only the worktree
+ * differs. That is the control the whole comparison rests on.
+ */
+export async function runCandidateStage(workspace: string, config: ExperimentConfig, candidateId: string): Promise<void> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidateId)) throw new Error(`unsafe candidate id ${candidateId}`);
+  const evaluation = config.evaluation;
+  if (!evaluation) throw new Error("the research loop requires an evaluation contract");
+  if (config.runner.kind !== "command" || !config.runner.command) {
+    throw new Error("runCandidateStage is the local-runner path; a remote runner executes through its adapter");
+  }
+
+  const output = path.posix.join("results", "studies", candidateId, "raw-results.json");
+  const log = path.join(workspace, "logs", "studies", candidateId, "runner.log");
+  await fs.mkdir(path.dirname(log), { recursive: true });
+
+  const conditions = candidateId === "baseline"
+    ? [evaluation.baseline_id]
+    : [...new Set(config.suite?.studies.flatMap((study) => study.conditions).filter((condition) => condition !== evaluation.baseline_id) ?? ["candidate"])];
+
+  try {
+    const result = await execFile("sh", ["-lc", config.runner.command], {
+      cwd: config.runner.workdir ? path.resolve(workspace, config.runner.workdir) : workspace,
+      encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+      env: {
+        ...process.env,
+        LONGEXPERIMENT_WORKSPACE: workspace,
+        LONGEXPERIMENT_STUDY_ID: candidateId,
+        LONGEXPERIMENT_CANDIDATE_ID: candidateId,
+        LONGEXPERIMENT_RESULT_PATH: output,
+        LONGEXPERIMENT_SEEDS: evaluation.seeds.join(","),
+        LONGEXPERIMENT_CONDITIONS: conditions.join(","),
+        LONGEXPERIMENT_PRIMARY_METRIC: evaluation.primary_metric,
+        LONGEXPERIMENT_INPUT_LOCKS: "inputs/locks.json",
+      },
+    });
+    await fs.writeFile(log, `${result.stdout}\n${result.stderr}`, "utf8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await fs.appendFile(log, `\nRUNNER FAILED\n${message}\n`, "utf8");
+    throw new Error(`candidate ${candidateId} runner failed; inspect ${path.relative(workspace, log)}`);
+  }
+  await fs.access(path.join(workspace, output));
+}
+
+/**
+ * Turn an implemented candidate worktree into an immutable, policy-checked commit.
+ *
+ * The loop previously materialized a branch and ran it, but nothing applied the
+ * proposal — so every candidate scored identically to the baseline and the
+ * search could never find anything. Authoring is the agent's job; this stage is
+ * the deterministic half that decides whether what it wrote is admissible:
+ *
+ *  - only `mutable_paths` may change, never a `protected_paths` entry;
+ *  - the file and byte budgets are enforced before any compute is spent;
+ *  - an empty diff is rejected, because an unchanged candidate is not a
+ *    candidate — it silently re-measures the baseline.
+ */
+export async function verifyCandidateStage(workspace: string, config: ExperimentConfig, candidateId: string): Promise<{ commit_sha: string; changed: string[] }> {
+  const plan = RoundPlan.parse(await readJson(activeRound(workspace, "candidates.json")));
+  if (!plan.candidates.some((candidate) => candidate.id === candidateId)) throw new Error(`candidate ${candidateId} is not part of round ${plan.round_id}`);
+  const policy = profileFor(config).mutationPolicy(config);
+  const tree = path.join(workspace, "worktrees", candidateId);
+
+  const git = async (args: string[]) => (await execFile("git", ["-C", tree, ...args], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })).stdout;
+  const changed = (await git(["status", "--porcelain"])).split("\n")
+    .map((line) => line.slice(3).trim()).filter(Boolean);
+
+  if (changed.length === 0) {
+    throw new Error(`candidate ${candidateId} changed nothing; an unchanged worktree just re-measures the baseline`);
+  }
+  const forbidden = changed.filter((file) => !isMutable(file, policy));
+  if (forbidden.length > 0) {
+    throw new Error(`candidate ${candidateId} modified paths outside the mutation policy: ${forbidden.sort().join(", ")}`);
+  }
+  if (changed.length > policy.max_files_changed) {
+    throw new Error(`candidate ${candidateId} changed ${changed.length} files, above max_files_changed ${policy.max_files_changed}`);
+  }
+  let bytes = 0;
+  for (const file of changed) {
+    const stat = await fs.stat(path.join(tree, file)).catch(() => null);
+    bytes += stat?.size ?? 0;
+  }
+  if (bytes > policy.max_total_bytes_changed) {
+    throw new Error(`candidate ${candidateId} changed ${bytes} bytes, above max_total_bytes_changed ${policy.max_total_bytes_changed}`);
+  }
+
+  await git(["add", "-A"]);
+  await execFile("git", ["-C", tree, "-c", "user.email=longexperiment@local", "-c", "user.name=LongExperiment", "commit", "-m", `candidate ${candidateId}`], { encoding: "utf8" });
+  const commit_sha = (await git(["rev-parse", "HEAD"])).trim();
+  await recordCandidateCommit(workspace, candidateId, commit_sha);
+  await writeAtomic(path.join(workspace, "results", "studies", candidateId, "candidate-commit.json"), {
+    version: 1, candidate_id: candidateId, commit_sha, changed_paths: changed.sort(), bytes_changed: bytes,
+  });
+  return { commit_sha, changed: changed.sort() };
 }

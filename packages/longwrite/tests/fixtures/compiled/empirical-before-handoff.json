@@ -826,8 +826,8 @@
         "stages": [
           {
             "id": "artifact_plan",
-            "title": "Choose source-grounded analytical artifacts",
             "owner": "analyst",
+            "title": "Choose source-grounded analytical artifacts",
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
@@ -879,8 +879,8 @@
           },
           {
             "id": "action_plan",
-            "title": "Plan bounded remediation actions",
             "owner": "analyst",
+            "title": "Plan bounded remediation actions",
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
@@ -936,8 +936,9 @@
           },
           {
             "id": "action_plan_split",
-            "title": "Order remediation actions by evidence dependency",
             "owner": "analyst",
+            "runtime": "script",
+            "title": "Order remediation actions by evidence dependency",
             "inputs": [
               "reviews/action-plan.json"
             ],
@@ -950,7 +951,6 @@
             "validators": [
               "required_output_exists"
             ],
-            "runtime": "script",
             "command": {
               "cmd": "<node>",
               "args": [
@@ -1450,8 +1450,8 @@
     "tool_catalog": [
       {
         "id": "targeted_research_expansion",
-        "title": "Expand research evidence for an identified coverage gap",
         "owner": "source-curator",
+        "title": "Expand research evidence for an identified coverage gap",
         "inputs": [
           "outline.json",
           "reviews/action-plan.json",
@@ -1467,6 +1467,7 @@
           "required_output_exists"
         ],
         "runtime": "script",
+        "max_invocations": 1,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -1477,13 +1478,12 @@
             "--action-plan",
             "reviews/action-plan.json"
           ]
-        },
-        "max_invocations": 1
+        }
       },
       {
         "id": "reopen_outline",
-        "title": "Reopen the approved outline for a structural correction",
         "owner": "outline-architect",
+        "title": "Reopen the approved outline for a structural correction",
         "inputs": [
           "reviews/action-plan.json",
           "reviews/artifact-plan.json",
@@ -1523,8 +1523,8 @@
       },
       {
         "id": "revise_sections",
-        "title": "Revise evidence-backed prose and structure",
         "owner": "editor",
+        "title": "Revise evidence-backed prose and structure",
         "inputs": [
           "project_brief.md",
           "outline.json",
@@ -1572,8 +1572,8 @@
       },
       {
         "id": "revise_visual_plan",
-        "title": "Repair the placed visual plan from review findings",
         "owner": "artifact-builder",
+        "title": "Repair the placed visual plan from review findings",
         "inputs": [
           "outline.json",
           "evidence/coverage.json",
@@ -1602,8 +1602,8 @@
       },
       {
         "id": "request_operator_clarification",
-        "title": "Request an operator decision",
         "owner": "analyst",
+        "title": "Request an operator decision",
         "inputs": [
           "reviews/action-plan.json"
         ],
@@ -1618,6 +1618,8 @@
           "non_empty_markdown"
         ],
         "runtime": "script",
+        "requires_operator_response": true,
+        "max_invocations": 1,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -1628,9 +1630,7 @@
             "--action-plan",
             "reviews/action-plan.json"
           ]
-        },
-        "requires_operator_response": true,
-        "max_invocations": 1
+        }
       }
     ]
   }

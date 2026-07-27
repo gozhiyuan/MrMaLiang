@@ -120,6 +120,15 @@ export async function recordCandidateResult(workspaceDir: string, nodeId: string
   return updateLineage(workspaceDir, (graph) => ({ ...graph, nodes: graph.nodes.map((node) => node.id === nodeId ? { ...node, ...result, status: "completed" } : node) }));
 }
 
+/** Bind a candidate to the immutable commit its implementation produced.
+ *  A candidate is only evidence once its code is a real commit. */
+export async function recordCandidateCommit(workspaceDir: string, nodeId: string, commitSha: string): Promise<LineageGraph> {
+  return updateLineage(workspaceDir, (graph) => {
+    if (!graph.nodes.some((node) => node.id === nodeId)) throw new Error(`unknown lineage node ${nodeId}`);
+    return { ...graph, nodes: graph.nodes.map((node) => node.id === nodeId ? { ...node, commit_sha: commitSha } : node) };
+  });
+}
+
 export async function promoteChampion(workspaceDir: string, nodeId: string, reason: string): Promise<LineageGraph> {
   return updateLineage(workspaceDir, (graph) => {
     const node = graph.nodes.find((candidate) => candidate.id === nodeId);

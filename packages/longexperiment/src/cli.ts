@@ -14,7 +14,7 @@ import { readLineage } from "./lib/lineage.js";
 import { initializeResearchState, readResearchState, updateResearchState } from "./lib/research-state.js";
 import { ExperimentPilot } from "./lib/schema.js";
 import { reconcileClaims } from "./lib/reproduction/claims.js";
-import { auditBaseline, auditRoundCandidate, materializeRoundCandidates, promoteRound, researchInit, validateRoundPlan, writeResearchFindings } from "./lib/research-round.js";
+import { auditBaseline, auditRoundCandidate, materializeRoundCandidates, promoteRound, researchInit, runCandidateStage, validateRoundPlan, verifyCandidateStage, writeResearchFindings } from "./lib/research-round.js";
 
 function slugFromDir(dir: string): string {
   const base = path.basename(path.resolve(dir));
@@ -226,6 +226,17 @@ stage.command("research-init <workspace>").action(async (workspace) => {
   const resolved = path.resolve(workspace);
   const { commit_sha } = await researchInit(resolved, await readConfig(resolved));
   console.log(`baseline frozen at ${commit_sha}`);
+});
+
+stage.command("run-candidate <workspace> <candidateId>").action(async (workspace, candidateId) => {
+  const resolved = path.resolve(workspace);
+  await runCandidateStage(resolved, await readConfig(resolved), candidateId);
+});
+
+stage.command("verify-candidate <workspace> <candidateId>").action(async (workspace, candidateId) => {
+  const resolved = path.resolve(workspace);
+  const result = await verifyCandidateStage(resolved, await readConfig(resolved), candidateId);
+  console.log(`${candidateId} committed as ${result.commit_sha.slice(0, 12)} (${result.changed.join(", ")})`);
 });
 
 stage.command("audit-baseline <workspace>").action(async (workspace) => {

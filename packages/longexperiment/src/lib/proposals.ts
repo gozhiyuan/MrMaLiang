@@ -5,7 +5,9 @@ const ProposalId = z.string().regex(/^[a-z][a-z0-9_-]*$/);
 const ChangedPath = z.string().min(1).refine((value) => !value.startsWith("/") && !value.split("/").includes(".."), "must be workspace-relative");
 
 export const ResearchProposal = z.object({
-  version: z.literal(1),
+  /** Defaulted: the authoring prompt states the field list, and a missing
+   *  version must not discard an otherwise valid proposal. */
+  version: z.literal(1).default(1),
   id: ProposalId,
   author_id: z.string().min(1),
   parent_champion_id: z.string().min(1),
@@ -20,7 +22,7 @@ export const ResearchProposal = z.object({
 export type ResearchProposal = z.infer<typeof ResearchProposal>;
 
 export const ProposalCritique = z.object({
-  version: z.literal(1),
+  version: z.literal(1).default(1),
   proposal_id: ProposalId,
   author_id: z.string().min(1),
   verdict: z.enum(["accept", "revise", "reject"]),

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
 import { parse as parseYaml } from "yaml";
+import { Manifest } from "malaclaw/dist/lib/schema.js";
 import { compileExperimentToManifest } from "../src/lib/compiler.js";
 import { ExperimentConfig } from "../src/lib/schema.js";
 import { FLAGSHIP_IDS } from "../src/lib/flagships.js";
@@ -238,5 +239,34 @@ describe("golden experiment manifests keep their scientific structure", () => {
     const flat = JSON.stringify(normalize(compileExperimentToManifest(baseConfig())));
     expect(flat).not.toContain(process.execPath);
     expect(flat).not.toMatch(/"\/(Users|home)\//);
+  });
+});
+
+/**
+ * A frozen manifest is only useful if the engine can actually run it.
+ *
+ * The golden tests above compare compiled output against itself, so they
+ * happily froze a manifest MalaClaw refused to parse: every prescribed
+ * workspace emitted the worker runtime `script` into the manifest-level
+ * `runtime`, which is the provisioning enum. `malaclaw validate` failed on
+ * those workspaces while the whole suite stayed green. Parsing each golden
+ * through the engine's own schema closes that gap permanently.
+ */
+describe("compiled manifests satisfy the MalaClaw engine schema", () => {
+  it("parses every checked-in golden fixture", async () => {
+    const files = (await fs.readdir(fixturesDir)).filter((name) => name.endsWith(".json"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const manifest = JSON.parse(await fs.readFile(path.join(fixturesDir, file), "utf-8"));
+      expect(() => Manifest.parse(manifest), `${file} is not a valid MalaClaw manifest`).not.toThrow();
+    }
+  });
+
+  it("parses freshly compiled flagship manifests", async () => {
+    for (const flagship of FLAGSHIP_IDS) {
+      const raw = await fs.readFile(path.join(flagshipsDir, `${flagship}.yaml`), "utf-8");
+      const manifest = compileExperimentToManifest(ExperimentConfig.parse(parseYaml(raw)));
+      expect(() => Manifest.parse(manifest), `flagship ${flagship} is not a valid MalaClaw manifest`).not.toThrow();
+    }
   });
 });

@@ -46,4 +46,12 @@ jobs:
         run: npm test
         env:
           MALACLAW_SOURCE_DIR: ${{ github.workspace }}/.dependencies/MalaClaw
+      # The golden suites compare compiled manifests against themselves, so an
+      # invalid manifest can stay frozen and green. This scaffolds real
+      # workspaces, validates each through the engine, and executes a
+      # prescribed experiment with a deterministic local runner.
+      - name: Execution smoke
+        run: npm run smoke:execution
+        env:
+          MALACLAW_SOURCE_DIR: ${{ github.workspace }}/.dependencies/MalaClaw
       - run: npm run maliang -- template list
