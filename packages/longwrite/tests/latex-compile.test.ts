@@ -173,6 +173,39 @@ describe.skipIf(!latexmkAvailable())("real latexmk compilation", () => {
       "# Background\n\nDurable plans need evidence-backed memory [source:source-1].\n",
       "utf-8",
     );
+    // No artifact is published unless the planner selected it, so this test
+    // selects the two it compiles: a verified metadata plot and a
+    // source-bound comparison table, both placed in section-1.
+    const sourceIds = (await fs.readFile(path.join(ws, "sources", "classified_sources.jsonl"), "utf-8"))
+      .trim().split("\n").map((line) => (JSON.parse(line) as { id: string }).id);
+    await fs.mkdir(path.join(ws, "reviews"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reviews", "artifact-plan.json"), JSON.stringify({
+      version: 1,
+      intents: [{
+        id: "corpus-recency",
+        kind: "metadata_plot",
+        rationale: "The background section's recency claim has to be checkable against the retrieved corpus itself.",
+        section_id: "section-1",
+        plot_metric: "publication_year",
+        acceptance_criteria: [{ metric: "verified_metadata_plots", target: 1 }],
+      }],
+    }, null, 2), "utf-8");
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      table_specs: [{
+        id: "memory-regime-comparison",
+        kind: "comparison_matrix",
+        comparative: true,
+        title: "Memory regimes compared",
+        caption: "The matrix separates each regime's intervention from its reported outcome.",
+        insight: "The comparison shows which regimes report durable gains and which remain limited by retrieval quality.",
+        placement: { section_id: "section-1", discussion: "The table grounds the section's comparison of memory regimes." },
+        headers: ["Source", "Regime", "Outcome"],
+        rows: [{ cells: ["Evidence", "Long horizon", "Longer usable context"], source_ids: [sourceIds[0]] }],
+      }],
+    }, null, 2), "utf-8");
     await buildFigureWorkspace(ws);
     await fs.writeFile(path.join(ws, "figures", "source-years-plot.png"), onePixelPng());
     await buildLatexWorkspace(ws);
@@ -180,6 +213,8 @@ describe.skipIf(!latexmkAvailable())("real latexmk compilation", () => {
     expect(report).toContain("Real PDF compiled: yes");
     const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
     expect(section).toContain("\\input{figures/source-years.tex}");
-    expect(section).toContain("\\input{tables/evidence-profile.tex}");
+    expect(section).toContain("\\input{tables/memory-regime-comparison.tex}");
+    // Corpus bookkeeping is workspace evidence, not a paper table.
+    expect(section).not.toContain("evidence-profile");
   }, 120_000);
 });

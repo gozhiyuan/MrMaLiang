@@ -397,15 +397,28 @@ describe("compileModeToManifest", () => {
     expect(workflow.stages.find((stage) => stage.id === "source_evidence_extract")?.validator_commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ args: expect.arrayContaining(["research", "repair-source-evidence", "."]) }),
     ]));
+    expect(workflow.stages.find((stage) => stage.id === "source_evidence_extract")?.outputs).toEqual(expect.arrayContaining([
+      "evidence/validated-source-evidence.json",
+    ]));
     expect(workflow.stages.find((stage) => stage.id === "finalize_evidence_depth")?.command).toMatchObject({
       args: expect.arrayContaining(["research", "finalize-evidence-depth", "."]),
     });
+    expect(workflow.stages.find((stage) => stage.id === "finalize_evidence_depth")?.inputs).toEqual(expect.arrayContaining([
+      "evidence/validated-source-evidence.json",
+    ]));
+    expect(workflow.stages.find((stage) => stage.id === "finalize_evidence_depth")?.outputs).toEqual(expect.arrayContaining([
+      "evidence/active-validated-source-evidence.json",
+    ]));
     const outline = workflow.stages.find((stage) => stage.id === "outline");
     expect(outline?.requires_human_approval).toBe(false);
     expect((outline?.skills as string[])).toContain("evidence/source-packets.json");
+    expect((outline?.skills as string[])).toContain("evidence/active-validated-source-evidence.json");
+    expect(workflow.stages.find((stage) => stage.id === "outline_initial_review")).toBeDefined();
+    expect(workflow.stages.find((stage) => stage.id === "outline_initial_readiness_score")).toBeDefined();
     const outlineLoop = workflow.stages.find((stage) => stage.id === "outline_quality_loop") as { max_rounds: number; stages: Array<Record<string, unknown>> };
     expect(outlineLoop.max_rounds).toBe(2);
-    expect(outlineLoop.stages.map((stage) => stage.id)).toEqual(["outline_survey_contract", "outline_structure_audit", "outline_review", "outline_readiness_score", "outline_revise"]);
+    expect(outlineLoop.stages.map((stage) => stage.id)).toEqual(["outline_revise", "outline_recheck_survey_contract", "outline_recheck_structure_audit", "outline_recheck_review", "outline_recheck_readiness_score"]);
+    expect(outlineLoop.stages.every((stage) => stage.when === "outline_readiness < 1")).toBe(true);
     expect(workflow.stages.find((stage) => stage.id === "outline_approval_gate")).toMatchObject({ requires_human_approval: false });
     expect(ids.indexOf("initial_artifact_plan")).toBeLessThan(ids.indexOf("visual_plan"));
     expect(workflow.stages.find((stage) => stage.id === "initial_artifact_plan_repair")).toBeUndefined();
@@ -431,6 +444,9 @@ describe("compileModeToManifest", () => {
     ]));
     expect(loop.stages.find((stage) => stage.id === "quality_source_evidence_extract")?.validator_commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ args: expect.arrayContaining(["research", "repair-source-evidence", "."]) }),
+    ]));
+    expect(loop.stages.find((stage) => stage.id === "quality_source_evidence_extract")?.outputs).toEqual(expect.arrayContaining([
+      "evidence/validated-source-evidence.json",
     ]));
     expect(loop.stages.find((stage) => stage.id === "artifact_plan_repair")).toBeUndefined();
     expect(loop.stages.find((stage) => stage.id === "artifact_plan")?.validator_commands).toEqual(expect.arrayContaining([

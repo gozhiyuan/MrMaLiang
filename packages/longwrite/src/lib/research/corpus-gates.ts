@@ -3,7 +3,8 @@ import path from "node:path";
 import { loadProjectConfig } from "../project-config.js";
 import { parseJsonl } from "./jsonl.js";
 import { loadSearchPlan, matchingTaxonomyCell } from "./search-plan.js";
-import type { ClassifiedSource, RawSource } from "./types.js";
+import { sourceMatchesTaxonomy } from "./taxonomy.js";
+import type { ClassifiedSource } from "./types.js";
 
 export type CorpusGateFinding = {
   id: string;
@@ -18,17 +19,13 @@ export type CorpusGateReport = {
   recent_ratio: number;
   source_type_count: number;
   core_source_count: number;
-  taxonomy: Array<{ cell: string; source_count: number; pass: boolean; coverage_method: "planned_query_provenance" | "literal_text" }>;
+  taxonomy: Array<{ cell: string; source_count: number; pass: boolean; coverage_method: "planned_query_provenance" | "meaningful_label_terms" }>;
   findings: CorpusGateFinding[];
 };
 
 async function readJsonl<T>(workspaceDir: string, rel: string): Promise<T[]> {
   const raw = await fs.readFile(path.join(workspaceDir, rel), "utf-8");
   return parseJsonl<T>(raw);
-}
-
-function sourceText(source: RawSource): string {
-  return `${source.title} ${source.abstract} ${source.topics.join(" ")}`.toLowerCase();
 }
 
 function isCore(source: ClassifiedSource): boolean {
@@ -61,12 +58,13 @@ export async function evaluateCorpusGates(workspaceDir: string): Promise<CorpusG
     const provenanceCount = plannedQueries.size > 0
       ? sources.filter((source) => source.provenance && plannedQueries.has(source.provenance.query)).length
       : 0;
-    // Workspaces without an LLM search plan retain literal-text coverage. A
-    // recorded planned query group is stronger evidence of intended coverage
-    // than requiring the human taxonomy label to appear verbatim in a paper.
-    const literalCount = sources.filter((source) => sourceText(source).includes(cell.toLowerCase())).length;
-    const coverageMethod = provenanceCount > 0 ? "planned_query_provenance" as const : "literal_text" as const;
-    const count = provenanceCount > 0 ? provenanceCount : literalCount;
+    // A recorded planned query group is strongest evidence of intended
+    // coverage. Without one, use the same meaningful-term matcher used for
+    // evidence allocation; a full prose label is not a realistic literal
+    // phrase to expect in a paper title or abstract.
+    const labelTermCount = sources.filter((source) => sourceMatchesTaxonomy(source, cell)).length;
+    const coverageMethod = provenanceCount > 0 ? "planned_query_provenance" as const : "meaningful_label_terms" as const;
+    const count = provenanceCount > 0 ? provenanceCount : labelTermCount;
     return { cell, source_count: count, pass: count >= gates.min_sources_per_taxonomy_cell, coverage_method: coverageMethod };
   });
 

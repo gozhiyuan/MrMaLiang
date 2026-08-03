@@ -16,6 +16,25 @@ async function addPublicationFigure(workspaceDir: string): Promise<void> {
   await fs.writeFile(path.join(workspaceDir, "figures", "source-years-plot.png"), onePixelPng());
 }
 
+async function selectConceptMap(workspaceDir: string): Promise<void> {
+  await fs.mkdir(path.join(workspaceDir, "figures"), { recursive: true });
+  await fs.writeFile(path.join(workspaceDir, "figures", "placement-plan.json"), JSON.stringify({
+    version: 1,
+    placements: [],
+    concept_map: {
+      title: "Memory-agent evidence map",
+      caption: "The map distinguishes memory design, evaluation, and safety evidence.",
+      placement: { section_id: "section-1", discussion: "The map anchors the background synthesis." },
+      nodes: [
+        { id: "memory", label: "Memory design" },
+        { id: "evaluation", label: "Evaluation" },
+        { id: "safety", label: "Safety" },
+      ],
+      edges: [{ from: "memory", to: "evaluation" }, { from: "evaluation", to: "safety" }],
+    },
+  }, null, 2));
+}
+
 async function makeWorkspace(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-figures-"));
   tempDirs.push(dir);
@@ -58,14 +77,11 @@ afterAll(() => {
 });
 
 describe("research figures and tables", () => {
-  it("builds deterministic figure, table, data, and manifest artifacts", async () => {
+  it("does not publish unplanned corpus bookkeeping as paper artifacts", async () => {
     const ws = await makeWorkspace();
     const written = await buildFigureWorkspace(ws);
     expect(written).toEqual(expect.arrayContaining([
-      "data/source-years.csv",
       "data/source-quality.csv",
-      "figures/source-years.svg",
-      "tables/source-quality.md",
       "figures/manifest.json",
       "figures/figure-plan.md",
       // Backend sources are always written even when mmdc/matplotlib are absent.
@@ -75,20 +91,9 @@ describe("research figures and tables", () => {
     ]));
 
     const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
-    // The source-years plot uses the Matplotlib PNG when available and the
-    // deterministic pgfplots/SVG fallback otherwise; either way the manifest
-    // must declare the artifact that was actually produced.
-    const pythonAvailable = await detectPython();
-    expect(manifest.figures[0]).toMatchObject({
-      id: "source-years",
-      backend: pythonAvailable ? "python" : "deterministic-svg",
-      path: pythonAvailable ? "figures/source-years-plot.png" : "figures/source-years.svg",
-    });
+    expect(manifest.figures).toEqual([]);
+    expect(manifest.tables).toEqual([]);
     expect(await fs.readFile(path.join(ws, "data", "source-years.csv"), "utf-8")).toContain("year,count");
-    expect(await fs.readFile(path.join(ws, "tables", "evidence-profile.md"), "utf-8")).toContain("| Citation depth | Sources | Share |");
-    const methodTable = await fs.readFile(path.join(ws, "paper", "tables", "method-comparison.tex"), "utf-8");
-    expect(methodTable).toContain("\\begin{longtable}");
-    expect(methodTable).toContain("\\setlength{\\tabcolsep}{2pt}");
 
     await addPublicationFigure(ws);
     const report = await validateFigureWorkspace(ws);
@@ -97,12 +102,13 @@ describe("research figures and tables", () => {
 
   it("requires generated figures and tables when a manifest exists", async () => {
     const ws = await makeWorkspace();
+    await selectConceptMap(ws);
     await buildFigureWorkspace(ws);
     await addPublicationFigure(ws);
     // Removing whichever artifact the manifest actually declares must fail the
     // gate, regardless of which figure backend the environment selected.
     const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
-    const declaredPath = manifest.figures[0].path as string;
+    const declaredPath = manifest.figures.find((figure: { id: string }) => figure.id === "concept-map").path as string;
     await fs.rm(path.join(ws, declaredPath));
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
@@ -111,20 +117,20 @@ describe("research figures and tables", () => {
     ]));
   }, 15_000);
 
-  it("includes figure and table references in generated LaTeX", async () => {
+  it("includes only selected figure references in generated LaTeX", async () => {
     const ws = await makeWorkspace();
+    await selectConceptMap(ws);
     await buildFigureWorkspace(ws);
     await addPublicationFigure(ws);
     await buildLatexWorkspace(ws);
     const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
-    expect(section).toContain("\\label{fig:source-years}");
-    expect(section).toContain("\\input{figures/source-years.tex}");
-    expect(section).toContain("\\label{tab:evidence-profile}");
-    expect(section).toContain("\\input{tables/evidence-profile.tex}");
+    expect(section).toContain("\\label{fig:concept-map}");
+    expect(section).toContain("\\input{figures/concept-map.tex}");
+    expect(section).not.toContain("evidence-profile");
     expect((await validateFigureWorkspace(ws)).pass).toBe(true);
   });
 
-  it("publishes a placed taxonomy-coverage table when evidence coverage exists", async () => {
+  it("keeps taxonomy coverage as workspace evidence rather than a default paper table", async () => {
     const ws = await makeWorkspace();
     await fs.mkdir(path.join(ws, "evidence"), { recursive: true });
     await fs.writeFile(path.join(ws, "evidence", "coverage.json"), JSON.stringify({
@@ -134,12 +140,12 @@ describe("research figures and tables", () => {
     await addPublicationFigure(ws);
     await buildLatexWorkspace(ws);
     const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
-    expect(manifest.tables).toEqual(expect.arrayContaining([expect.objectContaining({ id: "taxonomy-coverage" })]));
+    expect(manifest.tables).toEqual([]);
     const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
-    expect(section).toContain("\\input{tables/taxonomy-coverage.tex}");
+    expect(section).not.toContain("taxonomy-coverage");
   });
 
-  it("applies a source-grounded agentic table override through the normal builder", async () => {
+  it("renders a source-grounded selected comparison table through the normal builder", async () => {
     const ws = await makeWorkspace();
     const sources = (await fs.readFile(path.join(ws, "sources", "classified_sources.jsonl"), "utf-8"))
       .trim().split("\n").map((line) => JSON.parse(line) as { id: string });
@@ -147,24 +153,65 @@ describe("research figures and tables", () => {
     await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
       version: 1,
       placements: [],
-      table_overrides: [{
-        id: "method-comparison",
+      table_specs: [{
+        id: "conditional-memory-evidence",
+        kind: "comparison_matrix",
         title: "Conditional memory evidence matrix",
         caption: "Table 4. The matrix distinguishes intervention, outcome, and limitation.",
         headers: ["Source", "Regime", "Intervention", "Outcome", "Confounder", "Safety"],
         rows: [{ cells: ["Evidence", "Long horizon", "External memory", "Longer context", "Retrieval quality varies", "No safety result"], source_ids: [sources[0].id] }],
+        insight: "The matrix distinguishes intervention, outcome, and limitation.",
+        placement: { section_id: "section-1", discussion: "The comparison anchors the memory discussion." },
       }],
     }, null, 2));
     await buildFigureWorkspace(ws);
-    const table = await fs.readFile(path.join(ws, "paper", "tables", "method-comparison.tex"), "utf-8");
+    const table = await fs.readFile(path.join(ws, "paper", "tables", "conditional-memory-evidence.tex"), "utf-8");
     const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
     expect(table).toContain("Intervention");
     expect(table).toContain("Retrieval quality varies");
     expect(table).toContain("\\caption{The matrix distinguishes intervention, outcome, and limitation.}");
     expect(table).not.toContain("\\caption{Table 4.");
-    expect(manifest.tables.find((table: { id: string }) => table.id === "method-comparison")).toMatchObject({
+    expect(manifest.tables.find((table: { id: string }) => table.id === "conditional-memory-evidence")).toMatchObject({
       title: "Conditional memory evidence matrix",
     });
+  });
+
+  it("renders an agent-selected explanatory diagram without a fixed figure type", async () => {
+    const ws = await makeWorkspace();
+    const sources = (await fs.readFile(path.join(ws, "sources", "classified_sources.jsonl"), "utf-8"))
+      .trim().split("\n").map((line) => JSON.parse(line) as { id: string });
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      diagrams: [{
+        id: "memory-feedback-loop",
+        title: "Memory feedback loop for long-horizon agents",
+        caption: "The diagram distinguishes retrieval, execution feedback, and memory revision.",
+        insight: "Durable performance depends on closing the loop between outcome feedback and the retained memory state.",
+        placement: { section_id: "section-1", discussion: "The loop makes the mechanism concrete." },
+        source_ids: [sources[0].id, sources[1].id],
+        nodes: [
+          { id: "retrieve", label: "Retrieve context" },
+          { id: "act", label: "Act in environment" },
+          { id: "update", label: "Update retained memory" },
+        ],
+        edges: [
+          { from: "retrieve", to: "act", label: "conditions action" },
+          { from: "act", to: "update", label: "returns feedback" },
+          { from: "update", to: "retrieve", label: "changes recall" },
+        ],
+      }],
+    }, null, 2));
+    await buildFigureWorkspace(ws);
+    await buildLatexWorkspace(ws);
+    const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
+    expect(manifest.figures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "memory-feedback-loop", title: "Memory feedback loop for long-horizon agents" }),
+    ]));
+    expect(await fs.readFile(path.join(ws, "figures", "memory-feedback-loop.svg"), "utf-8")).toContain("Retrieve context");
+    const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
+    expect(section).toContain("\\label{fig:memory-feedback-loop}");
   });
 
   it("renders declarative survey timelines and comparison tables from verified source IDs", async () => {
@@ -259,6 +306,7 @@ describe("research figures and tables", () => {
 
   it("fails when a manifest artifact is not embedded at its declared placement", async () => {
     const ws = await makeWorkspace();
+    await selectConceptMap(ws);
     await buildFigureWorkspace(ws);
     await addPublicationFigure(ws);
     await buildLatexWorkspace(ws);
@@ -266,8 +314,7 @@ describe("research figures and tables", () => {
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
     expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
-      expect.stringContaining("source-years is not labeled"),
-      expect.stringContaining("evidence-profile is not labeled"),
+      expect.stringContaining("concept-map is not labeled"),
     ]));
   });
 
@@ -297,5 +344,28 @@ describe("research figures and tables", () => {
       expect.objectContaining({ id: "metadata-citation_depth", data: ["data/source-depths.csv"] }),
     ]));
     expect(await fs.readFile(path.join(ws, "paper", "figures", "metadata-citation_depth.tex"), "utf-8")).toContain("symbolic x coords");
+  });
+
+  it("escapes comma-containing venue labels consistently in pgfplots coordinates", async () => {
+    const ws = await makeWorkspace();
+    const sourcePath = path.join(ws, "sources", "classified_sources.jsonl");
+    const sources = (await fs.readFile(sourcePath, "utf-8")).trim().split("\n").map((line) => JSON.parse(line));
+    sources[0].venue = "arXiv:gr-qc,astro-ph.HE";
+    await fs.writeFile(sourcePath, `${sources.map(JSON.stringify).join("\n")}\n`, "utf-8");
+    await fs.mkdir(path.join(ws, "reviews"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reviews", "artifact-plan.json"), JSON.stringify({
+      version: 1,
+      intents: [{
+        id: "plot-venue", kind: "metadata_plot",
+        rationale: "Venue distribution is verified metadata.",
+        section_id: "section-1", plot_metric: "venue",
+        acceptance_criteria: [{ metric: "verified_metadata_plots", target: 1 }],
+      }],
+    }), "utf-8");
+
+    await buildFigureWorkspace(ws);
+    const latex = await fs.readFile(path.join(ws, "paper", "figures", "metadata-venue.tex"), "utf-8");
+    expect(latex).toContain("arXiv:gr-qc{,}astro-ph.HE");
+    expect(latex).toContain("(arXiv:gr-qc{,}astro-ph.HE,1)");
   });
 });

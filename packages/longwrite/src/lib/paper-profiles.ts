@@ -69,9 +69,13 @@ const literatureSurvey: PaperProfile = {
     min_citation_depths_per_section: { A: 1, B: 2, C: 2 }, min_cited_ab_sources_per_taxonomy_cell: 2,
   },
   corpusGates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 4 },
-  figureGates: { min_figures: 6, min_tables: 12, min_comparative_tables: 3, min_verified_metadata_plots: 3, max_nanobanana_illustrations: 1, require_insight_statements: true },
+  // A publication-quality survey needs reader-relevant comparisons, not a
+  // quota of corpus bookkeeping. The artifact plan is allowed to select none
+  // when no figure/table advances the argument; selected artifacts still have
+  // source-binding, caption, and rendered-visual-review gates.
+  figureGates: { min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: true },
   requiresCodebase: false,
-  requiredVisualIds: ["source-years", "concept-map", "evidence-profile", "method-comparison", "benchmark-metadata"],
+  requiredVisualIds: [],
   architectureTitleRequired: false,
   architectureDiagram: { minSources: 3, requiresPinnedCodebaseSource: false },
   promptOverlays: { outline: [], draft: [], visual: [], artifact: [] },

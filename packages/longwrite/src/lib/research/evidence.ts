@@ -5,6 +5,7 @@ import { citationMarkers } from "./citation-markers.js";
 import { parseJsonl } from "./jsonl.js";
 import type { ClassifiedSource } from "./types.js";
 import type { EmbeddingClient } from "./embeddings.js";
+import { sourceMatchesTaxonomy } from "./taxonomy.js";
 
 /** Lazy-load node:sqlite so merely IMPORTING this module never crashes on
  *  Node < 22. Only stages that actually build/query the FTS index pay the
@@ -258,27 +259,6 @@ export async function searchEvidence(workspaceDir: string, query: string, limit 
 }
 
 type OutlineSection = { id: string; title?: string; keywords?: string[] };
-
-const TAXONOMY_STOP_WORDS = new Set(["and", "for", "from", "into", "the", "with"]);
-
-function normalizedTerms(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(/\s+/)
-    .filter((term) => term.length > 1 && !TAXONOMY_STOP_WORDS.has(term));
-}
-
-/** Taxonomy cells are human labels, not exact phrases. Requiring two label
- * terms keeps coverage useful ("tool-use planning" matches tool + planning)
- * without treating every generic agent mention as coverage. */
-export function sourceMatchesTaxonomy(source: ClassifiedSource, cell: string): boolean {
-  const terms = normalizedTerms(cell);
-  if (terms.length === 0) return false;
-  const sourceTerms = new Set(normalizedTerms(`${source.title} ${source.abstract} ${source.topics.join(" ")}`));
-  const matched = terms.filter((term) => sourceTerms.has(term)).length;
-  return matched >= Math.min(2, terms.length);
-}
 
 async function outlineSections(workspaceDir: string): Promise<OutlineSection[]> {
   const raw = JSON.parse(await fs.readFile(path.join(workspaceDir, "outline.json"), "utf-8")) as { sections?: unknown };

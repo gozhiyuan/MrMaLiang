@@ -49,7 +49,10 @@ const TableOverride = z.object({
  * escape hatch. */
 const TableSpec = z.object({
   id: z.string().regex(/^[A-Za-z][A-Za-z0-9-]{1,60}$/),
-  kind: z.enum(["comparison_matrix", "taxonomy_matrix", "evidence_matrix"]),
+  /** Agent-chosen reader purpose. This is descriptive rather than a fixed
+   * table menu; the renderer still owns the safe source-bound layout. */
+  kind: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{1,60}$/),
+  comparative: z.boolean().optional(),
   title: z.string().min(1).max(180),
   caption: z.string().min(1).max(500),
   insight: z.string().min(24).max(800),
@@ -71,6 +74,20 @@ const TimelineSpec = z.object({
   insight: z.string().min(24).max(800),
   placement: Placement,
   source_ids: z.array(z.string().min(1)).min(3).max(16),
+}).strict();
+
+/** A source-grounded explanatory diagram. The agent chooses its subject and
+ * relationship (taxonomy, feedback loop, causal map, process, etc.); the
+ * renderer owns the bounded diagram grammar and publication layout. */
+const DiagramSpec = z.object({
+  id: z.string().regex(/^[A-Za-z][A-Za-z0-9-]{1,60}$/),
+  title: z.string().min(1).max(180),
+  caption: z.string().min(1).max(500),
+  insight: z.string().min(24).max(800),
+  placement: Placement,
+  source_ids: z.array(z.string().min(1)).min(1).max(12),
+  nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(48) }).strict()).min(3).max(10),
+  edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().max(36).optional() }).strict()).max(12),
 }).strict();
 
 const PlacementPlan = z.object({
@@ -97,6 +114,7 @@ const PlacementPlan = z.object({
    * LaTeX, chart code, or unverified numeric data. */
   table_specs: z.array(TableSpec).max(10).optional(),
   timelines: z.array(TimelineSpec).max(3).optional(),
+  diagrams: z.array(DiagramSpec).max(3).optional(),
 }).strict();
 
 export const figureManifestSchema = z.object({
@@ -314,11 +332,17 @@ function categoryPlotSvg(title: string, rows: Array<{ label: string; count: numb
 }
 
 function categoryPlotLatex(rows: Array<{ label: string; count: number }>, xlabel: string): string {
-  const labels = rows.map((row) => latexCell(row.label).replace(/,/g, "{,}")).join(",");
+  // pgfplots uses commas both to separate symbolic categories and to separate
+  // an x label from its y value in a coordinate.  Escape a literal comma in
+  // exactly the same way in the declared category list and the coordinates;
+  // otherwise a venue such as "arXiv:gr-qc,astro-ph.HE" compiles as a
+  // different (truncated) category than the one declared on the axis.
+  const category = (label: string) => latexCell(label).replace(/,/g, "{,}");
+  const labels = rows.map((row) => category(row.label)).join(",");
   return [
     "\\begin{tikzpicture}",
     `\\begin{axis}[width=0.88\\linewidth,height=0.42\\linewidth,ybar,bar width=18pt,symbolic x coords={${labels}},xtick=data,x tick label style={rotate=30,anchor=east},ylabel={${xlabel}},ymajorgrids=true,grid style={dashed,gray!30},enlargelimits=0.15]`,
-    `\\addplot+[fill=blue!65] coordinates {${rows.map((row) => `(${latexCell(row.label)},${row.count})`).join(" ")}};`,
+    `\\addplot+[fill=blue!65] coordinates {${rows.map((row) => `(${category(row.label)},${row.count})`).join(" ")}};`,
     "\\end{axis}", "\\end{tikzpicture}", "",
   ].join("\n");
 }
@@ -431,23 +455,6 @@ function longTableLatex(headers: string[], rows: string[][], caption: string, id
 
 type ConceptMap = NonNullable<z.infer<typeof PlacementPlan>["concept_map"]>;
 
-function fallbackConceptMap(
-  topic: string,
-  taxonomy: string[],
-  placement: z.infer<typeof Placement>,
-): ConceptMap {
-  const labels = [...new Set(taxonomy.map((item) => item.trim()).filter(Boolean))].slice(0, 5);
-  while (labels.length < 3) labels.push(["Evidence", "Synthesis", "Open questions"][labels.length]);
-  const nodes = labels.map((label, index) => ({ id: `concept-${index + 1}`, label }));
-  return {
-    title: `Conceptual map of ${compactText(topic, 100)}`,
-    caption: "The map makes the survey's reader-facing coverage themes and their intended connections explicit.",
-    placement,
-    nodes,
-    edges: nodes.slice(1).map((node, index) => ({ from: nodes[index].id, to: node.id })),
-  };
-}
-
 function svgEscaped(value: string): string {
   return value.replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char] ?? char);
 }
@@ -546,10 +553,10 @@ function conceptMapMermaid(map: ConceptMap): string {
   return ["flowchart LR", ...nodeLines, ...edgeLines, ""].join("\n");
 }
 
-function conceptMapPdfLatex(): string {
+function conceptMapPdfLatex(asset = "concept-map.pdf"): string {
   return [
     "\\begin{center}",
-    "\\includegraphics[width=\\linewidth]{assets/concept-map.pdf}",
+    `\\includegraphics[width=\\linewidth]{assets/${asset}}`,
     "\\end{center}",
     "",
   ].join("\n");
@@ -607,6 +614,7 @@ async function placementOverrides(workspaceDir: string): Promise<Map<string, z.i
 type TableOverrideContract = z.infer<typeof TableOverride>;
 type TableSpecContract = z.infer<typeof TableSpec>;
 type TimelineSpecContract = z.infer<typeof TimelineSpec>;
+type DiagramSpecContract = z.infer<typeof DiagramSpec>;
 
 async function tableOverrides(workspaceDir: string, sources: ClassifiedSource[]): Promise<Map<string, TableOverrideContract>> {
   let raw: string;
@@ -644,7 +652,7 @@ async function tableSpecs(workspaceDir: string, sources: ClassifiedSource[]): Pr
   }
   const plan = PlacementPlan.parse(JSON.parse(raw));
   const knownSourceIds = new Set(sources.map((source) => source.id));
-  const ids = new Set<string>(["evidence-profile", "taxonomy-coverage", "method-comparison", "benchmark-metadata"]);
+  const ids = new Set<string>();
   for (const spec of plan.table_specs ?? []) {
     if (ids.has(spec.id)) throw new Error(`table_specs contains duplicate or reserved id ${spec.id}`);
     ids.add(spec.id);
@@ -684,6 +692,31 @@ async function timelineSpecs(workspaceDir: string, sources: ClassifiedSource[]):
     }).sort((left, right) => left.year - right.year || left.title.localeCompare(right.title));
     return { spec, rows };
   });
+}
+
+/** The agent may choose any explanatory relationship, but every diagram must
+ * name the evidence records that constrain its labels and connections. */
+async function diagramSpecs(workspaceDir: string, sources: ClassifiedSource[]): Promise<DiagramSpecContract[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(workspaceDir, "figures", "placement-plan.json"), "utf-8");
+  } catch {
+    return [];
+  }
+  const plan = PlacementPlan.parse(JSON.parse(raw));
+  const knownSourceIds = new Set(sources.map((source) => source.id));
+  const ids = new Set(["source-years", "concept-map", "concept-illustration"]);
+  for (const spec of plan.diagrams ?? []) {
+    if (ids.has(spec.id)) throw new Error(`diagrams contains duplicate or reserved id ${spec.id}`);
+    ids.add(spec.id);
+    const unknown = spec.source_ids.filter((id) => !knownSourceIds.has(id));
+    if (unknown.length > 0) throw new Error(`diagrams.${spec.id} names unknown source IDs: ${unknown.join(", ")}`);
+    const nodeIds = new Set(spec.nodes.map((node) => node.id));
+    for (const edge of spec.edges) {
+      if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) throw new Error(`diagrams.${spec.id} has an edge that names an unknown node`);
+    }
+  }
+  return plan.diagrams ?? [];
 }
 
 /** Read the small Mermaid diagrams produced by older workspaces and promote
@@ -736,21 +769,17 @@ async function legacyMermaidConceptMap(workspaceDir: string): Promise<ConceptMap
 
 async function conceptMapForWorkspace(
   workspaceDir: string,
-  topic: string,
-  taxonomy: string[],
-  fallbackPlacement: z.infer<typeof Placement>,
-): Promise<ConceptMap> {
+): Promise<ConceptMap | null> {
   try {
     const raw = await fs.readFile(path.join(workspaceDir, "figures", "placement-plan.json"), "utf-8");
     const plan = PlacementPlan.parse(JSON.parse(raw));
     if (plan.concept_map) return plan.concept_map;
   } catch {
-    // A previous workspace may have the pre-concept-map plan shape. Preserve
-    // its buildability while giving it a deterministic fallback figure.
+    // A legacy inline Mermaid diagram is still an explicit authorial choice.
   }
   const legacy = await legacyMermaidConceptMap(workspaceDir);
   if (legacy) return legacy;
-  return fallbackConceptMap(topic, taxonomy, fallbackPlacement);
+  return null;
 }
 
 function planMarkdown(sources: ClassifiedSource[], manifest: FigureManifest): string {
@@ -843,6 +872,15 @@ export async function sanitizePlacementPlanFile(workspaceDir: string): Promise<v
     clampEntries(plan.table_overrides, "table_overrides");
     clampEntries(plan.table_specs, "table_specs");
     clampEntries(plan.timelines, "timelines");
+    clampEntries(plan.diagrams, "diagrams");
+    if (Array.isArray(plan.diagrams)) {
+      plan.diagrams.forEach((diagram, index) => {
+        if (!diagram || typeof diagram !== "object") return;
+        const record = diagram as Record<string, unknown>;
+        if (Array.isArray(record.nodes)) record.nodes.forEach((node, nodeIndex) => clampField(node, "label", 48, `diagrams[${index}].nodes[${nodeIndex}]`));
+        if (Array.isArray(record.edges)) record.edges.forEach((edge, edgeIndex) => clampField(edge, "label", 36, `diagrams[${index}].edges[${edgeIndex}]`));
+      });
+    }
   }
   const result = PlacementPlan.safeParse(parsed);
   if (!result.success) {
@@ -871,31 +909,32 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   const pythonPlotAvailable = await detectPython();
   const target = await placement(workspaceDir);
   const overrides = await placementOverrides(workspaceDir);
-  const metadataIntents = await metadataPlotIntents(workspaceDir);
+  const requestedMetadataIntents = await metadataPlotIntents(workspaceDir);
   const tableOverrideById = await tableOverrides(workspaceDir, sources);
   const declaredTableSpecs = await tableSpecs(workspaceDir, sources);
   const declaredTimelines = await timelineSpecs(workspaceDir, sources);
-  const sourceYearsPlacement = overrides.get("source-years") ?? target;
-  const evidenceProfilePlacement = overrides.get("evidence-profile") ?? target;
-  const taxonomy = await taxonomyCoverage(workspaceDir);
-  const conceptMap = await conceptMapForWorkspace(
-    workspaceDir,
-    config?.research.topic ?? "the surveyed field",
-    config?.research.taxonomy ?? taxonomy.map((row) => row.cell),
-    overrides.get("concept-map") ?? target,
-  );
+  const declaredDiagrams = await diagramSpecs(workspaceDir, sources);
+  const sourceYearsIntent = requestedMetadataIntents.find((intent) => intent.metric === "publication_year");
+  const sourceYearsPlacement = overrides.get("source-years") ?? sourceYearsIntent?.placement ?? target;
+  // Render only artifacts selected for an analytical purpose. Corpus depth,
+  // venue, quality-score, and provider distributions are useful diagnostics in
+  // the workspace, but are not paper figures unless the artifact planner
+  // explicitly makes one part of the argument.
+  const metadataIntents = requestedMetadataIntents;
+  // A concept map is a reader-facing choice, not a fallback quota filler.
+  // The visual planner must declare it (or an existing manuscript must carry
+  // an explicit legacy Mermaid diagram) before it becomes a paper figure.
+  const conceptMap = await conceptMapForWorkspace(workspaceDir);
+  const plannedDiagrams = declaredDiagrams.map((spec) => ({
+    id: spec.id,
+    map: { title: spec.title, caption: spec.caption, placement: spec.placement, nodes: spec.nodes, edges: spec.edges } as ConceptMap,
+    insight: spec.insight,
+    sourceIds: spec.source_ids,
+  }));
+  const wantsNanobananaIllustration = overrides.has("concept-illustration");
   const empirical = await experimentPacket(workspaceDir);
   const experimentFigures = await importedExperimentFigures(workspaceDir, target);
   const repositoryFigures = await importedRepositoryFigures(workspaceDir, config?.research.repository_figures ?? [], target);
-  const direct = depths.filter((row) => row.depth === "A" || row.depth === "B").reduce((sum, row) => sum + row.count, 0);
-  const defaultMethodHeaders = ["Paper", "Topic family", "Depth", "Citations", "Identifier"];
-  const defaultBenchmarkHeaders = ["Paper", "Year", "Venue", "Identifier"];
-  const methodOverride = tableOverrideById.get("method-comparison");
-  const benchmarkOverride = tableOverrideById.get("benchmark-metadata");
-  const methodHeaders = methodOverride?.headers ?? defaultMethodHeaders;
-  const benchmarkHeaders = benchmarkOverride?.headers ?? defaultBenchmarkHeaders;
-  const methodRows = methodOverride?.rows.map((row) => row.cells) ?? methodComparisonRows(sources);
-  const benchmarkRows = benchmarkOverride?.rows.map((row) => row.cells) ?? benchmarkMetadataRows(sources);
   const metadataFigures = metadataIntents.flatMap((intent) => {
     if (intent.metric === "publication_year") return [];
     const rows = categoryCounts(sources, intent.metric);
@@ -918,19 +957,24 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   const manifest: FigureManifest = {
     version: 1,
     figures: [
-      {
+      ...(sourceYearsIntent ? [{
         id: "source-years", title: "Sources by publication year",
         caption: "The retrieved corpus is concentrated in the years represented by the classified source set.",
         insight: "The plot makes the corpus's temporal concentration visible, so recency claims can be checked against the retrieved evidence.",
         path: pythonPlotAvailable ? "figures/source-years-plot.png" : "figures/source-years.svg", latex_path: "paper/figures/source-years.tex", placement: sourceYearsPlacement,
-        backend: pythonPlotAvailable ? "python" : "deterministic-svg", data: ["data/source-years.csv"],
-      },
-      {
+        backend: (pythonPlotAvailable ? "python" : "deterministic-svg") as "python" | "deterministic-svg", data: ["data/source-years.csv"],
+      }] : []),
+      ...(conceptMap ? [{
         id: "concept-map", title: conceptMap.title, caption: conceptMap.caption,
         insight: "The map exposes the organizing relationships that structure the survey rather than presenting its themes as a flat list.",
         path: "figures/concept-map.svg", latex_path: "paper/figures/concept-map.tex", placement: conceptMap.placement,
-        backend: "deterministic-svg", data: ["data/concept-map.json"],
-      },
+        backend: "deterministic-svg" as const, data: ["data/concept-map.json"],
+      }] : []),
+      ...plannedDiagrams.map(({ id, map, insight }) => ({
+        id, title: map.title, caption: map.caption, insight,
+        path: `figures/${id}.svg`, latex_path: `paper/figures/${id}.tex`, placement: map.placement,
+        backend: "deterministic-svg" as const, data: [`data/${id}.json`],
+      })),
       ...metadataFigures.map(({ rows: _rows, metric: _metric, ...figure }) => figure),
       ...declaredTimelines.map(({ spec }) => ({
         id: spec.id, title: spec.title, caption: spec.caption, insight: spec.insight,
@@ -941,39 +985,11 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
       ...repositoryFigures,
     ],
     tables: [
-      {
-        id: "evidence-profile", title: "Evidence depth profile",
-        caption: `The survey selects ${direct} A/B-depth sources for substantive discussion and retains lower-depth sources as supporting context.`,
-        insight: "The profile distinguishes sources used for substantive synthesis from those retained only as supporting context.",
-        path: "tables/evidence-profile.md", latex_path: "paper/tables/evidence-profile.tex", placement: evidenceProfilePlacement,
-        backend: "deterministic-markdown", layout: "table", comparative: false, data: ["data/source-depths.csv"],
-      },
-      ...(taxonomy.length > 0 ? [{
-        id: "taxonomy-coverage", title: "Taxonomy coverage",
-        caption: "Coverage by taxonomy cell distinguishes total retrieved sources from A/B-depth sources suitable for substantive discussion.",
-        insight: "The table reveals which taxonomy cells have enough direct evidence and which still need targeted recall.",
-        path: "tables/taxonomy-coverage.md", latex_path: "paper/tables/taxonomy-coverage.tex", placement: overrides.get("taxonomy-coverage") ?? target,
-        backend: "deterministic-markdown" as const, layout: "table" as const, comparative: false, data: ["data/taxonomy-coverage.csv"],
-      }] : []),
-      {
-        id: "method-comparison", title: methodOverride?.title ?? "Core evidence map",
-        caption: methodOverride?.caption ?? "Core sources are mapped by topic family, evidence depth, citation signal, and persistent identifier; the narrative synthesis, rather than this inventory, makes the substantive method comparison.",
-        insight: "The matrix makes comparison conditions visible so the narrative does not turn heterogeneous evidence into a single ranking.",
-        path: "tables/method-comparison.md", latex_path: "paper/tables/method-comparison.tex", placement: overrides.get("method-comparison") ?? target,
-        backend: "deterministic-markdown", layout: "longtable", comparative: true, data: ["data/method-comparison.csv"],
-      },
-      {
-        id: "benchmark-metadata", title: benchmarkOverride?.title ?? "Benchmark and metadata table",
-        caption: benchmarkOverride?.caption ?? "Benchmark/evaluation-related sources are isolated with venue and identifier metadata for evidence-backed comparisons.",
-        insight: "The table separates benchmark regimes and verification metadata, preventing incompatible reported measures from being read as one leaderboard.",
-        path: "tables/benchmark-metadata.md", latex_path: "paper/tables/benchmark-metadata.tex", placement: overrides.get("benchmark-metadata") ?? target,
-        backend: "deterministic-markdown", layout: "longtable", comparative: true, data: ["data/benchmark-metadata.csv"],
-      },
       ...declaredTableSpecs.map((spec) => ({
         id: spec.id, title: spec.title, caption: spec.caption, insight: spec.insight,
         path: `tables/${spec.id}.md`, latex_path: `paper/tables/${spec.id}.tex`, placement: spec.placement,
         backend: "deterministic-markdown" as const, layout: "longtable" as const,
-        comparative: spec.kind === "comparison_matrix", data: [`data/${spec.id}.csv`],
+        comparative: spec.comparative ?? /(?:comparison|matrix)/i.test(spec.kind), data: [`data/${spec.id}.csv`],
       })),
       ...(empirical ? [{
         id: "empirical-comparisons", title: "Verified empirical comparisons",
@@ -988,26 +1004,21 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
     ["data/source-years.csv", csv([["year", "count"], ...years.map((row) => [row.year, row.count])])],
     ["data/source-depths.csv", csv([["citation_depth", "count", "share"], ...depths.map((row) => [row.depth, row.count, row.share.toFixed(4)])])],
     ["data/source-quality.csv", csv([["id", "title", "year", "citation_depth", "quality_score"], ...sources.map((source) => [source.id, source.title, source.year, source.citation_depth, source.quality_score.toFixed(2)])])],
-    ...(metadataFigures.some((figure) => figure.metric === "venue") ? [["data/source-venues.csv", csv([["venue", "count"], ...categoryCounts(sources, "venue").map((row) => [row.label, row.count])])] as [string, string]] : []),
+    ["data/source-venues.csv", csv([["venue", "count"], ...categoryCounts(sources, "venue").map((row) => [row.label, row.count])])],
     ["figures/source-years.svg", sourceYearsSvg(years)],
-    ["data/concept-map.json", `${JSON.stringify(conceptMap, null, 2)}\n`],
-    ["figures/concept-map.mmd", conceptMapMermaid(conceptMap)],
-    ["figures/concept-map.svg", conceptMapSvg(conceptMap)],
-    ["paper/figures/concept-map.tex", conceptMapLatex(conceptMap)],
-    ["tables/evidence-profile.md", markdownTable(["Citation depth", "Sources", "Share"], depths.map((row) => [row.depth, String(row.count), `${(row.share * 100).toFixed(1)}%`]))],
-    ["tables/source-quality.md", markdownTable(["ID", "Year", "Depth", "Quality"], sources.slice().sort((a, b) => b.quality_score - a.quality_score).map((source) => [source.id, String(source.year), source.citation_depth, source.quality_score.toFixed(2)]))],
-    ["data/method-comparison.csv", csv([methodHeaders, ...methodRows])],
-    ["tables/method-comparison.md", markdownTable(methodHeaders, methodRows)],
-    ["paper/tables/method-comparison.tex", longTableLatex(methodHeaders, methodRows, methodOverride?.caption ?? "Core sources are mapped by topic family, evidence depth, citation signal, and persistent identifier; the narrative synthesis, rather than this inventory, makes the substantive method comparison.", "method-comparison")],
-    ["data/benchmark-metadata.csv", csv([benchmarkHeaders, ...benchmarkRows])],
-    ["tables/benchmark-metadata.md", markdownTable(benchmarkHeaders, benchmarkRows)],
-    ["paper/tables/benchmark-metadata.tex", longTableLatex(benchmarkHeaders, benchmarkRows, benchmarkOverride?.caption ?? "Benchmark/evaluation-related sources are isolated with venue and identifier metadata for evidence-backed comparisons.", "benchmark-metadata")],
-    ...(taxonomy.length > 0 ? [
-      ["data/taxonomy-coverage.csv", csv([["taxonomy_cell", "sources", "direct_sources"], ...taxonomy.map((row) => [row.cell, row.sourceCount, row.directCount])])],
-      ["tables/taxonomy-coverage.md", markdownTable(["Taxonomy cell", "Sources", "A/B-depth"], taxonomy.map((row) => [row.cell, String(row.sourceCount), String(row.directCount)]))],
-      ["paper/tables/taxonomy-coverage.tex", taxonomyCoverageLatex(taxonomy)],
-    ] as Array<[string, string]> : []),
-    ["paper/figures/source-years.tex", pythonPlotAvailable ? sourceYearsPngLatex() : sourceYearsLatex(years)],
+    ...(conceptMap ? [
+      ["data/concept-map.json", `${JSON.stringify(conceptMap, null, 2)}\n`] as [string, string],
+      ["figures/concept-map.mmd", conceptMapMermaid(conceptMap)] as [string, string],
+      ["figures/concept-map.svg", conceptMapSvg(conceptMap)] as [string, string],
+      ["paper/figures/concept-map.tex", conceptMapLatex(conceptMap)] as [string, string],
+    ] : []),
+    ...plannedDiagrams.flatMap(({ id, map, sourceIds }) => [
+      [`data/${id}.json`, `${JSON.stringify({ ...map, source_ids: sourceIds }, null, 2)}\n`] as [string, string],
+      [`figures/${id}.mmd`, conceptMapMermaid(map)] as [string, string],
+      [`figures/${id}.svg`, conceptMapSvg(map)] as [string, string],
+      [`paper/figures/${id}.tex`, conceptMapLatex(map)] as [string, string],
+    ]),
+    ...(sourceYearsIntent ? [["paper/figures/source-years.tex", pythonPlotAvailable ? sourceYearsPngLatex() : sourceYearsLatex(years)] as [string, string]] : []),
     ...metadataFigures.flatMap((figure) => [
       [`figures/${figure.id}.svg`, categoryPlotSvg(figure.title, figure.rows)] as [string, string],
       [`paper/figures/${figure.id}.tex`, categoryPlotLatex(figure.rows, "Classified sources")] as [string, string],
@@ -1017,7 +1028,6 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
       [`figures/${spec.id}.svg`, timelineSvg(spec.title, rows)] as [string, string],
       [`paper/figures/${spec.id}.tex`, timelineLatex(rows)] as [string, string],
     ]),
-    ["paper/tables/evidence-profile.tex", depthTableLatex(depths)],
     ...(empirical ? (() => {
       const headers = ["Metric", "Treatment", "Baseline", "Delta", "95% CI", "Paired seeds"];
       const rows = empirical.comparisons.map((comparison) => [comparison.metric, comparison.treatment_condition, comparison.baseline_condition, comparison.estimate.toFixed(6), `[${comparison.confidence_interval.lower.toFixed(6)}, ${comparison.confidence_interval.upper.toFixed(6)}]`, String(comparison.paired_seeds.length)]);
@@ -1047,25 +1057,29 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   // Mermaid is preferred when available because it preserves non-linear
   // lifecycle edges cleanly in the reader PDF. The deterministic TikZ/SVG
   // contract above remains the no-local-tool fallback.
-  if (
-    await renderMermaidFile(workspaceDir, "figures/concept-map.mmd", "figures/concept-map-untrimmed.pdf")
-    && await cropPdfFile(workspaceDir, "figures/concept-map-untrimmed.pdf", "figures/concept-map.pdf")
-  ) {
-    const conceptFigure = manifest.figures.find((figure) => figure.id === "concept-map");
-    if (conceptFigure) {
-      conceptFigure.path = "figures/concept-map.pdf";
-      conceptFigure.backend = "mermaid";
-      await fs.writeFile(path.join(workspaceDir, conceptFigure.latex_path), conceptMapPdfLatex(), "utf-8");
-      await fs.writeFile(path.join(workspaceDir, "figures", "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-      written.push("figures/concept-map-untrimmed.pdf", "figures/concept-map.pdf", conceptFigure.latex_path, "figures/manifest.json");
-    }
+  const mermaidDiagrams = [
+    ...(conceptMap ? [{ id: "concept-map" }] : []),
+    ...plannedDiagrams.map(({ id }) => ({ id })),
+  ];
+  for (const { id } of mermaidDiagrams) {
+    if (!(await renderMermaidFile(workspaceDir, `figures/${id}.mmd`, `figures/${id}-untrimmed.pdf`)
+      && await cropPdfFile(workspaceDir, `figures/${id}-untrimmed.pdf`, `figures/${id}.pdf`))) continue;
+    const figure = manifest.figures.find((item) => item.id === id);
+    if (!figure) continue;
+    figure.path = `figures/${id}.pdf`;
+    figure.backend = "mermaid";
+    await fs.writeFile(path.join(workspaceDir, figure.latex_path), conceptMapPdfLatex(`${id}.pdf`), "utf-8");
+    await fs.writeFile(path.join(workspaceDir, "figures", "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+    written.push(`figures/${id}-untrimmed.pdf`, `figures/${id}.pdf`, figure.latex_path, "figures/manifest.json");
   }
   // Mermaid/Python renderers still produce source assets and diagnostics. The
   // paid image backend joins the publication manifest only after it returns an
   // actual image plus provenance and we write a placement/LaTeX contract.
   const backends = await renderFigureBackends(workspaceDir);
   written.push(...backends.written);
-  const nanobanana = await runNanobanana(workspaceDir);
+  const nanobanana = wantsNanobananaIllustration
+    ? await runNanobanana(workspaceDir)
+    : { enabled: false, detail: "not selected by the visual plan", rendered: [], image: undefined };
   if (nanobanana.image) {
     const illustration = {
       id: "concept-illustration",
@@ -1074,12 +1088,17 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
       insight: "The illustration is orienting only; it does not supply evidence or quantitative support for any manuscript claim.",
       path: nanobanana.image.path,
       latex_path: "paper/figures/concept-illustration.tex",
-      placement: overrides.get("concept-illustration") ?? conceptMap.placement,
+      placement: overrides.get("concept-illustration")!,
       backend: "nanobanana" as const,
       data: [nanobanana.image.provenancePath],
     };
     manifest.figures = manifest.figures.filter((figure) => figure.id !== illustration.id);
     manifest.figures.push(illustration);
+    // The illustration is written outside the main artifact loop, which is
+    // what creates `paper/figures/`. Now that no artifact is published unless
+    // it was selected, an illustration can be the only one in the manuscript,
+    // so this path can no longer assume an earlier figure made the directory.
+    await fs.mkdir(path.dirname(path.join(workspaceDir, illustration.latex_path)), { recursive: true });
     await fs.writeFile(path.join(workspaceDir, illustration.latex_path), nanobananaLatex(illustration.path), "utf-8");
     await fs.writeFile(path.join(workspaceDir, "figures", "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     await fs.writeFile(path.join(workspaceDir, "figures", "figure-plan.md"), planMarkdown(sources, manifest), "utf-8");

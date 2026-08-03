@@ -351,7 +351,11 @@ async function disclosureLatex(presentation: PresentationConfig, workspaceDir: s
     presentation.disclosure.version ? `Version: ${presentation.disclosure.version}` : "",
     ...(provenanceParts.length ? [`Execution provenance: ${provenanceParts.join("; ")}`] : []),
   ].filter(Boolean).join(" ");
-  return note ? ["\\begin{center}", "\\footnotesize\\textit{" + escapeLatex(note) + "}", "\\end{center}", ""].join("\n") : "";
+  // A venue-specific disclosure belongs with first-page notes, not between the
+  // title and abstract or in the running page footer. \footnotetext after
+  // \maketitle anchors it at the bottom of page one without consuming the
+  // paper's argument space.
+  return note ? `\\footnotetext{\\footnotesize\\textit{${escapeLatex(note)}}}\n` : "";
 }
 
 function productionStatisticsLatex(
@@ -424,12 +428,12 @@ function placedArtifacts(sectionId: string, manifest: FigureManifest | null): st
   const tables = manifest.tables.filter((table) => table.placement.section_id === sectionId);
   return [
     ...figures.flatMap((figure) => [
-      `The following figure supports this section's discussion of ${escapeLatex(readerCaption(figure.title).toLowerCase())}. Figure~\\ref{fig:${figure.id}} presents the visualization.`,
+      `Figure~\\ref{fig:${figure.id}}: ${escapeLatex(readerCaption(figure.insight))}`,
       "",
       figureLatex(figure),
     ]),
     ...tables.flatMap((table) => [
-      `The following table supports this section's discussion of ${escapeLatex(readerCaption(table.title).toLowerCase())}. Table~\\ref{tab:${table.id}} summarizes the evidence.`,
+      `Table~\\ref{tab:${table.id}}: ${escapeLatex(readerCaption(table.insight))}`,
       "",
       tableLatex(table),
     ]),

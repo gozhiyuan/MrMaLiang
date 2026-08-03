@@ -106,11 +106,41 @@ async function checkBuildArtifacts(workspaceDir: string): Promise<ValidationChec
   return { id: "latex_build", pass: findings.length === 0, findings };
 }
 
+/** Keep operational bookkeeping out of the reader-facing manuscript. These
+ * deterministic checks complement (rather than replace) the reviewer's
+ * contextual judgment of whether a selected analytical artifact is useful. */
+async function checkReaderFacingPublication(workspaceDir: string): Promise<ValidationCheck> {
+  const findings: string[] = [];
+  const main = await fileText(workspaceDir, "paper/main.tex") ?? "";
+  const sections = await Promise.all((await sectionFiles(workspaceDir)).map((name) => fileText(workspaceDir, `paper/sections/${name}`)));
+  const body = [main, ...sections].filter((value): value is string => Boolean(value)).join("\n");
+  if (/Execution provenance:|Runtime\/model units:/i.test(body)) {
+    findings.push("reader_facing_publication: internal execution provenance leaked into the manuscript; retain it in reports/run-provenance instead");
+  }
+  if (/Metric\s*&\s*Value\s*&\s*Metric\s*&\s*Value|Cited sources\s*&.*Figures/i.test(main)) {
+    findings.push("reader_facing_publication: production-statistics telemetry table must not appear in the manuscript");
+  }
+  if (/The following (?:figure|table) supports this section/i.test(body)) {
+    findings.push("reader_facing_publication: replace mechanical figure/table lead-ins with the artifact's specific comparison, inference, or limitation");
+  }
+  try {
+    const names = (await fs.readdir(path.join(workspaceDir, "paper", "tables"))).filter((name) => name.endsWith(".tex"));
+    const tables = await Promise.all(names.map((name) => fileText(workspaceDir, `paper/tables/${name}`)));
+    if (/(?:Full source title|Paper \(full title\)|Venue \(full name\)|Packet evidence|Record status)/i.test(tables.filter((value): value is string => Boolean(value)).join("\n"))) {
+      findings.push("reader_facing_publication: source-inventory or pipeline-status table detected; use the bibliography and retain only analytical comparison columns");
+    }
+  } catch {
+    // No generated tables is valid when the artifact plan selected none.
+  }
+  return { id: "reader_facing_publication", pass: findings.length === 0, findings };
+}
+
 export async function validateLatexWorkspace(workspaceDir: string): Promise<ValidationReport> {
   const checks = [
     await checkLatexSources(workspaceDir),
     await checkOutlineStructure(workspaceDir),
     await checkBuildArtifacts(workspaceDir),
+    await checkReaderFacingPublication(workspaceDir),
   ];
   return { pass: checks.every((check) => check.pass), checks };
 }

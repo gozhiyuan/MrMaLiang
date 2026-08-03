@@ -3,6 +3,7 @@ import path from "node:path";
 import { dedupeSources } from "./dedupe.js";
 import { toJsonl } from "./jsonl.js";
 import { ProviderRequestLimiter } from "./rate-limit.js";
+import { scoreSources } from "./score.js";
 import { normalizeSemanticScholarResponse } from "./semantic-scholar.js";
 import type { RawSource } from "./types.js";
 
@@ -57,7 +58,13 @@ export async function snowballWorkspace(
     await writeSnowball(workspaceDir, results, []);
     return { results, written: ["sources/snowball_results.jsonl", "sources/deduped_sources.jsonl", "reports/snowball.md"] };
   }
-  const ranked = sources.slice().sort((a, b) => (b.metrics?.citation_count ?? 0) - (a.metrics?.citation_count ?? 0));
+  // Only citation-network-addressable records can be seeds. Applying the cap
+  // before this filter can consume every slot on OpenAlex-only records (often
+  // broad, highly cited background papers), producing a misleading all-skip
+  // run even when the corpus contains many arXiv/S2-addressable sources.
+  // LQS provides the existing deterministic relevance/quality ordering rather
+  // than treating raw citation count as a proxy for topical relevance.
+  const ranked = scoreSources(sources.filter((source) => Boolean(sourceRef(source))));
   const results: SnowballResult[] = [];
   const discovered: RawSource[] = [];
   for (const source of ranked.slice(0, opts.maxSeeds ?? 12)) {

@@ -41,15 +41,15 @@ resulting manifests still invoke the same subcommands.
 | `research select-semantic-candidates` | — | `semantic_candidate_select` |
 | `research select-source-evidence-candidates` | — | `corpus_recovery_source_candidate_select`, `quality_source_evidence_candidate_select`, `source_evidence_candidate_select` |
 | `research snowball` | — | `snowball_recall` |
-| `research survey-contract` | — | `outline_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
+| `research survey-contract` | — | `outline_initial_survey_contract`, `outline_recheck_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
 | `research venue-upgrade` | — | `venue_upgrade` |
 | `research verify` | `--max-sources` | `final_release_verify_citations`, `verify_citations` |
 | `review claims` | — | `claim_score` |
 | `review outline-approval` | — | `outline_approval_gate` |
 | `review request-clarification` | `--action-plan` | `request_operator_clarification` |
-| `review score-outline-readiness` | — | `outline_readiness_score` |
+| `review score-outline-readiness` | — | `outline_initial_readiness_score`, `outline_recheck_readiness_score` |
 | `review split-action-plan` | — | `action_plan_split` |
-| `review structure` | — | `outline_structure_audit`, `quality_outline_structure_audit`, `structure_audit` |
+| `review structure` | — | `outline_initial_structure_audit`, `outline_recheck_structure_audit`, `quality_outline_structure_audit`, `structure_audit` |
 | `review validate-outline-reopen` | `--action-plan` | `quality_outline_reopen_validate` |
 | `validate research` | `--advisory` | `final_release_assessment`, `final_validate` |
 

@@ -147,6 +147,10 @@ function withScorecardContract(stage: Record<string, unknown>): Record<string, u
   return {
     ...stage,
     outputs: outputs.includes("reviews/scorecard.json") ? outputs : [...outputs, "reviews/scorecard.json"],
+    instructions: [
+      ...((stage.instructions as string[] | undefined) ?? []),
+      "Publication relevance is a required review dimension. Raise a major finding for any figure/table that is pipeline telemetry, source-inventory metadata, or a decorative chart rather than evidence needed to understand or test a specific paper claim. In particular, reject run counts, citation-depth/quality/provider distributions, venue/DOI inventories, packet-status columns, full source-title inventories, and generic one-color charts unless the manuscript makes a concrete analytical case for that exact artifact. Reject generic lead-ins such as 'The following figure/table supports this section'; require surrounding prose to state the comparison, inference, or limitation. Internal execution provenance belongs in workspace reports, not in the manuscript front matter.",
+    ],
     validator_commands: [
       ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
       validateScorecardCommand(),
@@ -522,14 +526,14 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must copy an exact contiguous run of at least four normalized words from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
           "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The validator checks every excerpt against the retrieved text before accepting this attempt and controls final A/B depth.",
         ],
-        outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+        outputs: ["evidence/source-packets.json", "evidence/validated-source-evidence.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
         validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
       }),
       scriptStage({
         id: "finalize_evidence_depth",
         title: "Finalize citation depth from semantic and full-text evidence",
-        owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json"],
-        outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "reports/evidence-depth-finalization.md"],
+        owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json", "evidence/validated-source-evidence.json"],
+        outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "evidence/active-validated-source-evidence.json", "reports/evidence-depth-finalization.md"],
         validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
         command: longwriteCommand(["research", "finalize-evidence-depth", "."]),
       }),
@@ -610,15 +614,15 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
               "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
               "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Explain comparison dimensions and limitations faithfully so the deterministic validator can finalize citation depth.",
             ],
-            outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+            outputs: ["evidence/source-packets.json", "evidence/validated-source-evidence.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
             validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
           }),
           scriptStage({
             id: "corpus_recovery_finalize_evidence_depth",
             title: "Finalize recovered citation depth from validated evidence",
             owner: "analyst", when: "corpus_gate_pass < 1",
-            inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json"],
-            outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "reports/evidence-depth-finalization.md"], validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
+            inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json", "evidence/validated-source-evidence.json"],
+            outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "evidence/active-validated-source-evidence.json", "reports/evidence-depth-finalization.md"], validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
             command: longwriteCommand(["research", "finalize-evidence-depth", "."]),
           }),
           scriptStage({
@@ -641,79 +645,86 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     // The original outline approval occurs too early for an evidence-aware
     // critique. The final approval gate below is the only human pause.
     outline.requires_human_approval = false;
-    outline.inputs = [...new Set([...(outline.inputs as string[]), "evidence/source-packets.json", "reports/corpus-gates.md"])];
+    outline.inputs = [...new Set([...(outline.inputs as string[]), "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"])];
     outline.optional_inputs = [...new Set([...((outline.optional_inputs as string[] | undefined) ?? []), "sources/semantic-screening.json", "reports/evidence-depth-finalization.md"])];
-    outline.skills = [...new Set([...((outline.skills as string[] | undefined) ?? []), "evidence/source-packets.json", "reports/corpus-gates.md", "sources/semantic-screening.json"])];
+    outline.skills = [...new Set([...((outline.skills as string[] | undefined) ?? []), "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md", "sources/semantic-screening.json"])];
     outline.instructions = [
       ...((outline.instructions as string[] | undefined) ?? []),
-      "Use evidence/source-packets.json as the compact deep-reading dossier: organize sections around supported contributions, comparisons, tensions, and limitations rather than bibliography order. Do not claim to have read or synthesize a source beyond its supplied packet.",
+      "Use evidence/active-validated-source-evidence.json as the citation-ready cumulative deep-reading dossier; it contains exactly the current A/B classified sources with validated packets. evidence/source-packets.json is only the latest working round. Organize sections around supported contributions, comparisons, tensions, and limitations rather than bibliography order. Do not claim to have read or synthesize a source beyond its supplied validated packet.",
       "For every substantive outline section, select source_ids that can support its intended argument and make the section purpose state the comparative or analytical question it resolves. Preserve explicit taxonomy coverage and leave unresolved evidence gaps visible rather than papering them over.",
     ];
-    // Replace the one-shot audits with loop children that overwrite the same
-    // durable reports each round. Downstream stages therefore consume only the
-    // re-audited, approved outline.
+    // Run an initial assessment before the repair loop.  A loop whose body is
+    // review -> score -> revise has an off-by-one budget: its last revision is
+    // never reviewed before the loop exhausts.  Here `max_rounds` means repair
+    // attempts.  Every repair is followed by fresh audits, review, and a
+    // script-owned readiness score.
     next.stages = next.stages.filter((stage) => stage.id !== "survey_contract" && stage.id !== "structure_audit");
     const outlineIndex = next.stages.findIndex((stage) => stage.id === "outline");
+    const outlineSurveyContract = scriptStage({
+      ...surveyContract,
+      id: "outline_initial_survey_contract",
+      title: "Audit initial outline survey contract",
+      runtime: "script",
+      command: longwriteCommand(["research", "survey-contract", "."]),
+    });
+    const outlineStructureAudit = scriptStage({
+      ...structureAudit,
+      id: "outline_initial_structure_audit",
+      title: "Audit initial outline structure",
+      runtime: "script",
+      command: longwriteCommand(["review", "structure", "."]),
+    });
+    const outlineReview = agentStage({
+      id: "outline_initial_review",
+      title: "Critique initial outline against source evidence",
+      owner: "skeptical-reviewer",
+      // The structure audit is skipped by the fast workflow profile, so its
+      // report is optional here. Requiring it made every fast-profile
+      // survey fail workflow validation before a single stage ran.
+      inputs: ["outline.md", "outline.json", "reports/survey-contract.md", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl"],
+      optional_inputs: ["reports/structure-audit.md", "sources/semantic-screening.json", "reports/corpus-gates.md", "feedback/outline-revision.md"],
+      skills: ["outline.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl", "reports/corpus-gates.md"],
+      instructions: [
+        "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
+        "Review the outline as a research argument, not a table of contents. Use the citation-ready cumulative evidence dossier, not only the latest packet file or archival history. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
+        "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval.",
+      ],
+      outputs: ["reviews/outline-review.json", "reports/outline-review-repair.md"], validators: ["required_output_exists"],
+      validator_commands: [longwriteCommand(["review", "repair-outline-review", "."])], retry: { max_attempts: 2 },
+    });
+    const outlineReadiness = scriptStage({
+      id: "outline_initial_readiness_score",
+      title: "Score initial deterministic outline readiness",
+      owner: "analyst", inputs: ["reviews/outline-review.json", "reports/survey-contract.json"],
+      optional_inputs: ["reports/structure-audit.json"],
+      outputs: ["reports/outline-readiness.md", "reports/metrics.json"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["review", "score-outline-readiness", "."]),
+    });
+    const outlineRevise = agentStage({
+      id: "outline_revise",
+      title: "Revise outline from evidence-aware critique",
+      owner: "outline-architect",
+      inputs: ["project_brief.md", "outline.md", "outline.json", "reviews/outline-review.json", "reports/outline-readiness.md", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl"],
+      optional_inputs: ["feedback/outline-revision.md", "sources/semantic-screening.json", "reports/corpus-gates.md"],
+      skills: ["outline.json", "reviews/outline-review.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl"],
+      instructions: [
+        "Rewrite outline.md and outline.json to address every major/critical review finding with the smallest evidence-grounded structural change. Preserve valid sections when there are no blocking findings; do not add generic filler or a revision log to reader-facing outline artifacts.",
+        "Every outline.json section must retain id, title, role, target_words, purpose, at least two keywords, and source_ids. Use only current classified source IDs. Keep the paper's organizing argument explicit: taxonomy, comparisons, limitations, and evidence gaps must be structurally visible before drafting begins.",
+      ],
+      outputs: ["outline.md", "outline.json"], validators: ["required_output_exists", "non_empty_markdown"], retry: { max_attempts: 2 },
+    });
     const outlineLoop = loopStage({
       id: "outline_quality_loop",
-      title: "Review and revise the evidence-aware outline",
+      title: "Repair and re-audit the evidence-aware outline",
       max_rounds: policy.outlineReviewMaxRounds ?? 2,
       stop_when: "outline_readiness >= 1",
       on_exhaustion: "fail",
       stages: [
-        scriptStage({
-          ...surveyContract,
-          id: "outline_survey_contract",
-          title: "Audit outline survey contract",
-          runtime: "script",
-          command: longwriteCommand(["research", "survey-contract", "."]),
-        }),
-        scriptStage({
-          ...structureAudit,
-          id: "outline_structure_audit",
-          title: "Audit outline structure",
-          runtime: "script",
-          command: longwriteCommand(["review", "structure", "."]),
-        }),
-        agentStage({
-          id: "outline_review",
-          title: "Critique outline against source evidence",
-          owner: "skeptical-reviewer",
-          // The structure audit is skipped by the fast workflow profile, so its
-          // report is optional here. Requiring it made every fast-profile
-          // survey fail workflow validation before a single stage ran.
-          inputs: ["outline.md", "outline.json", "reports/survey-contract.md", "evidence/source-packets.json", "sources/classified_sources.jsonl"],
-          optional_inputs: ["reports/structure-audit.md", "sources/semantic-screening.json", "reports/corpus-gates.md", "feedback/outline-revision.md"],
-          skills: ["outline.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "sources/classified_sources.jsonl", "reports/corpus-gates.md"],
-          instructions: [
-            "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
-            "Review the outline as a research argument, not a table of contents. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
-            "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval.",
-          ],
-          outputs: ["reviews/outline-review.json", "reports/outline-review-repair.md"], validators: ["required_output_exists"],
-          validator_commands: [longwriteCommand(["review", "repair-outline-review", "."])], retry: { max_attempts: 2 },
-        }),
-        scriptStage({
-          id: "outline_readiness_score",
-          title: "Score deterministic outline readiness",
-          owner: "analyst", inputs: ["reviews/outline-review.json", "reports/survey-contract.json"],
-          optional_inputs: ["reports/structure-audit.json"],
-          outputs: ["reports/outline-readiness.md", "reports/metrics.json"], validators: ["required_output_exists"], runtime: "script",
-          command: longwriteCommand(["review", "score-outline-readiness", "."]),
-        }),
-        agentStage({
-          id: "outline_revise",
-          title: "Revise outline from evidence-aware critique",
-          owner: "outline-architect",
-          inputs: ["project_brief.md", "outline.md", "outline.json", "reviews/outline-review.json", "reports/outline-readiness.md", "evidence/source-packets.json", "sources/classified_sources.jsonl"],
-          optional_inputs: ["feedback/outline-revision.md", "sources/semantic-screening.json", "reports/corpus-gates.md"],
-          skills: ["outline.json", "reviews/outline-review.json", "reports/survey-contract.md", "reports/structure-audit.md", "evidence/source-packets.json", "sources/classified_sources.jsonl"],
-          instructions: [
-            "Rewrite outline.md and outline.json to address every major/critical review finding with the smallest evidence-grounded structural change. Preserve valid sections when there are no blocking findings; do not add generic filler or a revision log to reader-facing outline artifacts.",
-            "Every outline.json section must retain id, title, role, target_words, purpose, at least two keywords, and source_ids. Use only current classified source IDs. Keep the paper's organizing argument explicit: taxonomy, comparisons, limitations, and evidence gaps must be structurally visible before drafting begins.",
-          ],
-          outputs: ["outline.md", "outline.json"], validators: ["required_output_exists", "non_empty_markdown"], retry: { max_attempts: 2 },
-        }),
+        { ...outlineRevise, when: "outline_readiness < 1" },
+        { ...outlineSurveyContract, id: "outline_recheck_survey_contract", title: "Re-audit revised outline survey contract", when: "outline_readiness < 1" },
+        { ...outlineStructureAudit, id: "outline_recheck_structure_audit", title: "Re-audit revised outline structure", when: "outline_readiness < 1" },
+        { ...outlineReview, id: "outline_recheck_review", title: "Critique revised outline against source evidence", when: "outline_readiness < 1" },
+        { ...outlineReadiness, id: "outline_recheck_readiness_score", title: "Score revised deterministic outline readiness", when: "outline_readiness < 1" },
       ],
     });
     const approval = scriptStage({
@@ -724,7 +735,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       outputs: ["reports/outline-approval.md"], validators: ["required_output_exists"], runtime: "script",
       command: longwriteCommand(["review", "outline-approval", "."]), requires_human_approval: policy.outlineApprovalMode === "human",
     });
-    next.stages.splice(outlineIndex + 1, 0, outlineLoop, approval);
+    next.stages.splice(outlineIndex + 1, 0, outlineSurveyContract, outlineStructureAudit, outlineReview, outlineReadiness, outlineLoop, approval);
   }
   const qualityLoop = next.stages.find((stage) => stage.id === "quality_loop");
   if (!qualityLoop || !Array.isArray(qualityLoop.stages)) {
@@ -745,13 +756,13 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       id: "initial_artifact_plan",
       title: "Choose evidence-aware artifacts before drafting",
       owner: "analyst",
-      inputs: ["project_brief.md", "outline.md", "outline.json", "evidence/source-packets.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
+      inputs: ["project_brief.md", "outline.md", "outline.json", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
       optional_inputs: ["sources/semantic-screening.json", "reports/corpus-gates.md", "reports/outline-readiness.md"],
-      skills: ["project_brief.md", "outline.json", "evidence/source-packets.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
+      skills: ["project_brief.md", "outline.json", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
       instructions: [
         "Write ONLY reviews/artifact-plan.json as {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?]}]}. It is a creative strategy record, not a request to write TeX, code, coordinates, dates, or results.",
         `Choose only source-grounded artifacts that materially improve the approved outline. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot. A formalization must clarify a sourced definition, objective, comparison, or analytical claim; it is never decorative mathematics. A comparison_matrix or timeline requires a target section and at least three representative classified source IDs. ${architectureSourceRequirement} A metadata_plot uses publication_year, citation_depth, or venue and derives values from verified workspace metadata.`,
-        "For a long survey, use the configured visual quality targets as an artifact budget: select enough independent comparison/table, metadata, timeline, or diagram intents for the visual planner to meet them, but do not duplicate weak inventory tables. The visual planner will turn these intents into a strict source-bound figure-spec contract.",
+        "Every artifact must earn its place by helping a reader compare evidence, understand a mechanism, or evaluate a stated limitation. Do not select pipeline telemetry, source-inventory metadata, DOI/venue lists, packet-status fields, full-title lists, or a decorative chart merely to meet a count. Use an empty intents array when no analytical artifact is justified. The visual planner will turn selected intents into a strict source-bound figure-spec contract.",
         "empirical_pilot is legal only when research.paper_kind is empirical. It creates a preregistration request with hypothesis, control, and trial acceptance criterion; it never invents findings and does not render an empirical result plot until LongExperiment provides verified result data.",
         "Choose at most five intents. Do not invent source IDs, sections, taxonomy cells, numerical values, experimental results, or unsupported equations. Use an empty intents array when no artifact is justified.",
         ...selectedPaperProfile.promptOverlays.artifact,
@@ -763,7 +774,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     next.stages.splice(visualIndex, 0, initialArtifactPlanner);
     visualPlan.inputs = [...new Set([...(visualPlan.inputs as string[]), "reviews/artifact-plan.json"])];
     visualPlan.optional_inputs = [...new Set([...((visualPlan.optional_inputs as string[] | undefined) ?? []), "reports/artifact-plan-repair.md"])];
-    visualPlan.skills = [...new Set([...((visualPlan.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json"])];
+    visualPlan.skills = [...new Set([...((visualPlan.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json"])];
     visualPlan.instructions = [
       ...((visualPlan.instructions as string[] | undefined) ?? []),
       "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
@@ -778,7 +789,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
           ...step,
           inputs: [...new Set([...(step.inputs as string[]), "reviews/artifact-plan.json"])],
           optional_inputs: [...new Set([...((step.optional_inputs as string[] | undefined) ?? []), "reports/artifact-plan-repair.md"])],
-          skills: [...new Set([...((step.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json"])],
+          skills: [...new Set([...((step.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json"])],
           instructions: [
             ...((step.instructions as string[] | undefined) ?? []),
             "Read only the pre-draft artifact intents that name this section. If a validated formalization is selected, decide its exact source-grounded notation from the evidence packet, define every symbol nearby, and omit it if a useful formalization cannot be supported. Do not add arbitrary mathematics. Explain nearby planned figures/tables in prose, but leave their labels, captions, data, and placement to the artifact builder.",
@@ -796,7 +807,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     optional_inputs: ["reports/metrics.json", "evidence/coverage.json", "feedback/user-feedback.md"],
     skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
     instructions: [
-      "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified.",
+      "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
       `The current artifact-plan contract additionally permits timeline and architecture_diagram intents. A timeline needs a target section and at least three classified source IDs; an architecture diagram follows this profile's requirement: ${architectureSourceRequirement} The visual renderer derives dates from metadata and never accepts handwritten coordinates or result values.`,
       "Schema: {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?}]}]}. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot.",
       "Formalization is a request for the chapter writer to introduce a compact definition/objective with locally defined symbols; it requires a target section and supporting classified source ids. Do not request decorative mathematics.",
@@ -957,14 +968,14 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
         "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one.",
       ],
-      outputs: ["evidence/source-packets.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
+      outputs: ["evidence/source-packets.json", "evidence/validated-source-evidence.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
       validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
     }),
     scriptStage({
       id: "quality_finalize_evidence_depth",
       title: "Finalize refreshed citation depth from source evidence",
-      owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json"],
-      outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "reports/evidence-depth-finalization.md"], validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
+      owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json", "evidence/validated-source-evidence.json"],
+      outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "evidence/active-validated-source-evidence.json", "reports/evidence-depth-finalization.md"], validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
       command: longwriteCommand(["research", "finalize-evidence-depth", "."]),
     }),
     scriptStage({
@@ -1141,11 +1152,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       id: "reopen_outline",
       title: "Reopen the approved outline for a structural correction",
       owner: "outline-architect",
-      inputs: ["reviews/action-plan.json", "reviews/artifact-plan.json", "outline.md", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "reports/corpus-gates.md"],
+      inputs: ["reviews/action-plan.json", "reviews/artifact-plan.json", "outline.md", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"],
       optional_inputs: ["sources/semantic-screening.json", "reports/evidence-depth-finalization.md", "reviews/scorecard.json"],
-      skills: ["reviews/action-plan.json", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "reports/corpus-gates.md"],
+      skills: ["reviews/action-plan.json", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"],
       instructions: [
-        "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and source-packet-backed contributions; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
+        "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and contributions backed by the cumulative validated-evidence dossier; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
         "Write feedback/outline-revision.md with the exact action-plan findings addressed, the structural change, and any remaining evidence limitation. Do not draft chapters, alter figures, fabricate sources, or turn an unresolved empirical question into a result. The following scripts re-audit the outline before downstream evidence allocation.",
       ],
       outputs: ["outline.md", "outline.json", "feedback/outline-revision.md"], validators: ["required_output_exists", "non_empty_markdown"],
@@ -1187,7 +1198,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       ],
       instructions: [
         ...((visualPlan.instructions as string[] | undefined) ?? []),
-        "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. For a substantive method or benchmark table repair, use table_overrides only for method-comparison or benchmark-metadata: each row must have exactly one cell per header and cite one or more existing classified source IDs in source_ids. A validated metadata_plot intent is rendered from verified metadata by the normal artifact builder; do not invent plot values or use Nano Banana as evidence.",
+        "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. Remove any artifact that is pipeline telemetry, a source inventory, or decorative rather than analytical. A validated metadata_plot is rendered from verified metadata only when it is essential to a stated reader-facing claim; do not invent plot values or use Nano Banana as evidence.",
         "For new survey-native artifacts, use table_specs for source-bound comparison/taxonomy/evidence matrices and timelines for source-selected milestones. The builder validates all source IDs and derives timeline years; do not insert raw TeX, chart code, coordinates, or unsupported numerical results.",
       ],
       max_invocations: 1,

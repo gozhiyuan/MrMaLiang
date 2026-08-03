@@ -18,7 +18,7 @@ const AcceptanceCriterion = z.object({
  * remain responsible for their bounded output contracts. */
 const ArtifactIntent = z.object({
   id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-  kind: z.enum(["formalization", "comparison_matrix", "metadata_plot", "timeline", "architecture_diagram", "taxonomy_recall", "empirical_pilot"]),
+  kind: z.enum(["formalization", "explanatory_diagram", "comparison_matrix", "metadata_plot", "timeline", "architecture_diagram", "taxonomy_recall", "empirical_pilot"]),
   rationale: z.string().min(20).max(4_000),
   section_id: z.string().min(1).max(160).optional(),
   source_ids: z.array(z.string().min(1)).max(12).default([]),
@@ -42,6 +42,9 @@ const ArtifactIntent = z.object({
   }
   if (intent.kind === "architecture_diagram" && (!intent.section_id || intent.source_ids.length < 1)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "architecture_diagram requires section_id and at least one supporting source_id" });
+  }
+  if (intent.kind === "explanatory_diagram" && (!intent.section_id || intent.source_ids.length < 1)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "explanatory_diagram requires section_id and at least one supporting source_id" });
   }
   if (intent.kind === "taxonomy_recall" && !intent.taxonomy_cell) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "taxonomy_recall requires taxonomy_cell" });

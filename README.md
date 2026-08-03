@@ -403,6 +403,15 @@ malaclaw dashboard-extensions doctor
 maliang writing dashboard
 ```
 
+When MalaClaw is used from a source checkout, build its dashboard once before
+the first launch:
+
+```bash
+cd /path/to/MalaClaw/dashboard
+npm install
+npm run build
+```
+
 The dashboard exposes the pinned-code manifest, validated architecture dossier,
 and locator-repair report alongside normal outline/review/build artifacts. The
 CLI blueprint remains the recommended reproducible starting point for a

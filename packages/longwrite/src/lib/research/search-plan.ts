@@ -91,8 +91,8 @@ export async function loadSearchPlan(workspaceDir: string): Promise<SearchPlanLo
 
 export function plannedQueries(plan: SearchPlan): string[] {
   return [
-    ...plan.query_variants,
     ...plan.taxonomy_cells.flatMap((cell) => cell.query_variants),
+    ...plan.query_variants,
   ].filter((query, index, all) => all.indexOf(query) === index);
 }
 

@@ -670,6 +670,22 @@ research
   });
 
 research
+  .command("backfill-validated-evidence-history <workspace>")
+  .description("Restore cumulative validated evidence from completed recovery checkpoints (one-time migration)")
+  .action(async (workspace) => {
+    const { runResearchBackfillValidatedEvidenceHistory } = await import("./commands/research.js");
+    await runResearchBackfillValidatedEvidenceHistory(workspace);
+  });
+
+research
+  .command("restore-recovery-corpus <workspace>")
+  .description("Restore sources overwritten by pre-cumulative recovery from completed finalization checkpoints (one-time migration)")
+  .action(async (workspace) => {
+    const { runResearchRestoreRecoveryCorpus } = await import("./commands/research.js");
+    await runResearchRestoreRecoveryCorpus(workspace);
+  });
+
+research
   .command("finalize-evidence-depth <workspace>")
   .description("Require validated semantic and full-text evidence before final A/B citation depth")
   .action(async (workspace) => {

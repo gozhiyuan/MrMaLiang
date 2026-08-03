@@ -5,7 +5,7 @@ import path from "node:path";
 import { repairAgenticActionPlan } from "../src/lib/ops/action-plan.js";
 import { writeOperatorClarificationRequest } from "../src/lib/ops/action-plan.js";
 import { runInit } from "../src/commands/init.js";
-import { runResearchExpand } from "../src/commands/research.js";
+import { buildExpansionSearchPlan, runResearchExpand } from "../src/commands/research.js";
 
 const dirs: string[] = [];
 
@@ -76,6 +76,21 @@ describe("agentic action-plan contract", () => {
     }));
     await runResearchExpand(dir, { actionPlan: "reviews/action-plan.json" });
     await expect(fs.readFile(path.join(dir, "reports", "research-expansion.md"), "utf-8")).resolves.toContain("seed provider");
+  });
+
+  it("preserves taxonomy query groups when generating a recovery search plan", () => {
+    const plan = buildExpansionSearchPlan("agent memory", ["agent memory benchmark"], ["memory safety"], {
+      version: 1,
+      topic: "agent memory",
+      query_variants: ["agent memory planning"],
+      taxonomy_cells: [{ cell: "memory safety", query_variants: ["agent memory safety", "memory retention risk", "long-term memory safety"] }],
+      exclusion_terms: ["medical"],
+      venue_priorities: ["ICLR"],
+      source_types: ["paper"],
+    });
+    expect(plan.taxonomy_cells).toHaveLength(1);
+    expect(plan.taxonomy_cells[0]?.query_variants).toContain("agent memory safety");
+    expect(plan.query_variants).toEqual(expect.arrayContaining(["agent memory planning", "agent memory benchmark"]));
   });
 
   it("writes a concrete operator request without allowing the plan to guess", async () => {

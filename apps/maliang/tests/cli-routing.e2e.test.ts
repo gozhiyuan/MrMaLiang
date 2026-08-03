@@ -123,7 +123,16 @@ describe("maliang command surface", () => {
     expect(config.research.topic).toBe("Long-horizon memory and planning in LLM agents");
     expect(config.writing.target_length_words).toBe(24_000);
     expect(config.publication.presentation.citation_style).toBe("author_year");
-    expect(config.figures.quality_gates).toMatchObject({ min_figures: 6, min_tables: 12 });
+    // The flagship sets no artifact quota: a count target makes the planner
+    // manufacture corpus bookkeeping to satisfy it. Relevance is gated instead
+    // by source binding and the required insight statement on each artifact
+    // the planner does select.
+    expect(config.figures.quality_gates).toMatchObject({
+      min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0,
+      require_insight_statements: true,
+    });
+    // Run counters are operational telemetry and stay out of the manuscript.
+    expect(config.publication.presentation.show_production_statistics).toBe(false);
   });
 
   it("forwards --reset to the component flow rather than swallowing it", async () => {

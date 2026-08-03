@@ -53,7 +53,7 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-type CandidateUrl = { url: string; kind: "html" | "pdf" };
+type CandidateUrl = { url: string; kind: "html" | "pdf" | "open_access" };
 
 /** An arXiv identifier gives us known, machine-readable retrieval endpoints.
  * `open_access_pdf` comes from heterogeneous metadata providers and is often a
@@ -76,7 +76,11 @@ function candidateUrls(source: ClassifiedSource, allowPdfDownload: boolean): Can
       ...(allowPdfDownload ? [{ url: `https://arxiv.org/pdf/${bare}`, kind: "pdf" } satisfies CandidateUrl] : []),
     );
   }
-  if (allowPdfDownload && source.links?.open_access_pdf) candidates.push({ url: source.links.open_access_pdf, kind: "pdf" });
+  // Provider fields named `open_access_pdf` are frequently publisher or
+  // repository landing pages. Treat them as an access lead, not as a trusted
+  // PDF MIME type: the resolver below first handles a direct PDF, then an
+  // HTML full-text page, then a bounded set of linked download URLs.
+  if (allowPdfDownload && source.links?.open_access_pdf) candidates.push({ url: source.links.open_access_pdf, kind: "open_access" });
   return candidates;
 }
 
@@ -172,6 +176,52 @@ async function fetchPdfText(
   }
 }
 
+function linkedDownloadUrls(html: string, baseUrl: string): string[] {
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/\bhref\s*=\s*["']([^"']+)["']/gi)) {
+    try {
+      const url = new URL(match[1]!, baseUrl);
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      if (!/(\.pdf(?:$|[?#])|\/download(?:$|[/?#])|article\/download|attachment)/i.test(url.pathname + url.search)) continue;
+      seen.add(url.toString());
+    } catch {
+      // An invalid link on a landing page is not an ingestion failure.
+    }
+  }
+  return [...seen].slice(0, 3);
+}
+
+async function fetchOpenAccessText(
+  fetchImpl: FulltextFetch,
+  extractor: PdfTextExtractor,
+  url: string,
+  sourceId: string,
+  workspaceDir: string,
+): Promise<{ extracted: ExtractedContent; resolvedUrl: string } | null> {
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) return null;
+    const raw = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get("content-type") ?? "";
+    // Some repositories omit a useful MIME type; try the extractor first
+    // unless the response positively identifies itself as HTML/text.
+    if (/pdf/i.test(contentType) || raw.subarray(0, 4).toString("ascii") === "%PDF" || !/(html|text\/)/i.test(contentType)) {
+      const text = await extractor(raw, sourceId, workspaceDir);
+      if (text) return { extracted: { text, raw, extension: "pdf" }, resolvedUrl: url };
+    }
+    const html = raw.toString("utf-8");
+    const text = htmlToText(html);
+    if (text.length >= 2_000) return { extracted: { text, raw: html, extension: "html" }, resolvedUrl: url };
+    for (const downloadUrl of linkedDownloadUrls(html, url)) {
+      const downloaded = await fetchPdfText(fetchImpl, extractor, downloadUrl, sourceId, workspaceDir);
+      if (downloaded) return { extracted: downloaded, resolvedUrl: downloadUrl };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function ingestFulltext(
   workspaceDir: string,
   fetchImpl: FulltextFetch = fetch,
@@ -262,10 +312,14 @@ export async function ingestFulltext(
     }
     let ingested = false;
     for (const candidate of urls) {
-      const extracted = candidate.kind === "html"
+      const resolved = candidate.kind === "open_access"
+        ? await fetchOpenAccessText(fetchImpl, pdfExtractor, candidate.url, source.id, workspaceDir)
+        : null;
+      const extracted = resolved?.extracted ?? (candidate.kind === "html"
         ? await fetchText(fetchImpl, candidate.url)
-        : await fetchPdfText(fetchImpl, pdfExtractor, candidate.url, source.id, workspaceDir);
+        : candidate.kind === "pdf" ? await fetchPdfText(fetchImpl, pdfExtractor, candidate.url, source.id, workspaceDir) : null);
       if (!extracted) continue;
+      const resolvedUrl = resolved?.resolvedUrl ?? candidate.url;
       const rel = `fulltext/${source.id}.md`;
       const clipped = extracted.text.slice(0, MAX_CHARS);
       const sourceRel = `sources/documents/${source.id}.${extracted.extension}`;
@@ -273,13 +327,13 @@ export async function ingestFulltext(
       await fs.writeFile(path.join(workspaceDir, sourceRel), extracted.raw);
       await fs.writeFile(
         path.join(workspaceDir, rel),
-        `# ${source.title}\n\nSource: ${candidate.url}\nFormat: ${candidate.kind}\nRetrieved: ${new Date().toISOString()}\n\n---\n\n${clipped}\n`,
+        `# ${source.title}\n\nSource: ${resolvedUrl}\nFormat: ${extracted.extension}\nRetrieved: ${new Date().toISOString()}\n\n---\n\n${clipped}\n`,
         "utf-8",
       );
       results.push({
         sourceId: source.id,
         status: "ingested",
-        detail: candidate.url,
+        detail: resolvedUrl,
         path: rel,
         sourcePath: sourceRel,
         sha256: crypto.createHash("sha256").update(extracted.raw).digest("hex"),

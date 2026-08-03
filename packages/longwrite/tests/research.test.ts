@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildResearchArtifacts, buildResearchArtifactsWithProvider, prepareResearchWorkspace } from "../src/lib/research/pipeline.js";
+import { buildResearchArtifacts, buildResearchArtifactsWithProvider, prepareResearchWorkspace, recallSources } from "../src/lib/research/pipeline.js";
 import { classifySources } from "../src/lib/research/classify.js";
 import { dedupeSources, duplicateKeys } from "../src/lib/research/dedupe.js";
 import { parseJsonl } from "../src/lib/research/jsonl.js";
@@ -65,6 +65,22 @@ describe("research artifact pipeline", () => {
     expect(artifacts.raw).toHaveLength(3);
     expect(artifacts.deduped).toHaveLength(3);
     expect(artifacts.reportMarkdown).toContain("Provider: seed");
+  });
+
+  it("retains the prior corpus when a recovery expansion recalls new sources", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "sources"), { recursive: true });
+    await fs.writeFile(path.join(ws, "sources", "deduped_sources.jsonl"), `${JSON.stringify({
+      id: "prior", title: "Prior evidence", authors: ["A"], year: 2025, venue: "arXiv", url: "https://example.test/prior",
+      abstract: "Prior durable evidence about agent memory.", source: "arxiv", topics: ["memory"], identifiers: { arxiv_id: "2501.00001" },
+    })}\n`);
+    const provider = { id: "test", search: async () => [{
+      id: "new", title: "New evidence", authors: ["B"], year: 2026, venue: "arXiv", url: "https://example.test/new",
+      abstract: "New targeted evidence about agent harnesses.", source: "arxiv", topics: ["harness"], identifiers: { arxiv_id: "2601.00001" },
+    }] };
+    await recallSources({ workspaceDir: ws, topic: "agent harness", provider: "seed", providerFactory: () => provider as never, count: 1, mergeExisting: true });
+    const retained = parseJsonl<RawSource>(await fs.readFile(path.join(ws, "sources", "deduped_sources.jsonl"), "utf-8"));
+    expect(retained.map((item) => item.id).sort()).toEqual(["new", "prior"]);
   });
 });
 

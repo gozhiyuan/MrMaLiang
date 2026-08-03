@@ -262,13 +262,13 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       document_class_options: opts.publication?.documentClassOptions ?? [],
       presentation: {
         citation_style: opts.publication?.citationStyle ?? (workflowProfile === "deep" ? "author_year" : "numeric"),
-        show_production_statistics: workflowProfile === "deep",
+        // Run counters are operational telemetry, not paper content. Keep
+        // them in reports/ and require an explicit author decision for any
+        // venue-specific disclosure in the manuscript.
+        show_production_statistics: false,
         disclosure: {
-          enabled: mode.id === "auto_research_agentic" && !opts.publication?.anonymous,
-          ...(mode.id === "auto_research_agentic" && !opts.publication?.anonymous
-            ? { ai_use: "MrMaLiang's agentic research workflow supported literature research, drafting, review, and figure planning through its LongWrite writing component and the MalaClaw runtime." }
-            : {}),
-          provenance: { enabled: mode.id === "auto_research_agentic" && !opts.publication?.anonymous, include_longwrite: true, include_malaclaw: true, include_runtime_models: true },
+          enabled: false,
+          provenance: { enabled: false, include_longwrite: true, include_malaclaw: true, include_runtime_models: true },
         },
       },
     },

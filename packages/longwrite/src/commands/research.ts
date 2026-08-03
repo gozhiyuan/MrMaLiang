@@ -14,6 +14,7 @@ import { discoverGithubCodebases, repairGithubCodebaseSelection } from "../lib/r
 import { importLongExperiment, prepareExperimentEvidence } from "../lib/research/experiment.js";
 import { repairCodebaseAnalysis } from "../lib/research/codebase-analysis.js";
 import { repairCodebaseComparison } from "../lib/research/codebase-comparison.js";
+import { loadSearchPlan, type SearchPlan } from "../lib/research/search-plan.js";
 
 /** Copy only a reviewed, publication-eligible LongExperiment result into the
  * paper workspace. LongWrite validates the copied manifest again at release. */
@@ -226,6 +227,20 @@ export async function runResearchRepairSourceEvidence(workspaceDir: string): Pro
   console.log(`source evidence: envelope normalized: ${result.normalized ? "yes" : "no"}`);
 }
 
+export async function runResearchBackfillValidatedEvidenceHistory(workspaceDir: string): Promise<void> {
+  const { backfillValidatedEvidenceHistory } = await import("../lib/research/semantic-screen.js");
+  const result = await backfillValidatedEvidenceHistory(path.resolve(workspaceDir));
+  console.log(`validated evidence history: recovered ${result.recovered} packet record(s); cumulative total ${result.total}`);
+  console.log(`  + ${result.reportPath}`);
+}
+
+export async function runResearchRestoreRecoveryCorpus(workspaceDir: string): Promise<void> {
+  const { restoreRecoveryCorpusFromCheckpoints } = await import("../lib/research/semantic-screen.js");
+  const result = await restoreRecoveryCorpusFromCheckpoints(path.resolve(workspaceDir));
+  console.log(`recovery corpus: restored ${result.restored} checkpoint source record(s); durable total ${result.total}`);
+  console.log(`  + ${result.reportPath}`);
+}
+
 export async function runResearchFinalizeEvidenceDepth(workspaceDir: string): Promise<void> {
   const { finalizeEvidenceBackedDepth } = await import("../lib/research/semantic-screen.js");
   for (const file of await finalizeEvidenceBackedDepth(path.resolve(workspaceDir))) console.log(`  + ${file}`);
@@ -288,6 +303,33 @@ function expansionQueries(topic: string, actions: z.infer<typeof RemediationPlan
   return [...new Set(queries)].slice(0, limit);
 }
 
+/** Preserve the original taxonomy query groups during targeted recovery.
+ * Recovery used to replace the search plan with generic failure prose, which
+ * made the next bounded recall forget the declared coverage program. */
+export function buildExpansionSearchPlan(
+  topic: string,
+  expansion: string[],
+  taxonomy: string[],
+  previous?: SearchPlan,
+): SearchPlan {
+  const taxonomy_cells = previous?.taxonomy_cells.length
+    ? previous.taxonomy_cells
+    : taxonomy.map((cell) => ({
+      cell,
+      query_variants: [cell, `${topic} ${cell}`, `${cell} survey`],
+    }));
+  return {
+    version: 1,
+    topic,
+    query_variants: [...new Set([...(previous?.query_variants ?? []), ...expansion])].slice(0, 50),
+    taxonomy_cells,
+    exclusion_terms: previous?.exclusion_terms ?? [],
+    venue_priorities: previous?.venue_priorities ?? [],
+    source_types: previous?.source_types.length ? previous.source_types : ["paper", "survey", "benchmark"],
+    rationale: "Targeted expansion preserves the original taxonomy coverage program and adds remediation queries.",
+  };
+}
+
 /** Apply the research-expansion remediation action as a bounded, idempotent
  * script stage. The LLM only identifies the deficit; this command owns the
  * provider calls and source/evidence refresh. */
@@ -319,16 +361,11 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
     return;
   }
   const queryVariants = expansionQueries(topic, actions, config.research.query_budget);
+  const previousLoad = await loadSearchPlan(resolved);
+  const previousPlan = previousLoad.present && previousLoad.ok ? previousLoad.plan : undefined;
+  const expansionPlan = buildExpansionSearchPlan(topic, queryVariants, config.research.taxonomy, previousPlan);
   await fs.mkdir(path.join(resolved, "sources"), { recursive: true });
-  await fs.writeFile(path.join(resolved, "sources", "search-plan.json"), `${JSON.stringify({
-    version: 1,
-    topic,
-    query_variants: queryVariants,
-    exclusion_terms: [],
-    venue_priorities: [],
-    source_types: ["paper", "survey", "benchmark"],
-    rationale: "Targeted expansion generated from the deterministic remediation plan.",
-  }, null, 2)}\n`, "utf-8");
+  await fs.writeFile(path.join(resolved, "sources", "search-plan.json"), `${JSON.stringify(expansionPlan, null, 2)}\n`, "utf-8");
   const pipeline = await import("../lib/research/pipeline.js");
   const enrichment = await import("../lib/research/enrich.js");
   const fulltext = await import("../lib/research/fulltext.js");
@@ -339,6 +376,7 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
     provider: config.research.provider as ResearchProviderId,
     targetCandidates: config.research.target_candidates,
     queryBudget: config.research.query_budget,
+    mergeExisting: true,
   }));
   written.push(...(await enrichment.enrichSourceMetadata(resolved, {
     maxSources: 20,

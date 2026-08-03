@@ -62,9 +62,9 @@ export { enrichSourceMetadata } from "../../lib/research/enrich.js";
 export {
   buildEvidenceIndex,
   searchEvidence,
-  sourceMatchesTaxonomy,
   allocateSectionEvidence,
 } from "../../lib/research/evidence.js";
+export { sourceMatchesTaxonomy } from "../../lib/research/taxonomy.js";
 
 // ── Ledger ───────────────────────────────────────────────────────────────────
 export {
