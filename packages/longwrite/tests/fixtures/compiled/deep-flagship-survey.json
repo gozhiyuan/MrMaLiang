@@ -780,7 +780,7 @@
         "instructions": [
           "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations.",
           "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation.",
-          "Reward a well-designed explanatory diagram, source-grounded timeline, or qualitative comparison matrix when it makes the manuscript's argument more legible than prose. Review these for a clear analytical takeaway, source grounding, readable labels, and non-redundancy. For every equation, verify nearby symbol definitions and a literature citation or an explicit author-formalization label with stated assumptions; treat an unsupported theorem, conjecture, quantitative chart, or percentage as a major finding.",
+          "Reward a well-designed explanatory diagram, source-grounded timeline, or qualitative comparison matrix when it makes the manuscript's argument more legible than prose. Review these for a clear analytical takeaway, source grounding, readable labels, and non-redundancy. For every equation, verify nearby symbol definitions and a literature citation or an explicit author-formalization label with stated assumptions; treat an unsupported theorem, conjecture, quantitative chart, or percentage as a major finding. Judge under-use as well as over-use: where a section argues a comparison across several sources in prose that a reader would follow far more easily as a table or diagram, say so and name the sections and the axis being compared. Do not ask for an artifact merely to raise a count, and never for one the cited evidence cannot support.",
           "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved.",
           "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler.",
           "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
@@ -823,6 +823,37 @@
         "on_exhaustion": "succeed",
         "stages": [
           {
+            "id": "comparison_opportunities",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Report where validated evidence sits and what the visual plan serves",
+            "inputs": [
+              "outline.json"
+            ],
+            "optional_inputs": [
+              "evidence/active-validated-source-evidence.json",
+              "evidence/validated-source-evidence.json",
+              "figures/manifest.json",
+              "figures/placement-plan.json"
+            ],
+            "outputs": [
+              "reports/comparison-opportunities.md",
+              "reports/comparison-opportunities.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "comparison-opportunities",
+                "."
+              ]
+            }
+          },
+          {
             "id": "artifact_plan",
             "owner": "analyst",
             "title": "Choose source-grounded analytical artifacts",
@@ -830,7 +861,8 @@
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
               "outline.json",
-              "sources/classified_sources.jsonl"
+              "sources/classified_sources.jsonl",
+              "reports/comparison-opportunities.md"
             ],
             "optional_inputs": [
               "reports/metrics.json",
@@ -842,10 +874,12 @@
               "reports/evidence-audit.md",
               "outline.json",
               "sources/classified_sources.jsonl",
-              "evidence/coverage.json"
+              "evidence/coverage.json",
+              "reports/comparison-opportunities.md"
             ],
             "instructions": [
               "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
+              "reports/comparison-opportunities.md lists, per outline section, the sources carrying validated evidence packets, the taxonomy cells they span, the limitations they record, the comparison dimensions their claims name verbatim, and which artifacts the manuscript already carries there. Read it before deciding. A section holding several packet-backed sources across multiple taxonomy cells with no artifact is where a comparison is most likely to earn its place; a section already served needs no second artifact. It is an observation, never a target: there is no correct number of artifacts, a section may be better served by prose, and an artifact the listed evidence does not support is exactly the failure this report exists to prevent. Judge the dimensions yourself — they are free text, so two sources can name the same axis in different words, and only some of them are worth a table.",
               "The current artifact-plan contract additionally permits timeline and architecture_diagram intents. A timeline needs a target section and at least three classified source IDs; an architecture diagram follows this profile's requirement: An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. The visual renderer derives dates from metadata and never accepts handwritten coordinates or result values.",
               "Schema: {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?}]}]}. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot.",
               "Formalization is a request for the chapter writer to introduce a compact definition/objective with locally defined symbols; it requires a target section and supporting classified source ids. Do not request decorative mathematics.",

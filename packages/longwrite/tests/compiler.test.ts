@@ -428,13 +428,14 @@ describe("compileModeToManifest", () => {
     const initialDraft = workflow.stages.find((stage) => stage.id === "draft_sections") as { steps: Array<Record<string, unknown>> };
     expect(initialDraft.steps.find((step) => step.id === "draft")?.inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
     const loop = workflow.stages.find((stage) => stage.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
-    expect(loop.stages.slice(0, 4).map((stage) => stage.id)).toEqual(["artifact_plan", "action_plan", "action_plan_split", "research_action_dispatch"]);
-    expect(loop.stages.slice(4, 13).map((stage) => stage.id)).toEqual([
+    // The opportunity report runs before the planner so the planner reads it.
+    expect(loop.stages.slice(0, 5).map((stage) => stage.id)).toEqual(["comparison_opportunities", "artifact_plan", "action_plan", "action_plan_split", "research_action_dispatch"]);
+    expect(loop.stages.slice(5, 14).map((stage) => stage.id)).toEqual([
       "quality_dispatch_metrics", "quality_semantic_screen", "quality_fulltext_refresh",
       "quality_evidence_index_refresh", "quality_source_evidence_candidate_select", "quality_source_evidence_extract",
       "quality_finalize_evidence_depth", "quality_corpus_gates", "quality_allocate_evidence",
     ]);
-    expect(loop.stages.slice(13, 18).map((stage) => stage.id)).toEqual([
+    expect(loop.stages.slice(14, 19).map((stage) => stage.id)).toEqual([
       "outline_action_dispatch",
       "quality_outline_survey_contract", "quality_outline_structure_audit",
       "quality_outline_reopen_validate", "quality_reallocate_outline_evidence",

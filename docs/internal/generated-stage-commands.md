@@ -28,6 +28,7 @@ resulting manifests still invoke the same subcommands.
 | `research assess` | — | `assess`, `final_release_assess_research` |
 | `research classify` | `--topic` | `classify` |
 | `research codebases` | — | `codebase_prepare` |
+| `research comparison-opportunities` | — | `comparison_opportunities` |
 | `research corpus-gates` | `--advisory` | `corpus_gate_assessment`, `corpus_gates`, `corpus_recovery_assessment`, `quality_corpus_gates` |
 | `research dispatch-metrics` | — | `quality_dispatch_metrics` |
 | `research enrich` | `--disabled` `--max-sources` | `enrich` |

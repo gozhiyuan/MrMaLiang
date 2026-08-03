@@ -764,6 +764,14 @@ research
   });
 
 research
+  .command("comparison-opportunities <workspace>")
+  .description("Report where validated evidence sits per outline section and what the visual plan already serves")
+  .action(async (workspace) => {
+    const { runResearchComparisonOpportunities } = await import("./commands/research.js");
+    await runResearchComparisonOpportunities(workspace);
+  });
+
+research
   .command("survey-contract <workspace>")
   .description("Check full survey outline structure and write the related-work comparison matrix")
   .action(async (workspace) => {
