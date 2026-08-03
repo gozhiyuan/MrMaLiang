@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.2 — 2026-08-03
+
+Defaults that had drifted from the workspaces actually being run, found by
+diffing a live flagship workspace against a freshly generated one.
+
+### Fixed
+
+- **The Nano Banana default model was a version behind.** It defaulted to
+  `gemini-2.5-flash-image` while a live flagship pinned
+  `gemini-3.1-flash-image` by hand.
+- **The image backend was invisible in generated workspaces.** The scaffold
+  emitted no `figures.backends` block at all, so the only paid backend could
+  not be found without reading the schema. It is now emitted
+  `enabled: false, requires_approval: true` — discoverable, and still never on
+  by default.
+- **A last artifact quota survived in the scaffold.** A non-agentic mode with a
+  `deep` workflow profile would have received `min_figures: 3, min_tables: 5,
+  min_comparative_tables: 1, min_verified_metadata_plots: 2`. No such mode
+  exists today, so the branch was unreachable, but it would have handed the
+  next one a count target the rest of the design had already rejected.
+
+### Note for existing workspaces
+
+A workspace generated before 0.3.0 keeps its own `longwrite.yaml` **and** its
+compiled `malaclaw.yaml`. The manifest is where the artifact-planner
+instructions live, so a stale one still tells the planner to treat quality
+targets as an artifact budget even after the config is correct. Re-sync before
+the next run:
+
+```bash
+maliang writing sync .
+maliang writing validate config .
+```
+
 ## 0.3.1 — 2026-08-03
 
 Finishes what 0.3.0 started. That release moved artifact selection from a

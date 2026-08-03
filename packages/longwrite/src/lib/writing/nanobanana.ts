@@ -25,7 +25,7 @@ export type NanobananaStatus = {
 };
 
 const EST_COST_PER_IMAGE_USD = 0.05;
-const DEFAULT_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_MODEL = "gemini-3.1-flash-image";
 const RENDER_TIMEOUT_MS = 120_000;
 
 function apiKey(): string | undefined {

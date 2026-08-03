@@ -273,11 +273,16 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       },
     },
     figures: {
+      // No count target for any mode. A quota makes the artifact planner
+      // manufacture something to satisfy it; relevance is gated instead by
+      // source binding and a required insight on whatever it does select.
       quality_gates: mode.id === "auto_research_agentic"
         ? selectedPaperProfile.figureGates
-        : mode.default_workflow_profile === "deep"
-        ? { min_figures: 3, min_tables: 5, min_comparative_tables: 1, min_verified_metadata_plots: 2, max_nanobanana_illustrations: 1, require_insight_statements: true }
         : { min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: false },
+      // Emitted disabled rather than omitted. This is the only paid backend,
+      // so it must never default on — but leaving it out of the generated file
+      // entirely meant an operator had to know the schema to find it at all.
+      backends: { nanobanana: { enabled: false, budget_usd: 2.0, requires_approval: true } },
     },
     ...(opts.runLimits ? { run_limits: opts.runLimits } : {}),
     execution: { stage_overrides: {} },
