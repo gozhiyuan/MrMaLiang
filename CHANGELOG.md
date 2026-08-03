@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.4 — 2026-08-03
+
+### Added
+
+- **`reports/comparison-opportunities.md`, read by the artifact planner.**
+  Removing the artifact quotas in 0.3.0 left the planner a prohibition with no
+  affordance: a long list of what not to select, and nothing showing where a
+  comparison would be justified. A prohibition-only prompt biases toward
+  selecting nothing — a live flagship produced a 60-page survey with two
+  tables. A new `research comparison-opportunities` stage reports, per outline
+  section, the sources carrying validated packets, the taxonomy cells they
+  span, the limitations they record, the comparison dimensions their claims
+  name, and which artifacts the manuscript already carries there. It runs
+  before `artifact_plan`, emits no target or threshold, and cannot fail.
+
+  Comparison dimensions are passed through **verbatim and unclustered**. On a
+  real corpus, 113 dimension strings were 111 distinct — they are free-text
+  descriptions, not a controlled vocabulary, and term overlap recovers only
+  topic words. Deciding which name the same axis is a judgment, so it stays
+  with the planner.
+
+  The report counts what the manuscript carries, not what the plan requested: a
+  placement can name a retired built-in or a backend that never rendered.
+
+- **Reviewers judge under-use as well as over-use.** They already treat
+  pipeline telemetry masquerading as analysis as a major finding. They are now
+  also asked to name a section that argues a comparison across several sources
+  in prose a reader would follow more easily as a table or diagram — never to
+  raise a count, and never for an artifact the cited evidence cannot support.
+
 ## 0.3.3 — 2026-08-03
 
 ### Fixed
