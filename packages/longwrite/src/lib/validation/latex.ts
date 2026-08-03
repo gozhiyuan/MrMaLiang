@@ -123,14 +123,15 @@ async function checkReaderFacingPublication(workspaceDir: string): Promise<Valid
   if (/The following (?:figure|table) supports this section/i.test(body)) {
     findings.push("reader_facing_publication: replace mechanical figure/table lead-ins with the artifact's specific comparison, inference, or limitation");
   }
-  try {
-    const names = (await fs.readdir(path.join(workspaceDir, "paper", "tables"))).filter((name) => name.endsWith(".tex"));
-    const tables = await Promise.all(names.map((name) => fileText(workspaceDir, `paper/tables/${name}`)));
-    if (/(?:Full source title|Paper \(full title\)|Venue \(full name\)|Packet evidence|Record status)/i.test(tables.filter((value): value is string => Boolean(value)).join("\n"))) {
-      findings.push("reader_facing_publication: source-inventory or pipeline-status table detected; use the bibliography and retain only analytical comparison columns");
-    }
-  } catch {
-    // No generated tables is valid when the artifact plan selected none.
+  // Check only the tables the manuscript actually inputs. `paper/tables/` also
+  // accumulates files from earlier rounds, and a table the manuscript no longer
+  // includes cannot reach a reader — failing on one blocks a clean manuscript
+  // over build residue, and no amount of agent revision can clear it, because
+  // nothing the agent rewrites references those files.
+  const included = [...body.matchAll(/\\input\{tables\/([^}]+?)(?:\.tex)?\}/g)].map((match) => `${match[1]}.tex`);
+  const tables = await Promise.all([...new Set(included)].map((name) => fileText(workspaceDir, `paper/tables/${name}`)));
+  if (/(?:Full source title|Paper \(full title\)|Venue \(full name\)|Packet evidence|Record status)/i.test(tables.filter((value): value is string => Boolean(value)).join("\n"))) {
+    findings.push("reader_facing_publication: source-inventory or pipeline-status table detected; use the bibliography and retain only analytical comparison columns");
   }
   return { id: "reader_facing_publication", pass: findings.length === 0, findings };
 }
