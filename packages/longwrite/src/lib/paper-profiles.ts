@@ -91,7 +91,11 @@ const repositoryStudy: PaperProfile = {
     min_citation_depths_per_section: { A: 0, B: 1, C: 1 }, min_cited_ab_sources_per_taxonomy_cell: 0,
   },
   corpusGates: { min_candidates: 50, min_sources_per_taxonomy_cell: 0, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1 },
-  figureGates: { min_figures: 3, min_tables: 3, min_comparative_tables: 1, min_verified_metadata_plots: 1, max_nanobanana_illustrations: 1, require_insight_statements: true },
+  // No count target here either, for the same reason as the survey profile: a
+  // quota makes the planner manufacture artifacts to satisfy it. The
+  // architecture diagram below is a different thing — a domain requirement of
+  // a repository study, not a quota — so it stays required by id.
+  figureGates: { min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: true },
   requiresCodebase: true,
   requiredVisualIds: ["concept-map"],
   architectureTitleRequired: true,

@@ -25,24 +25,6 @@ const ImportedArtifactProvenance = z.object({
   license: z.string().min(1).optional(),
 }).strict();
 
-const TableOverride = z.object({
-  // These are the only generated tables an agent may revise.  The builder,
-  // rather than an LLM worker, owns all rendered and TeX artifacts.
-  id: z.enum(["method-comparison", "benchmark-metadata"]),
-  title: z.string().min(1).max(140).optional(),
-  caption: z.string().min(1).max(500).optional(),
-  // Six fields are required for a reader-auditable comparison matrix
-  // (source, regime, intervention, outcome, confounder, safety). Wrapped
-  // p-columns keep this bounded schema readable in the PDF.
-  headers: z.array(z.string().min(1).max(48)).min(2).max(6),
-  rows: z.array(z.object({
-    cells: z.array(z.string().min(1).max(180)).min(2).max(6),
-    // Each substantive row must name the classified records it summarizes.
-    // The builder validates these IDs before it accepts the contract.
-    source_ids: z.array(z.string().min(1)).min(1).max(8),
-  }).strict()).min(1).max(20),
-}).strict();
-
 /** A survey-native, source-bound table. The model owns the comparison lens
  * and prose cells; the builder owns the durable CSV, Markdown, TeX, label,
  * caption, and placement artifacts. This is intentionally not a general TeX
@@ -99,20 +81,30 @@ const PlacementPlan = z.object({
   concept_map: z.object({
     title: z.string().min(1).max(180),
     caption: z.string().min(1).max(500),
+    /** Why this map earns space. Optional only so an existing plan still
+     * parses; without it the artifact fails `require_insight_statements`
+     * rather than borrowing a sentence the renderer wrote. */
+    insight: z.string().min(24).max(800).optional(),
     placement: Placement,
     // The deterministic fallback renderer uses a bounded publication grid.
     // Short labels are a layout contract, not merely a stylistic preference.
     nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(48) }).strict()).min(3).max(10),
     edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().max(36).optional() }).strict()).max(10),
   }).strict().optional(),
-  // Optional agentic remediation contract.  A table override changes data,
-  // Markdown, TeX, placement, and the publication manifest together on the
-  // next normal build; an LLM never writes those generated files directly.
-  table_overrides: z.array(TableOverride).max(2).optional(),
   /** Additional long-form tables declared by the artifact planner. Their
    * values must be traceable to classified source IDs; they cannot carry raw
    * LaTeX, chart code, or unverified numeric data. */
   table_specs: z.array(TableSpec).max(10).optional(),
+  /** Reader-facing framing for a verified metadata plot. The renderer derives
+   * the plot from verified corpus metadata and may label its axes factually,
+   * but only the planner may say why the distribution is worth a reader's
+   * attention, so `insight` is supplied here rather than canned downstream. */
+  metadata_plots: z.array(z.object({
+    metric: z.enum(["publication_year", "citation_depth", "venue"]),
+    insight: z.string().min(24).max(800),
+    title: z.string().min(1).max(180).optional(),
+    caption: z.string().min(1).max(500).optional(),
+  }).strict()).max(3).optional(),
   timelines: z.array(TimelineSpec).max(3).optional(),
   diagrams: z.array(DiagramSpec).max(3).optional(),
 }).strict();
@@ -611,34 +603,22 @@ async function placementOverrides(workspaceDir: string): Promise<Map<string, z.i
   return new Map(plan.placements.map((item) => [item.id, item.placement]));
 }
 
-type TableOverrideContract = z.infer<typeof TableOverride>;
-type TableSpecContract = z.infer<typeof TableSpec>;
-type TimelineSpecContract = z.infer<typeof TimelineSpec>;
-type DiagramSpecContract = z.infer<typeof DiagramSpec>;
+type MetadataPlotProse = { insight: string; title?: string; caption?: string };
 
-async function tableOverrides(workspaceDir: string, sources: ClassifiedSource[]): Promise<Map<string, TableOverrideContract>> {
-  let raw: string;
+/** Planner-authored framing for verified metadata plots, keyed by metric. */
+async function metadataPlotProse(workspaceDir: string): Promise<Map<string, MetadataPlotProse>> {
   try {
-    raw = await fs.readFile(path.join(workspaceDir, "figures", "placement-plan.json"), "utf-8");
+    const raw = await fs.readFile(path.join(workspaceDir, "figures", "placement-plan.json"), "utf-8");
+    const plan = PlacementPlan.parse(JSON.parse(raw));
+    return new Map((plan.metadata_plots ?? []).map((spec) => [spec.metric, spec]));
   } catch {
     return new Map();
   }
-  const plan = PlacementPlan.parse(JSON.parse(raw));
-  const knownSourceIds = new Set(sources.map((source) => source.id));
-  const overrides = new Map<string, TableOverrideContract>();
-  for (const override of plan.table_overrides ?? []) {
-    if (override.rows.some((row) => row.cells.length !== override.headers.length)) {
-      throw new Error(`table_overrides.${override.id} has a row with a different number of cells than headers`);
-    }
-    for (const row of override.rows) {
-      const unknown = row.source_ids.filter((id) => !knownSourceIds.has(id));
-      if (unknown.length > 0) throw new Error(`table_overrides.${override.id} names unknown source IDs: ${unknown.join(", ")}`);
-    }
-    if (overrides.has(override.id)) throw new Error(`table_overrides contains duplicate ${override.id}`);
-    overrides.set(override.id, override);
-  }
-  return overrides;
 }
+
+type TableSpecContract = z.infer<typeof TableSpec>;
+type TimelineSpecContract = z.infer<typeof TimelineSpec>;
+type DiagramSpecContract = z.infer<typeof DiagramSpec>;
 
 /** Validate that every declarative table is source-bound before the renderer
  * writes any artifact. This lets the LLM choose a useful comparison question
@@ -869,7 +849,6 @@ export async function sanitizePlacementPlanFile(workspaceDir: string): Promise<v
     const plan = parsed as Record<string, unknown>;
     clampField(plan.concept_map, "title", 180, "concept_map");
     clampField(plan.concept_map, "caption", 500, "concept_map");
-    clampEntries(plan.table_overrides, "table_overrides");
     clampEntries(plan.table_specs, "table_specs");
     clampEntries(plan.timelines, "timelines");
     clampEntries(plan.diagrams, "diagrams");
@@ -910,7 +889,7 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   const target = await placement(workspaceDir);
   const overrides = await placementOverrides(workspaceDir);
   const requestedMetadataIntents = await metadataPlotIntents(workspaceDir);
-  const tableOverrideById = await tableOverrides(workspaceDir, sources);
+  const metadataProse = await metadataPlotProse(workspaceDir);
   const declaredTableSpecs = await tableSpecs(workspaceDir, sources);
   const declaredTimelines = await timelineSpecs(workspaceDir, sources);
   const declaredDiagrams = await diagramSpecs(workspaceDir, sources);
@@ -939,17 +918,19 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
     if (intent.metric === "publication_year") return [];
     const rows = categoryCounts(sources, intent.metric);
     const id = intent.id;
-    const title = intent.metric === "citation_depth" ? "Sources by citation depth" : "Top publication venues";
     const dataPath = intent.metric === "citation_depth" ? "data/source-depths.csv" : "data/source-venues.csv";
+    const prose = metadataProse.get(intent.metric);
     return [{
       id,
-      title,
-      caption: intent.metric === "citation_depth"
-        ? "The classified corpus is distributed by citation depth, separating sources selected for substantive synthesis from supporting context."
-        : "The figure summarizes the most frequent publication venues in the classified corpus using verified source metadata.",
-      insight: intent.metric === "citation_depth"
-        ? "The distribution makes the evidence hierarchy auditable rather than leaving depth assignments implicit."
-        : "The venue distribution reveals whether the corpus is concentrated in a small set of publication channels or spans multiple communities.",
+      // A factual axis label is rendering vocabulary and may be supplied here.
+      // The insight is the argument for the plot's presence, so it comes from
+      // the planner or not at all — an empty one fails the insight gate rather
+      // than passing on a sentence the renderer wrote.
+      title: prose?.title ?? (intent.metric === "citation_depth" ? "Sources by citation depth" : "Top publication venues"),
+      caption: prose?.caption ?? (intent.metric === "citation_depth"
+        ? "Distribution of the classified corpus by citation depth, from verified source metadata."
+        : "The most frequent publication venues in the classified corpus, from verified source metadata."),
+      insight: prose?.insight ?? "",
       path: `figures/${id}.svg`, latex_path: `paper/figures/${id}.tex`, placement: overrides.get(id) ?? intent.placement,
       backend: "deterministic-svg" as const, data: [dataPath], rows, metric: intent.metric,
     }];
@@ -958,15 +939,16 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
     version: 1,
     figures: [
       ...(sourceYearsIntent ? [{
-        id: "source-years", title: "Sources by publication year",
-        caption: "The retrieved corpus is concentrated in the years represented by the classified source set.",
-        insight: "The plot makes the corpus's temporal concentration visible, so recency claims can be checked against the retrieved evidence.",
+        id: "source-years",
+        title: metadataProse.get("publication_year")?.title ?? "Sources by publication year",
+        caption: metadataProse.get("publication_year")?.caption ?? "Publication years of the classified source set, from verified source metadata.",
+        insight: metadataProse.get("publication_year")?.insight ?? "",
         path: pythonPlotAvailable ? "figures/source-years-plot.png" : "figures/source-years.svg", latex_path: "paper/figures/source-years.tex", placement: sourceYearsPlacement,
         backend: (pythonPlotAvailable ? "python" : "deterministic-svg") as "python" | "deterministic-svg", data: ["data/source-years.csv"],
       }] : []),
       ...(conceptMap ? [{
         id: "concept-map", title: conceptMap.title, caption: conceptMap.caption,
-        insight: "The map exposes the organizing relationships that structure the survey rather than presenting its themes as a flat list.",
+        insight: conceptMap.insight ?? "",
         path: "figures/concept-map.svg", latex_path: "paper/figures/concept-map.tex", placement: conceptMap.placement,
         backend: "deterministic-svg" as const, data: ["data/concept-map.json"],
       }] : []),
@@ -1106,5 +1088,14 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   }
   const reportPath = path.join(workspaceDir, "reports", "figures-build.md");
   await fs.appendFile(reportPath, `\n## nanobanana\n\n- Enabled: ${nanobanana.enabled ? "yes" : "no"}\n- ${nanobanana.detail}\n`, "utf-8").catch(() => {});
+  // A placement naming an artifact that was never produced used to be dropped
+  // in silence, so a planner asking for a retired built-in got no signal that
+  // its request had been ignored. Name them instead: the plan is wrong, or the
+  // artifact it depends on failed to render.
+  const publishedIds = new Set([...manifest.figures, ...manifest.tables].map((item) => item.id));
+  const unfulfilled = [...overrides.keys()].filter((id) => !publishedIds.has(id));
+  if (unfulfilled.length > 0) {
+    await appendVisualPlanRepair(workspaceDir, `placement-plan.json places ${unfulfilled.length} artifact(s) that were not produced and are absent from the manuscript: ${unfulfilled.join(", ")}. Either the id names no selectable artifact, or its renderer/backend did not run — see reports/figures-build.md.`);
+  }
   return written;
 }
