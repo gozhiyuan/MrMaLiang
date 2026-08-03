@@ -223,8 +223,11 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         ? { enabled: true, results_path: "experiments/results.json", min_trials: 3 }
         : { enabled: false, results_path: "experiments/results.json", min_trials: 3 },
       fulltext: { max_core_sources: isResearchMode ? profileDefaults.fulltextMaxSources : 40, allow_pdf_download: true },
+      // Scaled by paper profile rather than fixed: this cap is the ceiling on
+      // how deep a manuscript's evidence can go, so it has to track the length
+      // the profile is aiming for.
       semantic_screen: mode.id === "auto_research_agentic"
-        ? { enabled: true, max_candidates: 100, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 32, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }
+        ? { enabled: true, max_candidates: selectedPaperProfile.evidenceBudget.maxCandidates, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: selectedPaperProfile.evidenceBudget.maxEvidenceSources, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }
         : { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 },
       outline_review: mode.id === "auto_research_agentic"
         ? { enabled: true, max_rounds: 2, approval_mode: "auto" }

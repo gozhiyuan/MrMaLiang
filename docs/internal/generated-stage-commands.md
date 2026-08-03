@@ -35,6 +35,7 @@ resulting manifests still invoke the same subcommands.
 | `research expand` | `--action-plan` | `corpus_recovery_expand`, `targeted_research_expansion` |
 | `research finalize-evidence-depth` | — | `corpus_recovery_finalize_evidence_depth`, `finalize_evidence_depth`, `quality_finalize_evidence_depth` |
 | `research fulltext` | `--max-sources` `--no-pdf-download` | `corpus_recovery_fulltext`, `fulltext`, `quality_fulltext_refresh` |
+| `research gate-reachability` | — | `gate_reachability` |
 | `research prepare-experiment` | — | `experiment_evidence_prepare` |
 | `research recall` | `--provider` `--query-budget` `--target-candidates` `--topic` | `recall` |
 | `research reconcile-identities` | — | `identity_reconcile` |

@@ -537,6 +537,18 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
         command: longwriteCommand(["research", "finalize-evidence-depth", "."]),
       }),
+      // Depths are final here, so this is the earliest point a release gate can
+      // be shown to be already out of reach — and the last one before drafting
+      // spends a manuscript's worth of work against a target nothing can meet.
+      scriptStage({
+        id: "gate_reachability",
+        title: "Report which release gates the classified corpus can still satisfy",
+        owner: "analyst", inputs: ["sources/classified_sources.jsonl"],
+        optional_inputs: ["outline.json"],
+        outputs: ["reports/gate-reachability.md", "reports/gate-reachability.json"],
+        validators: ["required_output_exists"], runtime: "script",
+        command: longwriteCommand(["research", "gate-reachability", "."]),
+      }),
       scriptStage({
         id: "corpus_gate_assessment",
         title: "Measure final evidence-backed corpus coverage before recovery",

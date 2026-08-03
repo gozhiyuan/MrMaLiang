@@ -764,6 +764,14 @@ research
   });
 
 research
+  .command("gate-reachability <workspace>")
+  .description("Report which release gates the current corpus can still satisfy")
+  .action(async (workspace) => {
+    const { runResearchGateReachability } = await import("./commands/research.js");
+    await runResearchGateReachability(workspace);
+  });
+
+research
   .command("comparison-opportunities <workspace>")
   .description("Report where validated evidence sits per outline section and what the visual plan already serves")
   .action(async (workspace) => {

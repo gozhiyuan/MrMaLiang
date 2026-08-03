@@ -40,6 +40,17 @@ export type PaperProfile = {
   defaultWorkflowProfile: "standard" | "deep";
   targetWords: number;
   minPages?: number;
+  /**
+   * How much validated evidence this paper kind is allowed to collect.
+   *
+   * This was a flat constant: a 60-page survey and a 10k-word repository study
+   * both got 32 evidence sources. A/B citation depth requires a validated
+   * packet, so this cap is the ceiling on a manuscript's evidentiary depth —
+   * and a flagship run hit it, ending with 24 packet-backed sources, zero at
+   * A level, and a 37-page draft against a 60-page target. Evidence supply has
+   * to scale with the manuscript it is meant to support.
+   */
+  evidenceBudget: { maxCandidates: number; maxEvidenceSources: number };
   releaseGates: ReleaseGates;
   corpusGates: CorpusGates;
   figureGates: FigureGates;
@@ -69,6 +80,7 @@ const literatureSurvey: PaperProfile = {
     min_citation_depths_per_section: { A: 1, B: 2, C: 2 }, min_cited_ab_sources_per_taxonomy_cell: 2,
   },
   corpusGates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 4 },
+  evidenceBudget: { maxCandidates: 200, maxEvidenceSources: 96 },
   // A publication-quality survey needs reader-relevant comparisons, not a
   // quota of corpus bookkeeping. The artifact plan is allowed to select none
   // when no figure/table advances the argument; selected artifacts still have
@@ -91,6 +103,7 @@ const repositoryStudy: PaperProfile = {
     min_citation_depths_per_section: { A: 0, B: 1, C: 1 }, min_cited_ab_sources_per_taxonomy_cell: 0,
   },
   corpusGates: { min_candidates: 50, min_sources_per_taxonomy_cell: 0, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1 },
+  evidenceBudget: { maxCandidates: 100, maxEvidenceSources: 40 },
   // No count target here either, for the same reason as the survey profile: a
   // quota makes the planner manufacture artifacts to satisfy it. The
   // architecture diagram below is a different thing — a domain requirement of

@@ -495,6 +495,34 @@
         }
       },
       {
+        "id": "gate_reachability",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Report which release gates the classified corpus can still satisfy",
+        "inputs": [
+          "sources/classified_sources.jsonl"
+        ],
+        "optional_inputs": [
+          "outline.json"
+        ],
+        "outputs": [
+          "reports/gate-reachability.md",
+          "reports/gate-reachability.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "gate-reachability",
+            "."
+          ]
+        }
+      },
+      {
         "id": "corpus_gate_assessment",
         "owner": "source-curator",
         "runtime": "script",

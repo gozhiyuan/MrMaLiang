@@ -752,3 +752,18 @@ export async function runResearchComparisonOpportunities(workspaceDir: string): 
   console.log(`Comparison opportunities: ${report.sections.length} sections, ${unserved.length} with validated evidence and no placed artifact`);
   for (const file of written) console.log(`  + ${file}`);
 }
+
+/** Reports which release gates the current corpus can still satisfy. Never
+ * fails: a gate out of reach is an operator decision, and failing here would
+ * only relocate the same dead end to an earlier stage. */
+export async function runResearchGateReachability(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeGateReachability } = await import("../lib/research/gate-reachability.js");
+  const { report, written } = await writeGateReachability(resolved);
+  const blocked = report.gates.filter((gate) => !gate.reachable);
+  console.log(report.evaluated
+    ? `Release-gate reachability: ${report.gates.length} gates, ${blocked.length} already out of reach`
+    : "Release-gate reachability: no classified corpus yet");
+  for (const gate of blocked) console.log(`  [unreachable] ${gate.id}: ${gate.detail}`);
+  for (const file of written) console.log(`  + ${file}`);
+}
