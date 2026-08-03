@@ -276,7 +276,7 @@ async function prepareHandoff(workspace: string, manifest: string): Promise<void
   }
 }
 
-async function runWorkspace(target: string, runtime?: string): Promise<void> {
+async function runWorkspace(target: string, runtime?: string, reset = false): Promise<void> {
   const workspace = path.resolve(target);
   const project = await readMaliangProject(workspace);
   if (project.components.experiment && project.handoff.mode === "run_then_import" && project.handoff.state !== "prepared") {
@@ -285,7 +285,7 @@ async function runWorkspace(target: string, runtime?: string): Promise<void> {
     try { await fs.access(manifest); } catch {
       await markLifecycle(workspace, "experiment", "running");
       try {
-        await run("malaclaw", ["flow", "run", ...(runtime ? ["--runtime", runtime] : [])], experimentDir);
+        await run("malaclaw", ["flow", "run", ...(runtime ? ["--runtime", runtime] : []), ...(reset ? ["--reset"] : [])], experimentDir);
         await markLifecycle(workspace, "experiment", "awaiting_approval", "experiment flow has not yet produced an audited manifest");
         await writeMaliangProvenance(workspace, "experiment_phase_checkpoint");
         console.log("Experiment phase is not yet handoff-ready. Approve/retry it as needed, then run this command again.");
@@ -301,7 +301,7 @@ async function runWorkspace(target: string, runtime?: string): Promise<void> {
   }
   if (project.components.experiment && !project.components.writing) {
     await markLifecycle(workspace, "experiment", "running");
-    await run("malaclaw", ["flow", "run", ...(runtime ? ["--runtime", runtime] : [])], path.join(workspace, project.components.experiment.workspace));
+    await run("malaclaw", ["flow", "run", ...(runtime ? ["--runtime", runtime] : []), ...(reset ? ["--reset"] : [])], path.join(workspace, project.components.experiment.workspace));
     await markLifecycle(workspace, "experiment", "awaiting_approval", "inspect the experiment flow state for completion");
     await writeMaliangProvenance(workspace, "standalone_experiment_checkpoint");
     return;
@@ -310,7 +310,7 @@ async function runWorkspace(target: string, runtime?: string): Promise<void> {
   if (project.components.writing) {
     await markLifecycle(workspace, "writing", "running");
     try {
-      await runComponent("longwrite", ["run", path.join(workspace, project.components.writing.workspace), ...(runtime ? ["--runtime", runtime] : [])], workspace);
+      await runComponent("longwrite", ["run", path.join(workspace, project.components.writing.workspace), ...(runtime ? ["--runtime", runtime] : []), ...(reset ? ["--reset"] : [])], workspace);
       await markLifecycle(workspace, "writing", "completed", "LongWrite command returned successfully");
       await writeMaliangProvenance(workspace, "writing_phase_completed");
     } catch (error) {
@@ -367,7 +367,8 @@ program.command("init <dir>")
 
 program.command("run <workspace>")
   .option("--runtime <id>", "MalaClaw runtime, e.g. codex or script")
-  .action(async (workspace, options) => runWorkspace(workspace, options.runtime));
+  .option("--reset", "Reset existing component flow state before running")
+  .action(async (workspace, options) => runWorkspace(workspace, options.runtime, options.reset === true));
 
 program.command("status <workspace>").action(async (workspace) => {
   const resolved = path.resolve(workspace);
