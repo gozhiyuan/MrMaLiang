@@ -41,6 +41,27 @@ export function defaultLongWriteDashboardExtensionPath(): string {
   return path.join(packageRoot(), "dashboard-extension", "dist", "server", "index.js");
 }
 
+/** Resolve the component-local MalaClaw project when an operator starts the
+ * dashboard from a public MrMaLiang program workspace. The public workspace
+ * owns `maliang.yaml`; its `writing/` component owns `malaclaw.yaml`. */
+export async function dashboardProjectDir(cwd = process.cwd()): Promise<string> {
+  const resolved = path.resolve(cwd);
+  const manifestPath = path.join(resolved, "malaclaw.yaml");
+  if (await fs.access(manifestPath).then(() => true).catch(() => false)) return resolved;
+
+  try {
+    const project = parseYaml(await fs.readFile(path.join(resolved, "maliang.yaml"), "utf-8")) as {
+      components?: { writing?: { workspace?: unknown } };
+    };
+    const writingWorkspace = project?.components?.writing?.workspace;
+    if (typeof writingWorkspace !== "string" || writingWorkspace.trim().length === 0) return resolved;
+    const componentDir = path.resolve(resolved, writingWorkspace);
+    return await fs.access(path.join(componentDir, "malaclaw.yaml")).then(() => componentDir).catch(() => resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 async function readConfig(configPath: string): Promise<DashboardConfig> {
   let raw: string;
   try {
@@ -116,5 +137,5 @@ export async function runDashboard(opts: DashboardOptions): Promise<void> {
   if (opts.port) args.push("--port", opts.port);
   if (opts.host) args.push("--host", opts.host);
   if (opts.authToken) args.push("--auth-token", opts.authToken);
-  await runMalaClaw(process.cwd(), args, { stream: true });
+  await runMalaClaw(await dashboardProjectDir(), args, { stream: true });
 }
