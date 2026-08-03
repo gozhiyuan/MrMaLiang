@@ -87,7 +87,8 @@ describe("LaTeX manuscript build", () => {
     await fs.appendFile(path.join(ws, "paper", "main.tex"), "\nExecution provenance: internal run data\nMetric & Value & Metric & Value\n", "utf-8");
     await fs.mkdir(path.join(ws, "paper", "tables"), { recursive: true });
     await fs.writeFile(path.join(ws, "paper", "tables", "inventory.tex"), "Full source title & Packet evidence & Record status", "utf-8");
-    await fs.appendFile(path.join(ws, "paper", "sections", "section-1.tex"), "\nThe following table supports this section.\n", "utf-8");
+    // The manuscript must actually include the table for it to reach a reader.
+    await fs.appendFile(path.join(ws, "paper", "sections", "section-1.tex"), "\nThe following table supports this section.\n\\input{tables/inventory.tex}\n", "utf-8");
     const report = await validateLatexWorkspace(ws);
     expect(report.pass).toBe(false);
     expect(report.checks.find((check) => check.id === "reader_facing_publication")?.findings).toEqual(expect.arrayContaining([
@@ -96,6 +97,19 @@ describe("LaTeX manuscript build", () => {
       expect.stringContaining("source-inventory"),
       expect.stringContaining("mechanical figure/table lead-ins"),
     ]));
+  });
+
+  it("ignores a bookkeeping table left in the directory that the manuscript no longer includes", async () => {
+    const ws = await makeWorkspace();
+    await buildLatexWorkspace(ws);
+    // `paper/tables/` accumulates files across rounds. A table the manuscript
+    // does not input cannot reach a reader, and failing on one blocks a clean
+    // manuscript over build residue no agent revision can clear — nothing it
+    // rewrites references the orphan.
+    await fs.mkdir(path.join(ws, "paper", "tables"), { recursive: true });
+    await fs.writeFile(path.join(ws, "paper", "tables", "stale-inventory.tex"), "Full source title & Packet evidence & Record status", "utf-8");
+    const report = await validateLatexWorkspace(ws);
+    expect(report.checks.find((check) => check.id === "reader_facing_publication")?.pass).toBe(true);
   });
 
   it("renders pinned codebase citations as software references without treating them as papers", async () => {
