@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3 — 2026-08-03
+
+### Fixed
+
+- **A validator failed a clean manuscript over build residue.**
+  `reader_facing_publication` scanned every `.tex` in `paper/tables/`, but that
+  directory accumulates files across rounds, so a table the manuscript had
+  already stopped including could still fail the check. Nothing the rebuild
+  agent writes references an orphaned file, so no revision could clear it: a
+  live flagship run blocked at `quality_loop-r3-rebuild` after two attempts,
+  both with `lastOutcome: success`, while including only its two selected
+  analytical tables. The check now reads the `\input{tables/...}` set from the
+  manuscript itself.
+
 ## 0.3.2 — 2026-08-03
 
 Defaults that had drifted from the workspaces actually being run, found by
