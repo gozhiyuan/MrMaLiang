@@ -764,6 +764,14 @@ research
   });
 
 research
+  .command("direction-memory <workspace>")
+  .description("Record the previous round's artifact intents so the next planner sees what was already tried")
+  .action(async (workspace) => {
+    const { runResearchDirectionMemory } = await import("./commands/research.js");
+    await runResearchDirectionMemory(workspace);
+  });
+
+research
   .command("gate-reachability <workspace>")
   .description("Report which release gates the current corpus can still satisfy")
   .action(async (workspace) => {

@@ -767,3 +767,13 @@ export async function runResearchGateReachability(workspaceDir: string): Promise
   for (const gate of blocked) console.log(`  [unreachable] ${gate.id}: ${gate.detail}`);
   for (const file of written) console.log(`  + ${file}`);
 }
+
+/** Folds the previous round's artifact plan into append-only history so the
+ * next planner can see what the loop has already tried. */
+export async function runResearchDirectionMemory(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeDirectionMemory } = await import("../lib/research/direction-memory.js");
+  const { memory, written } = await writeDirectionMemory(resolved);
+  console.log(`Directions tried: ${memory.directions.length} across ${memory.rounds_recorded} planning round(s)`);
+  for (const file of written) console.log(`  + ${file}`);
+}

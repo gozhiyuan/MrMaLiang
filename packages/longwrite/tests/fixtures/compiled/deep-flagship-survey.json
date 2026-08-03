@@ -823,6 +823,33 @@
         "on_exhaustion": "succeed",
         "stages": [
           {
+            "id": "direction_memory",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Record the artifact directions this loop has already tried",
+            "inputs": [],
+            "optional_inputs": [
+              "reviews/artifact-plan.json",
+              "reports/directions-tried.json"
+            ],
+            "outputs": [
+              "reports/directions-tried.md",
+              "reports/directions-tried.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "direction-memory",
+                "."
+              ]
+            }
+          },
+          {
             "id": "comparison_opportunities",
             "owner": "analyst",
             "runtime": "script",
@@ -862,7 +889,8 @@
               "reports/evidence-audit.md",
               "outline.json",
               "sources/classified_sources.jsonl",
-              "reports/comparison-opportunities.md"
+              "reports/comparison-opportunities.md",
+              "reports/directions-tried.md"
             ],
             "optional_inputs": [
               "reports/metrics.json",
@@ -875,7 +903,8 @@
               "outline.json",
               "sources/classified_sources.jsonl",
               "evidence/coverage.json",
-              "reports/comparison-opportunities.md"
+              "reports/comparison-opportunities.md",
+              "reports/directions-tried.md"
             ],
             "instructions": [
               "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",

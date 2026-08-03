@@ -885,6 +885,33 @@
         "on_exhaustion": "succeed",
         "stages": [
           {
+            "id": "direction_memory",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Record the artifact directions this loop has already tried",
+            "inputs": [],
+            "optional_inputs": [
+              "reviews/artifact-plan.json",
+              "reports/directions-tried.json"
+            ],
+            "outputs": [
+              "reports/directions-tried.md",
+              "reports/directions-tried.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "direction-memory",
+                "."
+              ]
+            }
+          },
+          {
             "id": "comparison_opportunities",
             "owner": "analyst",
             "runtime": "script",
@@ -924,7 +951,8 @@
               "reports/evidence-audit.md",
               "outline.json",
               "sources/classified_sources.jsonl",
-              "reports/comparison-opportunities.md"
+              "reports/comparison-opportunities.md",
+              "reports/directions-tried.md"
             ],
             "optional_inputs": [
               "reports/metrics.json",
@@ -940,6 +968,7 @@
               "sources/classified_sources.jsonl",
               "evidence/coverage.json",
               "reports/comparison-opportunities.md",
+              "reports/directions-tried.md",
               "evidence/experiment-packets.json",
               "experiments/verification.json"
             ],

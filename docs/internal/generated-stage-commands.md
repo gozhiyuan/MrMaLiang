@@ -30,6 +30,7 @@ resulting manifests still invoke the same subcommands.
 | `research codebases` | — | `codebase_prepare` |
 | `research comparison-opportunities` | — | `comparison_opportunities` |
 | `research corpus-gates` | `--advisory` | `corpus_gate_assessment`, `corpus_gates`, `corpus_recovery_assessment`, `quality_corpus_gates` |
+| `research direction-memory` | — | `direction_memory` |
 | `research dispatch-metrics` | — | `quality_dispatch_metrics` |
 | `research enrich` | `--disabled` `--max-sources` | `enrich` |
 | `research expand` | `--action-plan` | `corpus_recovery_expand`, `targeted_research_expansion` |

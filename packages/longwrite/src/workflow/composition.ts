@@ -815,6 +815,17 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   // affordance: a long list of what not to select, and nothing showing where a
   // comparison would be justified. This restores the affordance as evidence
   // rather than as a number — it emits no target and cannot fail.
+  const directionMemory = scriptStage({
+    id: "direction_memory",
+    title: "Record the artifact directions this loop has already tried",
+    owner: "analyst",
+    inputs: [],
+    optional_inputs: ["reviews/artifact-plan.json", "reports/directions-tried.json"],
+    outputs: ["reports/directions-tried.md", "reports/directions-tried.json"],
+    validators: ["required_output_exists"], runtime: "script",
+    command: longwriteCommand(["research", "direction-memory", "."]),
+  });
+
   const comparisonOpportunities = scriptStage({
     id: "comparison_opportunities",
     title: "Report where validated evidence sits and what the visual plan serves",
@@ -830,9 +841,9 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     id: "artifact_plan",
     title: "Choose source-grounded analytical artifacts",
     owner: "analyst",
-    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "reports/comparison-opportunities.md"],
+    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "reports/comparison-opportunities.md", "reports/directions-tried.md"],
     optional_inputs: ["reports/metrics.json", "evidence/coverage.json", "feedback/user-feedback.md"],
-    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json", "reports/comparison-opportunities.md"],
+    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json", "reports/comparison-opportunities.md", "reports/directions-tried.md"],
     instructions: [
       "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
       "reports/comparison-opportunities.md lists, per outline section, the sources carrying validated evidence packets, the taxonomy cells they span, the limitations they record, the comparison dimensions their claims name verbatim, and which artifacts the manuscript already carries there. Read it before deciding. A section holding several packet-backed sources across multiple taxonomy cells with no artifact is where a comparison is most likely to earn its place; a section already served needs no second artifact. It is an observation, never a target: there is no correct number of artifacts, a section may be better served by prose, and an artifact the listed evidence does not support is exactly the failure this report exists to prevent. Judge the dimensions yourself — they are free text, so two sources can name the same axis in different words, and only some of them are worth a table.",
@@ -1052,6 +1063,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     }),
   ] : [];
   const adaptiveChildren: Array<Record<string, unknown>> = [
+    directionMemory,
     comparisonOpportunities,
     artifactPlanner,
     planner,
