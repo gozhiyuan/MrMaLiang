@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/maliang",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Unified CLI for MrMaLiang writing and experiment workflows",
   "type": "module",
   "bin": {

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.1 — 2026-08-03
+
+Finishes what 0.3.0 started. That release moved artifact selection from a
+quota to the agent's judgement, but three places still had the renderer
+deciding what a paper contained.
+
+### Fixed
+
+- **`repository_study` still carried the quota.** 0.3.0 zeroed the count gates
+  for `literature_survey` only, leaving repository studies required to produce
+  3 figures, 3 tables, 1 comparative table, and 1 metadata plot. Its counts are
+  now zero too. The architecture diagram stays required by id: that is a domain
+  requirement of a paper about a system, not a count target.
+- **A fixed table menu survived as dead code.** `table_overrides` was still
+  bound to `z.enum(["method-comparison", "benchmark-metadata"])` — two built-in
+  tables 0.3.0 stopped generating — and the path was never read, so an override
+  was parsed, source-id validated, then silently discarded. Removed;
+  `table_specs` is the source-bound way to declare a table.
+- **Unfulfilled placements failed silently.** A placement naming an artifact
+  that no longer exists was dropped with no signal, so a planner asking for a
+  retired built-in could not tell its request had been ignored. Unfulfilled
+  placements are now listed in `reports/visual-plan-repair.md`, distinguishing
+  an id that selects nothing from a renderer or backend that did not run.
+- **A canned rationale satisfied the insight gate.** `require_insight_statements`
+  exists to make the planner say why an artifact earns its space, but built-in
+  figures arrived with an insight the renderer had written — the same defect as
+  a quota, a gate satisfiable without the evidence it demands. The renderer may
+  now label an artifact factually and may not argue for it: `concept_map` takes
+  an optional `insight`, verified metadata plots take framing from a new
+  `metadata_plots` spec, and an artifact without one fails the gate rather than
+  borrowing a sentence.
+
+`concept_map.insight` is optional so an existing placement plan still parses.
+Such a plan now fails the insight gate instead of breaking the build — add an
+insight, or drop the artifact.
+
 ## 0.3.0 — 2026-08-03
 
 ### Requires
