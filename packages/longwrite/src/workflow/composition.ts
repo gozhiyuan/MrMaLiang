@@ -799,15 +799,31 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     }
   }
 
+  // Removing the artifact quotas left the planner a prohibition with no
+  // affordance: a long list of what not to select, and nothing showing where a
+  // comparison would be justified. This restores the affordance as evidence
+  // rather than as a number — it emits no target and cannot fail.
+  const comparisonOpportunities = scriptStage({
+    id: "comparison_opportunities",
+    title: "Report where validated evidence sits and what the visual plan serves",
+    owner: "analyst",
+    inputs: ["outline.json"],
+    optional_inputs: ["evidence/active-validated-source-evidence.json", "evidence/validated-source-evidence.json", "figures/manifest.json", "figures/placement-plan.json"],
+    outputs: ["reports/comparison-opportunities.md", "reports/comparison-opportunities.json"],
+    validators: ["required_output_exists"], runtime: "script",
+    command: longwriteCommand(["research", "comparison-opportunities", "."]),
+  });
+
   const artifactPlanner = agentStage({
     id: "artifact_plan",
     title: "Choose source-grounded analytical artifacts",
     owner: "analyst",
-    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl"],
+    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "reports/comparison-opportunities.md"],
     optional_inputs: ["reports/metrics.json", "evidence/coverage.json", "feedback/user-feedback.md"],
-    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json"],
+    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json", "reports/comparison-opportunities.md"],
     instructions: [
       "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
+      "reports/comparison-opportunities.md lists, per outline section, the sources carrying validated evidence packets, the taxonomy cells they span, the limitations they record, the comparison dimensions their claims name verbatim, and which artifacts the manuscript already carries there. Read it before deciding. A section holding several packet-backed sources across multiple taxonomy cells with no artifact is where a comparison is most likely to earn its place; a section already served needs no second artifact. It is an observation, never a target: there is no correct number of artifacts, a section may be better served by prose, and an artifact the listed evidence does not support is exactly the failure this report exists to prevent. Judge the dimensions yourself — they are free text, so two sources can name the same axis in different words, and only some of them are worth a table.",
       `The current artifact-plan contract additionally permits timeline and architecture_diagram intents. A timeline needs a target section and at least three classified source IDs; an architecture diagram follows this profile's requirement: ${architectureSourceRequirement} The visual renderer derives dates from metadata and never accepts handwritten coordinates or result values.`,
       "Schema: {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?}]}]}. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot.",
       "Formalization is a request for the chapter writer to introduce a compact definition/objective with locally defined symbols; it requires a target section and supporting classified source ids. Do not request decorative mathematics.",
@@ -1024,6 +1040,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     }),
   ] : [];
   const adaptiveChildren: Array<Record<string, unknown>> = [
+    comparisonOpportunities,
     artifactPlanner,
     planner,
     splitActionPlan,

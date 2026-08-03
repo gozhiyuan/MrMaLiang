@@ -738,3 +738,17 @@ export async function runResearchRefresh(workspaceDir: string): Promise<void> {
   console.log(`Refreshed literature corpus. Added ${added.length}, removed ${removed.length}.`);
   for (const file of [...written, "reports/literature-refresh-delta.md"]) console.log(`  + ${file}`);
 }
+
+/** Observation only: this never fails, because there is no correct number of
+ * artifacts for a paper to have. It reports where validated evidence sits and
+ * what the visual plan currently serves, so the planner chooses from evidence
+ * rather than from a quota. */
+export async function runResearchComparisonOpportunities(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeComparisonOpportunities, evaluateComparisonOpportunities } = await import("../lib/research/comparison-opportunities.js");
+  const report = await evaluateComparisonOpportunities(resolved);
+  const written = await writeComparisonOpportunities(resolved);
+  const unserved = report.sections.filter((section) => section.packet_backed_sources > 0 && section.placed_artifacts.length === 0);
+  console.log(`Comparison opportunities: ${report.sections.length} sections, ${unserved.length} with validated evidence and no placed artifact`);
+  for (const file of written) console.log(`  + ${file}`);
+}
