@@ -35,6 +35,27 @@ async function selectConceptMap(workspaceDir: string): Promise<void> {
   }, null, 2));
 }
 
+/** The full-mode visual contract (and with it the insight gate) only applies
+ * to an `auto_research_agentic` workspace, so a gate test has to declare one. */
+async function enableFullModeGates(workspaceDir: string): Promise<void> {
+  await fs.writeFile(path.join(workspaceDir, "longwrite.yaml"), [
+    "version: 1",
+    "project:",
+    "  id: insight-gate",
+    "  artifact_type: research_paper",
+    "  mode: auto_research_agentic",
+    "figures:",
+    "  quality_gates:",
+    "    min_figures: 0",
+    "    min_tables: 0",
+    "    min_comparative_tables: 0",
+    "    min_verified_metadata_plots: 0",
+    "    max_nanobanana_illustrations: 1",
+    "    require_insight_statements: true",
+    "",
+  ].join("\n"), "utf-8");
+}
+
 async function makeWorkspace(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-figures-"));
   tempDirs.push(dir);
@@ -367,5 +388,75 @@ describe("research figures and tables", () => {
     const latex = await fs.readFile(path.join(ws, "paper", "figures", "metadata-venue.tex"), "utf-8");
     expect(latex).toContain("arXiv:gr-qc{,}astro-ph.HE");
     expect(latex).toContain("(arXiv:gr-qc{,}astro-ph.HE,1)");
+  });
+});
+
+describe("the planner owns the argument, the renderer owns the rendering", () => {
+  it("fails the insight gate rather than lending a built-in figure a canned rationale", async () => {
+    const ws = await makeWorkspace();
+    await enableFullModeGates(ws);
+    await selectConceptMap(ws); // no `insight` on the concept map
+    await buildFigureWorkspace(ws);
+    await addPublicationFigure(ws);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
+    const conceptMap = manifest.figures.find((figure: { id: string }) => figure.id === "concept-map");
+    // The renderer may label the artifact; it may not argue for it.
+    expect(conceptMap.title).toBe("Memory-agent evidence map");
+    expect(conceptMap.insight).toBe("");
+
+    const report = await validateFigureWorkspace(ws);
+    expect(report.pass).toBe(false);
+    const findings = report.checks.flatMap((check) => check.findings).join(" ");
+    expect(findings).toContain("concept-map requires a substantive insight statement");
+  });
+
+  it("accepts a planner-authored insight on the same figure", async () => {
+    const ws = await makeWorkspace();
+    await enableFullModeGates(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      concept_map: {
+        title: "Memory-agent evidence map",
+        caption: "The map distinguishes memory design, evaluation, and safety evidence.",
+        insight: "Separating design from evaluation evidence shows that durability claims rest on far thinner support than capability claims.",
+        placement: { section_id: "section-1", discussion: "The map anchors the background synthesis." },
+        nodes: [
+          { id: "memory", label: "Memory design" },
+          { id: "evaluation", label: "Evaluation" },
+          { id: "safety", label: "Safety" },
+        ],
+        edges: [{ from: "memory", to: "evaluation" }, { from: "evaluation", to: "safety" }],
+      },
+    }, null, 2));
+    await buildFigureWorkspace(ws);
+    await addPublicationFigure(ws);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(ws, "figures", "manifest.json"), "utf-8"));
+    const conceptMap = manifest.figures.find((figure: { id: string }) => figure.id === "concept-map");
+    expect(conceptMap.insight).toContain("thinner support than capability claims");
+    expect((await validateFigureWorkspace(ws)).pass).toBe(true);
+  });
+
+  it("names a placement whose artifact was never produced instead of dropping it silently", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      // `evidence-profile` and `method-comparison` were built-ins that no
+      // longer exist. A planner asking for them must be told, not ignored.
+      placements: [
+        { id: "evidence-profile", placement: { section_id: "section-1", discussion: "Corpus depth overview." } },
+        { id: "method-comparison", placement: { section_id: "section-1", discussion: "Method comparison." } },
+      ],
+    }, null, 2));
+    await buildFigureWorkspace(ws);
+
+    const repair = await fs.readFile(path.join(ws, "reports", "visual-plan-repair.md"), "utf-8");
+    expect(repair).toContain("evidence-profile");
+    expect(repair).toContain("method-comparison");
+    expect(repair).toContain("not produced");
   });
 });
