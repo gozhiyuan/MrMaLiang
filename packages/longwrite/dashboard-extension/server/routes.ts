@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -160,6 +160,7 @@ type RunRecord = {
   finishedAt?: string;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
+  command: string;
   args: string[];
   stdout: string;
   stderr: string;
@@ -172,6 +173,15 @@ async function readTextIfExists(absPath: string): Promise<string | null> {
     return await fs.readFile(absPath, "utf-8");
   } catch {
     return null;
+  }
+}
+
+async function fileExists(absPath: string): Promise<boolean> {
+  try {
+    await fs.access(absPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -193,7 +203,13 @@ async function readYamlIfExists(absPath: string): Promise<YamlRecord | null> {
 export type ResearchProjection = {
   phase: string;
   evidence: { sources: number; coverage: Record<string, number>; depth: Record<string, number>; unresolved: string[] };
-  manuscript: { chapters: Array<{ id: string; words: number; targetWords?: number; state: string }>; totalWords: number; targetWords?: number; pdfBuilt: boolean };
+  manuscript: {
+    chapters: Array<{ id: string; title?: string; words: number; targetWords?: number; sourceCount: number; state: "drafted" | "pending" | "unknown" }>;
+    totalWords: number;
+    draftTargetWords?: number;
+    projectTargetWords?: number;
+    pdf: { status: "compiled" | "not_built"; warningCount: number };
+  };
   release: { gates: Array<{ id: string; status: "passed" | "failed" | "unknown"; detail?: string }>; ready: boolean };
   score: { review?: number; claimSupport?: number };
 };
@@ -220,18 +236,47 @@ function gateStatus(record: YamlRecord | null, key: string): "passed" | "failed"
 
 export async function buildResearchProjection(workspaceDir: string): Promise<ResearchProjection> {
   const join = (...parts: string[]) => path.join(workspaceDir, ...parts);
-  const [coverage, corpusGates, releaseGates, validation, metrics, structure, scoreHistory] = await Promise.all([
+  const [coverage, corpusGates, releaseGates, validation, metrics, structure, outline, scoreHistory, classifiedRaw, config, latexBuildReport] = await Promise.all([
     readJsonIfExists(join("evidence", "coverage.json")),
     readJsonIfExists(join("reports", "corpus-gates.json")),
     readJsonIfExists(join("reports", "release-gates.json")),
     readJsonIfExists(join("reports", "longwrite-validation.json")),
     readJsonIfExists(join("reports", "metrics.json")),
     readJsonIfExists(join("reports", "structure-audit.json")),
+    readJsonIfExists(join("outline.json")),
     readJsonIfExists(join("reports", "score-history.json")),
+    readTextIfExists(join("sources", "classified_sources.jsonl")),
+    readYamlIfExists(join("longwrite.yaml")),
+    readTextIfExists(join("reports", "latex-build.md")),
   ]);
 
-  const sources = Array.isArray(coverage?.sources) ? coverage!.sources : [];
-  const chapters = (Array.isArray(structure?.chapters) ? structure!.chapters : []).map((entry) => {
+  // coverage.json intentionally stores a compact taxonomy summary, rather
+  // than every source object.  The classified JSONL remains the source of
+  // truth for citation depth.  Reading these two current artifact shapes keeps
+  // the dashboard from falsely displaying a healthy corpus as zero sources.
+  const classifiedSources = classifiedRaw?.split("\n").filter(Boolean).flatMap((line) => {
+    try {
+      const value = JSON.parse(line);
+      return typeof value === "object" && value !== null ? [value as YamlRecord] : [];
+    } catch {
+      return [];
+    }
+  }) ?? [];
+  const taxonomyCoverage = Array.isArray(coverage?.taxonomy)
+    ? Object.fromEntries(coverage!.taxonomy.map((entry) => {
+      const record = asRecord(entry);
+      return [asString(record.cell) ?? "unclassified", Number(record.source_count) || 0];
+    }))
+    : {};
+  const corpusPassed = metrics?.corpus_gate_pass === 1 || metrics?.corpus_gate_pass === true || corpusGates?.pass === true;
+  const corpusDetail = (Array.isArray(corpusGates?.findings) ? corpusGates!.findings : [])
+    .map(asRecord)
+    .find((finding) => asString(finding.id) === "core_sources");
+  const phase = asString(metrics?.phase) ?? asString(validation?.phase)
+    ?? (metrics?.final_release_gate_pass === 1 ? "release_ready"
+      : metrics?.outline_readiness === 1 ? "pre_draft"
+        : corpusPassed ? "outlining" : "research");
+  const auditedChapters = (Array.isArray(structure?.chapters) ? structure!.chapters : []).map((entry) => {
     const record = asRecord(entry);
     return {
       id: asString(record.id) ?? asString(record.slug) ?? "chapter",
@@ -240,27 +285,52 @@ export async function buildResearchProjection(workspaceDir: string): Promise<Res
       state: asString(record.state) ?? asString(record.status) ?? "unknown",
     };
   });
+  const outlineSections = Array.isArray(outline?.sections) ? outline!.sections : [];
+  const chapters = outlineSections.length > 0
+    ? await Promise.all(outlineSections.map(async (entry) => {
+      const section = asRecord(entry);
+      const id = asString(section.id) ?? "chapter";
+      const source = await readTextIfExists(join("chapters", `${id}.md`));
+      return {
+        id,
+        title: asString(section.title),
+        words: source?.trim() ? source.trim().split(/\s+/).length : 0,
+        targetWords: section.target_words === undefined ? undefined : Number(section.target_words),
+        sourceCount: Array.isArray(section.source_ids) ? section.source_ids.length : 0,
+        state: source?.trim() ? "drafted" as const : "pending" as const,
+      };
+    }))
+    : auditedChapters.map((chapter) => ({ ...chapter, sourceCount: 0, state: chapter.state === "complete" ? "drafted" as const : "unknown" as const }));
 
-  const pdfBuilt = await readTextIfExists(join("build", "paper.pdf")).then((value) => value !== null).catch(() => false);
+  // The compiler's canonical output is manuscript.pdf.  Check existence rather
+  // than decoding the binary as text; a real PDF may be present before a later
+  // release gate writes its reports.
+  const pdfBuilt = await fileExists(join("build", "manuscript.pdf"));
+  const warningCount = latexBuildReport?.match(/^\s*- warning:/gmi)?.length ?? 0;
+  const configuredTargetWords = Number(asRecord(config?.writing).target_length_words) || undefined;
+  const draftTargetWords = chapters.reduce((total, chapter) => total + (chapter.targetWords ?? 0), 0) || undefined;
   const gateIds = ["corpus_gate_pass", "citation_verification", "evidence_audit", "claim_support", "figures", "latex", "visual_qa", "page_targets", "experiment_verification", "submission_package"];
 
   return {
-    phase: asString(metrics?.phase) ?? asString(validation?.phase) ?? "unknown",
+    phase,
     evidence: {
-      sources: sources.length,
-      coverage: countBy(sources, "section"),
-      depth: countBy(sources, "depth"),
+      sources: Number(corpusGates?.source_count ?? coverage?.source_count ?? classifiedSources.length) || 0,
+      coverage: taxonomyCoverage,
+      depth: countBy(classifiedSources, "citation_depth"),
       unresolved: (Array.isArray(validation?.findings) ? validation!.findings : [])
         .map((finding) => asString(asRecord(finding).message) ?? "")
         .filter((message) => message.length > 0).slice(0, 50),
     },
     manuscript: {
       chapters, totalWords: chapters.reduce((total, chapter) => total + chapter.words, 0),
-      targetWords: structure?.target_words === undefined ? undefined : Number(structure.target_words),
-      pdfBuilt,
+      draftTargetWords,
+      projectTargetWords: configuredTargetWords,
+      pdf: { status: pdfBuilt ? "compiled" : "not_built", warningCount },
     },
     release: {
-      gates: gateIds.map((id) => ({ id, status: gateStatus(releaseGates ?? corpusGates, id) })),
+      gates: gateIds.map((id) => id === "corpus_gate_pass"
+        ? { id, status: corpusPassed ? "passed" as const : "failed" as const, detail: asString(corpusDetail?.detail) }
+        : { id, status: gateStatus(releaseGates, id) }),
       ready: gateStatus(releaseGates, "final_release_gate_pass") === "passed",
     },
     score: {
@@ -780,42 +850,68 @@ function runStatus(workspaceDir: string): RunRecord | null {
   return runRegistry.get(workspaceDir) ?? null;
 }
 
-function appendTail(current: string, chunk: Buffer, maxBytes: number): string {
-  return (current + chunk.toString()).slice(-maxBytes);
+export function dashboardRunInvocation(workspaceDir: string, parentWorkspace: string | null, opts: { runtime?: string; reset?: boolean }): {
+  command: "maliang" | "longwrite";
+  args: string[];
+  cwd: string;
+} {
+  if (parentWorkspace) {
+    return {
+      command: "maliang",
+      args: ["run", parentWorkspace, ...(opts.runtime ? ["--runtime", opts.runtime] : []), ...(opts.reset ? ["--reset"] : [])],
+      cwd: parentWorkspace,
+    };
+  }
+  return {
+    command: "longwrite",
+    args: ["run", workspaceDir, ...(opts.runtime ? ["--runtime", opts.runtime] : []), ...(opts.reset ? ["--reset"] : [])],
+    cwd: workspaceDir,
+  };
 }
 
-function spawnLongWriteRun(workspaceDir: string, parentWorkspace: string | null, opts: { runtime?: string; reset?: boolean }): RunRecord {
+/** Dashboard availability must never determine a flagship run's lifetime.
+ * The child is put in its own process group and its streams are written to a
+ * durable workspace log, rather than pipes owned by the dashboard server. */
+export function detachedDashboardRunOptions(cwd: string, logFd: number): SpawnOptions {
+  return { cwd, shell: false, detached: true, stdio: ["ignore", logFd, logFd] };
+}
+
+async function spawnLongWriteRun(workspaceDir: string, parentWorkspace: string | null, opts: { runtime?: string; reset?: boolean }): Promise<RunRecord> {
   const existing = runRegistry.get(workspaceDir);
   if (existing?.running) {
     throw Object.assign(new Error("LongWrite run is already active for this workspace"), { statusCode: 409 });
   }
 
-  const args = parentWorkspace
-    ? opts.reset
-      ? ["writing", "run", parentWorkspace, ...(opts.runtime ? ["--runtime", opts.runtime] : []), "--reset"]
-      : ["run", parentWorkspace, ...(opts.runtime ? ["--runtime", opts.runtime] : [])]
-    : ["run", workspaceDir, ...(opts.runtime ? ["--runtime", opts.runtime] : []), ...(opts.reset ? ["--reset"] : [])];
-  const child: ChildProcessWithoutNullStreams = spawn(parentWorkspace ? maliangBin() : longwriteBin(), args, { cwd: parentWorkspace ?? workspaceDir, shell: false });
+  const invocation = dashboardRunInvocation(workspaceDir, parentWorkspace, opts);
+  const executable = invocation.command === "maliang" ? maliangBin() : longwriteBin();
+  const logsDir = path.join(workspaceDir, ".malaclaw", "flow", "logs");
+  const logName = `dashboard-run-${new Date().toISOString().replace(/[.:]/g, "-")}.log`;
+  await fs.mkdir(logsDir, { recursive: true });
+  const log = await fs.open(path.join(logsDir, logName), "a");
+  let child: ChildProcess;
+  try {
+    child = spawn(executable, invocation.args, detachedDashboardRunOptions(invocation.cwd, log.fd));
+  } finally {
+    await log.close();
+  }
+  // The process group and its stdio are independent of the dashboard. Do not
+  // keep the server event loop alive merely because a multi-hour run exists.
+  child.unref();
   const record: RunRecord = {
     running: true,
     pid: child.pid,
     startedAt: new Date().toISOString(),
-    args,
-    stdout: "",
+    command: executable,
+    args: invocation.args,
+    stdout: `Detached run; durable output: .malaclaw/flow/logs/${logName}`,
     stderr: "",
   };
   runRegistry.set(workspaceDir, record);
 
-  child.stdout.on("data", (chunk: Buffer) => {
-    record.stdout = appendTail(record.stdout, chunk, MAX_RUN_OUTPUT);
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    record.stderr = appendTail(record.stderr, chunk, MAX_RUN_OUTPUT);
-  });
   child.on("error", (err) => {
     record.running = false;
     record.finishedAt = new Date().toISOString();
-    record.stderr = appendTail(record.stderr, Buffer.from(err.message), MAX_RUN_OUTPUT);
+    record.stderr = err.message.slice(-MAX_RUN_OUTPUT);
   });
   child.on("close", (code, signal) => {
     record.running = false;
@@ -1099,7 +1195,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
       return reply.status(400).send({ error: "runtime must be a non-empty string" });
     }
     try {
-      const record = spawnLongWriteRun(workspaceDir, parentWorkspace, { runtime: runtime?.trim(), reset: reset === true });
+      const record = await spawnLongWriteRun(workspaceDir, parentWorkspace, { runtime: runtime?.trim(), reset: reset === true });
       return { ok: true, operation: record };
     } catch (err) {
       const statusCode = typeof err === "object" && err !== null && "statusCode" in err

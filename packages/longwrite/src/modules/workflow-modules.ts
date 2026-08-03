@@ -51,7 +51,7 @@ export const citationAuditModule = defineModule({
     requireExactLocators: z.boolean().default(true),
     minimumSupportRate: z.number().min(0).max(1).default(0.9),
   }),
-  inputs: ["chapters/*.md", "evidence/source-packets.json"],
+  inputs: ["chapters/*.md", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json"],
   outputs: ["evidence/citation-ledger.jsonl", "reports/evidence-audit.md"],
   requiredCapabilities: ["script"],
   stages: (ctx, config) => [

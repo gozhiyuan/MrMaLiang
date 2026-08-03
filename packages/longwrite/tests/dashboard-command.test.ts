@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { ensureLongWriteDashboardExtensionRegistered } from "../src/commands/dashboard.js";
+import { dashboardProjectDir, ensureLongWriteDashboardExtensionRegistered } from "../src/commands/dashboard.js";
 
 const tempDirs: string[] = [];
 
@@ -18,6 +18,16 @@ afterEach(async () => {
 });
 
 describe("LongWrite dashboard command", () => {
+  it("starts the core dashboard from a selected MrMaLiang writing component", async () => {
+    const program = await makeTempDir();
+    const writing = path.join(program, "custom-writing");
+    await fs.mkdir(writing);
+    await fs.writeFile(path.join(program, "maliang.yaml"), "components:\n  writing:\n    workspace: custom-writing\n", "utf-8");
+    await fs.writeFile(path.join(writing, "malaclaw.yaml"), "version: 1\n", "utf-8");
+
+    await expect(dashboardProjectDir(program)).resolves.toBe(writing);
+  });
+
   it("creates dashboard.yaml and registers the LongWrite extension", async () => {
     const dir = await makeTempDir();
     const configPath = path.join(dir, "dashboard.yaml");

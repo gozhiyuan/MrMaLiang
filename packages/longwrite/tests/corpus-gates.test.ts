@@ -105,4 +105,25 @@ describe("corpus gates", () => {
     expect(report.pass).toBe(true);
     expect(report.taxonomy[0]).toMatchObject({ source_count: 1, coverage_method: "planned_query_provenance", pass: true });
   });
+
+  it("matches meaningful taxonomy-label terms when no planned query group exists", async () => {
+    const ws = await workspace();
+    await fs.writeFile(path.join(ws, "longwrite.yaml"), stringify({
+      version: 1,
+      project: { id: "survey", artifact_type: "research_paper", mode: "auto_research_agentic" },
+      research: {
+        provider: "multi",
+        topic: "agent harnesses",
+        taxonomy: ["agent harness architectures and durable execution"],
+        corpus_gates: { min_candidates: 1, min_sources_per_taxonomy_cell: 1, min_core_sources: 1, min_recent_ratio: 0, min_source_type_diversity: 1 },
+      },
+    }), "utf-8");
+    await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"), toJsonl([
+      source("s1", "crossref", "A durable execution harness coordinates an autonomous agent.", "A", ["agent", "harness"]),
+    ]), "utf-8");
+
+    const report = await evaluateCorpusGates(ws);
+    expect(report.pass).toBe(true);
+    expect(report.taxonomy[0]).toMatchObject({ source_count: 1, coverage_method: "meaningful_label_terms", pass: true });
+  });
 });

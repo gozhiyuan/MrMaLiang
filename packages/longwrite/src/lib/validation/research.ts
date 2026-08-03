@@ -8,7 +8,7 @@ import { bibtexKey, bibtexKeys } from "../research/bibtex.js";
 import { computeCitationVerification, computeLiteratureQuality } from "../ops/research-quality.js";
 import { validateEvidenceLedger } from "../research/evidence.js";
 import { citationMarkers } from "../research/citation-markers.js";
-import { sourceMatchesTaxonomy } from "../research/evidence.js";
+import { sourceMatchesTaxonomy } from "../research/taxonomy.js";
 import { loadProjectConfig } from "../project-config.js";
 import { paperProfile } from "../paper-profiles.js";
 import { validateImportedExperiment } from "../research/experiment.js";

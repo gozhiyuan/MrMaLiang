@@ -81,6 +81,23 @@ describe("LaTeX manuscript build", () => {
     expect(bibliography).toContain("note = {DOI: \\url{https://doi.org/10.1000/example}}");
   });
 
+  it("rejects workflow telemetry and source-inventory tables from reader-facing paper pages", async () => {
+    const ws = await makeWorkspace();
+    await buildLatexWorkspace(ws);
+    await fs.appendFile(path.join(ws, "paper", "main.tex"), "\nExecution provenance: internal run data\nMetric & Value & Metric & Value\n", "utf-8");
+    await fs.mkdir(path.join(ws, "paper", "tables"), { recursive: true });
+    await fs.writeFile(path.join(ws, "paper", "tables", "inventory.tex"), "Full source title & Packet evidence & Record status", "utf-8");
+    await fs.appendFile(path.join(ws, "paper", "sections", "section-1.tex"), "\nThe following table supports this section.\n", "utf-8");
+    const report = await validateLatexWorkspace(ws);
+    expect(report.pass).toBe(false);
+    expect(report.checks.find((check) => check.id === "reader_facing_publication")?.findings).toEqual(expect.arrayContaining([
+      expect.stringContaining("execution provenance"),
+      expect.stringContaining("production-statistics"),
+      expect.stringContaining("source-inventory"),
+      expect.stringContaining("mechanical figure/table lead-ins"),
+    ]));
+  });
+
   it("renders pinned codebase citations as software references without treating them as papers", async () => {
     const ws = await makeWorkspace();
     await fs.mkdir(path.join(ws, "codebases"), { recursive: true });
@@ -246,6 +263,7 @@ describe("citation mapping", () => {
     expect(main).toContain("\\usepackage[round,authoryear]{natbib}");
     expect(main).toContain("\\bibliographystyle{plainnat}");
     expect(main).toContain("AI tools used: LongWrite");
+    expect(main).toContain("\\footnotetext{\\footnotesize\\textit{");
     expect(main).toMatch(/Execution provenance: MrMaLiang \d+\.\d+\.\d+/);
     expect(main).toMatch(/Writing component: LongWrite \d+\.\d+\.\d+/);
     expect(main).toMatch(/MalaClaw \d+\.\d+\.\d+/);

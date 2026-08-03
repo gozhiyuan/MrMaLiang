@@ -123,7 +123,43 @@ describe("maliang command surface", () => {
     expect(config.research.topic).toBe("Long-horizon memory and planning in LLM agents");
     expect(config.writing.target_length_words).toBe(24_000);
     expect(config.publication.presentation.citation_style).toBe("author_year");
-    expect(config.figures.quality_gates).toMatchObject({ min_figures: 6, min_tables: 12 });
+    // The flagship sets no artifact quota: a count target makes the planner
+    // manufacture corpus bookkeeping to satisfy it. Relevance is gated instead
+    // by source binding and the required insight statement on each artifact
+    // the planner does select.
+    expect(config.figures.quality_gates).toMatchObject({
+      min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0,
+      require_insight_statements: true,
+    });
+    // Run counters are operational telemetry and stay out of the manuscript.
+    expect(config.publication.presentation.show_production_statistics).toBe(false);
+  });
+
+  it("forwards --reset to the component flow rather than swallowing it", async () => {
+    const workspace = path.join(temporaryRoot, "reset-passthrough");
+    const init = run(["init", workspace, "--template", "experiment.standalone", "--hypothesis", "Reset passthrough reaches the component runtime"]);
+    expect(init.status, `${init.stdout}${init.stderr}`).toBe(0);
+
+    // `maliang run` dispatches to `malaclaw` by name, so a stub earlier on PATH
+    // records the argv the component actually receives.
+    const stubDir = path.join(temporaryRoot, "reset-stub");
+    await fs.mkdir(stubDir, { recursive: true });
+    const log = path.join(stubDir, "calls.log");
+    await fs.writeFile(path.join(stubDir, "malaclaw"), `#!/bin/sh\necho "$@" >> "${log}"\nexit 0\n`, { mode: 0o755 });
+    const stubbed = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
+      cwd: root, encoding: "utf8",
+      env: { ...process.env, PATH: `${stubDir}${path.delimiter}${process.env.PATH ?? ""}` },
+    });
+
+    const reset = stubbed(["run", workspace, "--runtime", "script", "--reset"]);
+    expect(reset.status, `${reset.stdout}${reset.stderr}`).toBe(0);
+    expect(await fs.readFile(log, "utf8")).toContain("flow run --runtime script --reset");
+
+    await fs.rm(log);
+    const plain = stubbed(["run", workspace, "--runtime", "script"]);
+    expect(plain.status, `${plain.stdout}${plain.stderr}`).toBe(0);
+    // Absent the flag, a resumable flow must not be reset out from under it.
+    expect(await fs.readFile(log, "utf8")).not.toContain("--reset");
   });
 
   it("does not expose incubating experiment protocols as flagship blueprints", () => {

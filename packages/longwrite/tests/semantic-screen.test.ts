@@ -9,12 +9,14 @@ import {
   repairSourceEvidencePackets,
   selectSemanticCandidates,
   selectSourceEvidenceCandidates,
+  ACTIVE_VALIDATED_SOURCE_EVIDENCE_PATH,
+  VALIDATED_SOURCE_EVIDENCE_HISTORY_PATH,
 } from "../src/lib/research/semantic-screen.js";
 
 const dirs: string[] = [];
 afterEach(async () => { while (dirs.length) await fs.rm(dirs.pop()!, { recursive: true, force: true }); });
 
-const source = (id: string, depth: "A" | "B") => ({
+const source = (id: string, depth: "A" | "B" | "C") => ({
   id, title: `${id} memory architecture`, authors: ["Author"], year: 2026,
   venue: "ICLR", url: `https://example.test/${id}`,
   abstract: `${id} studies memory architecture and planning with evaluated retrieval methods.`,
@@ -68,9 +70,63 @@ describe("agentic semantic-screen contract", () => {
       ],
     }), "utf-8");
     await repairSourceEvidencePackets(dir);
+    const history = JSON.parse(await fs.readFile(path.join(dir, VALIDATED_SOURCE_EVIDENCE_HISTORY_PATH), "utf-8"));
+    expect(history.entries.map((entry: { packet: { source_id: string } }) => entry.packet.source_id)).toEqual(["paper-a", "paper-b"]);
+    await finalizeEvidenceBackedDepth(dir);
+    const active = JSON.parse(await fs.readFile(path.join(dir, ACTIVE_VALIDATED_SOURCE_EVIDENCE_PATH), "utf-8"));
+    expect(active.entries.map((entry: { packet: { source_id: string } }) => entry.packet.source_id)).toEqual(["paper-a", "paper-b"]);
+    const finalized = (await fs.readFile(path.join(dir, "sources", "classified_sources.jsonl"), "utf-8")).trim().split("\n").map(JSON.parse);
+    expect(finalized.map((item: { citation_depth: string }) => item.citation_depth)).toEqual(["A", "B"]);
+  });
+
+  it("retains earlier validated evidence and can promote a later C-level source", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-history-"));
+    dirs.push(dir);
+    await runInit(dir, {
+      mode: "auto_research_agentic", topic: "Memory architecture", researchProvider: "multi",
+      taxonomy: ["memory architecture"],
+    });
+    const sources = [source("earlier-a", "A"), source("later-c", "C")];
+    await fs.writeFile(path.join(dir, "sources", "metadata-classified_sources.jsonl"), `${sources.map(JSON.stringify).join("\n")}\n`, "utf-8");
+    await fs.mkdir(path.join(dir, "evidence"), { recursive: true });
+    const screening = (source_id: string, recommended_depth: "A" | "B") => ({
+      source_id, taxonomy_cells: ["memory architecture"], chapter_role: "protagonist",
+      semantic_relevance: "high", rationale: "It directly evaluates a memory architecture with a reproducible planning comparison.",
+      recommended_depth, fulltext_priority: true,
+    });
+    const packet = (source_id: string, recommended_depth: "A" | "B", claims: number) => ({
+      source_id, recommended_depth,
+      claims: Array.from({ length: claims }, (_, index) => ({
+        claim: `Supported claim ${index + 1} describes the source's evaluated memory architecture.`,
+        supporting_excerpt: "This exact excerpt is retained as validated evidence",
+        locator: `section ${index + 1}`,
+      })),
+    });
+    await fs.writeFile(path.join(dir, VALIDATED_SOURCE_EVIDENCE_HISTORY_PATH), JSON.stringify({
+      version: 1,
+      entries: [
+        { screening: screening("earlier-a", "A"), packet: packet("earlier-a", "A", 2) },
+        { screening: screening("later-c", "B"), packet: packet("later-c", "B", 1) },
+        // This is retained as audit history but deliberately absent from the
+        // current classified corpus, so it must never leak into the
+        // citation-ready dossier given to the outline/review stages.
+        { screening: screening("archived-source", "B"), packet: packet("archived-source", "B", 1) },
+      ],
+    }), "utf-8");
+    // The new recovery round carries only the newly recovered source. The
+    // retained history must still keep earlier-a at A while later-c is allowed
+    // to graduate from metadata C to evidence-backed B.
+    await fs.writeFile(path.join(dir, "sources", "semantic-screening.json"), JSON.stringify({
+      version: 1, screenings: [screening("later-c", "B")],
+    }), "utf-8");
+    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({
+      version: 1, packets: [packet("later-c", "B", 1)],
+    }), "utf-8");
     await finalizeEvidenceBackedDepth(dir);
     const finalized = (await fs.readFile(path.join(dir, "sources", "classified_sources.jsonl"), "utf-8")).trim().split("\n").map(JSON.parse);
     expect(finalized.map((item: { citation_depth: string }) => item.citation_depth)).toEqual(["A", "B"]);
+    const active = JSON.parse(await fs.readFile(path.join(dir, ACTIVE_VALIDATED_SOURCE_EVIDENCE_PATH), "utf-8"));
+    expect(active.entries.map((entry: { packet: { source_id: string } }) => entry.packet.source_id)).toEqual(["earlier-a", "later-c"]);
   });
 
   it("fails a fabricated source-evidence excerpt instead of accepting an LLM assertion", async () => {

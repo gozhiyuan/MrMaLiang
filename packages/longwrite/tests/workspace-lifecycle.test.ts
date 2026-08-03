@@ -14,6 +14,8 @@ async function workspace(): Promise<string> {
   await runInit(target, { topic: "Evidence-backed agent memory", researchProvider: "seed" });
   await fs.mkdir(path.join(target, "evidence"), { recursive: true });
   await fs.writeFile(path.join(target, "evidence", "chunks.jsonl"), "{\"chunk_id\":\"c1\"}\n", "utf8");
+  await fs.writeFile(path.join(target, "evidence", "validated-source-evidence.json"), "{\"version\":1,\"entries\":[]}\n", "utf8");
+  await fs.writeFile(path.join(target, "evidence", "active-validated-source-evidence.json"), "{\"version\":1,\"entries\":[]}\n", "utf8");
   await fs.mkdir(path.join(target, "codebases"), { recursive: true });
   await fs.writeFile(path.join(target, "codebases", "manifest.json"), "{\"version\":1,\"codebases\":[]}\n", "utf8");
   await fs.writeFile(path.join(target, "evidence", "index.sqlite"), "derived index", "utf8");
@@ -54,6 +56,8 @@ describe("workspace lifecycle", () => {
     const manifest = JSON.parse(await fs.readFile(path.join(target, archived.manifest), "utf8")) as { archive: { sha256: string }; files: Array<{ path: string }> };
     expect(manifest.archive.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(manifest.files.map((file) => file.path)).toContain("evidence/chunks.jsonl");
+    expect(manifest.files.map((file) => file.path)).toContain("evidence/validated-source-evidence.json");
+    expect(manifest.files.map((file) => file.path)).toContain("evidence/active-validated-source-evidence.json");
     expect(manifest.files.map((file) => file.path)).toContain("codebases/manifest.json");
 
     const pruned = await pruneWorkspace(target, { execute: true, archive: archived.archive });

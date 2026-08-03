@@ -24,7 +24,7 @@ jobs:
           # each bump here is one reviewable line recording which release was
           # actually tested. Bump with:
           #   git -C <malaclaw> rev-parse v<next>^{commit}
-          ref: bbae0034d119db45d2fb3aa7fd516dcd03800b18 # MalaClaw v2.1.0
+          ref: 810163c097467b8aeed659f0214a033f36ccec23 # MalaClaw v2.2.0
           path: .dependencies/MalaClaw
       - uses: actions/setup-node@v4
         with:

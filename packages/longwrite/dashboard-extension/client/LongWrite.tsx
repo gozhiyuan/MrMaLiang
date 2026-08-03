@@ -74,6 +74,7 @@ type LongWriteResponse = {
     finishedAt?: string;
     exitCode?: number | null;
     signal?: string | null;
+    command?: string;
     args: string[];
     stdout: string;
     stderr: string;
@@ -658,7 +659,10 @@ export function LongWrite() {
     .filter(([, unit]) => unit.status === "running")
     .map(([key]) => key);
   const pending = flowUnits.filter((unit) => unit.status === "pending").length;
-  const selectedRuntime = runtimeOverride.trim() || data?.workflow.runtime || undefined;
+  // Keep the submitted value aligned with the visible select fallback. Without
+  // this final fallback, an unset manifest runtime displayed as "codex" but
+  // submitted `undefined`, allowing MalaClaw to use its dry-run default.
+  const selectedRuntime = runtimeOverride.trim() || data?.workflow.runtime || "codex";
   // A CLI/supervisor-started flow is not represented by this dashboard's
   // in-memory operation flag. Derive the disabled state from durable flow
   // state as well, so the Run buttons never invite a concurrent launch.
@@ -1180,7 +1184,7 @@ export function LongWrite() {
                   {data.operation.pid ? ` · pid ${data.operation.pid}` : ""}
                 </div>
                 <code style={{ display: "block", marginTop: 4, color: "#c9d1d9" }}>
-                  longwrite {data.operation.args.join(" ")}
+                  {data.operation.command ?? "longwrite"} {data.operation.args.join(" ")}
                 </code>
               </div>
             )}

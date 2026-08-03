@@ -73,10 +73,10 @@ describe("runInit", () => {
       min_citation_depths_per_section: { A: 1, B: 2, C: 2 },
       min_cited_ab_sources_per_taxonomy_cell: 2,
     });
-    expect(config.figures.quality_gates).toEqual({ min_figures: 6, min_tables: 12, min_comparative_tables: 3, min_verified_metadata_plots: 3, max_nanobanana_illustrations: 1, require_insight_statements: true });
+    expect(config.figures.quality_gates).toEqual({ min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: true });
     expect(config.publication.presentation).toMatchObject({
-      citation_style: "author_year", show_production_statistics: true,
-      disclosure: { enabled: true, provenance: { enabled: true } },
+      citation_style: "author_year", show_production_statistics: false,
+      disclosure: { enabled: false, provenance: { enabled: false } },
     });
     expect(config.run_limits.max_recorded_tokens).toBe(10000000);
   });

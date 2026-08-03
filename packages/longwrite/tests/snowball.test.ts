@@ -48,4 +48,32 @@ describe("citation-network expansion", () => {
     expect(merged).toContain("Referenced Memory Paper");
     expect(merged).toContain("Forward Citing Memory Paper");
   });
+
+  it("selects addressable, relevance-ranked seeds before applying the expansion cap", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-snowball-eligible-"));
+    roots.push(ws);
+    await fs.mkdir(path.join(ws, "sources"), { recursive: true });
+    await fs.writeFile(path.join(ws, "sources", "deduped_sources.jsonl"), [
+      JSON.stringify({
+        id: "ineligible-background", title: "Highly Cited Medical Imaging Survey", authors: ["A"], year: 2017,
+        venue: "Journal", url: "https://example.test/background", abstract: "Medical imaging methods.", source: "openalex",
+        topics: ["agent", "memory"], identifiers: { openalex_id: "https://openalex.org/W1" }, metrics: { citation_count: 100_000 },
+      }),
+      JSON.stringify({
+        id: "eligible-agent", title: "Agent Memory with Retrieval", authors: ["B"], year: 2025,
+        venue: "arXiv", url: "https://arxiv.org/abs/2501.00001", abstract: "An agent memory retrieval method.", source: "arxiv",
+        topics: ["agent", "memory"], identifiers: { arxiv_id: "2501.00001" }, metrics: { citation_count: 5 },
+      }),
+    ].join("\n") + "\n", "utf-8");
+
+    const { results } = await snowballWorkspace(ws, {
+      maxSeeds: 1,
+      limiter: new ProviderRequestLimiter({ minIntervalMs: 0 }),
+      fetchImpl: async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    });
+    expect(results).toEqual([
+      expect.objectContaining({ seed_source_id: "eligible-agent", direction: "references", status: "expanded" }),
+      expect.objectContaining({ seed_source_id: "eligible-agent", direction: "citations", status: "expanded" }),
+    ]);
+  });
 });

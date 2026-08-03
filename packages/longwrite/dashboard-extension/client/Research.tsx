@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 
 /**
  * MrMaLiang research workspace (plan section 14).
@@ -11,16 +12,27 @@ import { useQuery } from "@tanstack/react-query";
 export type ResearchProjection = {
   phase: string;
   evidence: { sources: number; coverage: Record<string, number>; depth: Record<string, number>; unresolved: string[] };
-  manuscript: { chapters: Array<{ id: string; words: number; targetWords?: number; state: string }>; totalWords: number; targetWords?: number; pdfBuilt: boolean };
+  manuscript: {
+    chapters: Array<{ id: string; title?: string; words: number; targetWords?: number; sourceCount: number; state: "drafted" | "pending" | "unknown" }>;
+    totalWords: number;
+    draftTargetWords?: number;
+    projectTargetWords?: number;
+    pdf: { status: "compiled" | "not_built"; warningCount: number };
+  };
   release: { gates: Array<{ id: string; status: "passed" | "failed" | "unknown"; detail?: string }>; ready: boolean };
   score: { review?: number; claimSupport?: number };
 };
 
 function useResearch() {
+  // Keep the summary tabs on the same public MrMaLiang workspace selected on
+  // the main tab. Without this query parameter the extension server receives
+  // no directory at all and reports that no LongWrite workspace is available.
+  const dir = localStorage.getItem("maliang-workspace-dir") ?? localStorage.getItem("longwrite-dir") ?? "";
   return useQuery<ResearchProjection>({
-    queryKey: ["longwrite", "research"],
+    queryKey: ["longwrite", "research", dir],
     queryFn: async () => {
-      const response = await fetch("/api/longwrite/research");
+      if (!dir) throw new Error("No MrMaLiang workspace is selected");
+      const response = await fetch(`/api/longwrite/research?dir=${encodeURIComponent(dir)}`);
       if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
       return response.json();
     },
@@ -64,8 +76,8 @@ export function ResearchOverview() {
         <>
           <section className="overview-section metric-row" aria-label="Research state">
             <article className="ui-metric-card"><h3>Phase</h3><p className="ui-metric-value">{data.phase}</p><p className="ui-metric-source">exact · reports/metrics.json</p></article>
-            <article className="ui-metric-card"><h3>Sources</h3><p className="ui-metric-value">{data.evidence.sources}</p><p className="ui-metric-source">exact · evidence/coverage.json</p></article>
-            <article className="ui-metric-card"><h3>Words</h3><p className="ui-metric-value">{data.manuscript.totalWords.toLocaleString()}{data.manuscript.targetWords ? ` / ${data.manuscript.targetWords.toLocaleString()}` : ""}</p><p className="ui-metric-source">exact · reports/structure-audit.json</p></article>
+            <article className="ui-metric-card"><h3>Sources</h3><p className="ui-metric-value">{data.evidence.sources}</p><p className="ui-metric-source">exact · reports/corpus-gates.json</p></article>
+            <article className="ui-metric-card"><h3>Words</h3><p className="ui-metric-value">{data.manuscript.totalWords.toLocaleString()}{data.manuscript.projectTargetWords ? ` / ${data.manuscript.projectTargetWords.toLocaleString()}` : ""}</p><p className="ui-metric-source">exact · chapter files / longwrite.yaml</p></article>
             <article className="ui-metric-card"><h3>Review score</h3><p className="ui-metric-value">{data.score.review ?? "—"}</p><p className="ui-metric-source">exact · reports/metrics.json</p></article>
             <article className="ui-metric-card"><h3>Claim support</h3><p className="ui-metric-value">{data.score.claimSupport ?? "—"}</p><p className="ui-metric-source">exact · reports/metrics.json</p></article>
             <article className="ui-metric-card"><h3>Release</h3><p className="ui-metric-value">{data.release.ready ? "ready" : "blocked"}</p><p className="ui-metric-source">exact · reports/release-gates.json</p></article>
@@ -82,7 +94,7 @@ export function ResearchOverview() {
 export function Evidence() {
   const research = useResearch();
   return (
-    <Frame title="Evidence" intro="Corpus size, section coverage, citation-depth distribution, and unresolved evidence findings.">
+    <Frame title="Evidence" intro="Corpus size, taxonomy coverage, citation-depth distribution, and unresolved evidence findings.">
       <Guard query={research}>{(data) => (
         <>
           <section className="overview-section"><h2>Citation depth</h2>
@@ -90,9 +102,9 @@ export function Evidence() {
               ? <p className="ui-state-hint">No depth classification has been recorded yet.</p>
               : <ul className="artifact-list">{Object.entries(data.evidence.depth).map(([depth, count]) => <li key={depth}><span className="ui-mono">{depth}</span> <small>{count} source{count === 1 ? "" : "s"}</small></li>)}</ul>}
           </section>
-          <section className="overview-section"><h2>Section coverage</h2>
+          <section className="overview-section"><h2>Taxonomy coverage</h2>
             {Object.keys(data.evidence.coverage).length === 0
-              ? <p className="ui-state-hint">No section-to-source mapping has been produced yet.</p>
+              ? <p className="ui-state-hint">No taxonomy-to-source mapping has been produced yet.</p>
               : <ul className="artifact-list">{Object.entries(data.evidence.coverage).map(([section, count]) => <li key={section}><span className="ui-mono">{section}</span> <small>{count} source{count === 1 ? "" : "s"}</small></li>)}</ul>}
           </section>
           <section className="overview-section"><h2>Unresolved findings</h2>
@@ -109,30 +121,39 @@ export function Evidence() {
 export function Manuscript() {
   const research = useResearch();
   return (
-    <Frame title="Manuscript" intro="Outline state, per-chapter word counts against target, and build status.">
+    <Frame title="Current manuscript" intro="The live canonical draft: chapter files and the PDF are replaced as review-loop revisions are accepted. “Drafted” means a chapter exists; it is not a quality or release verdict.">
       <Guard query={research}>{(data) => (
-        <section className="overview-section">
-          <h2>Chapters</h2>
-          {data.manuscript.chapters.length === 0
-            ? <p className="ui-state-hint">No structure audit has been produced yet.</p>
-            : (
-              <div className="ui-table-scroll">
-                <table className="ui-table">
-                  <caption className="sr-only">Chapters</caption>
-                  <thead><tr><th scope="col">Chapter</th><th scope="col">State</th><th scope="col">Words</th><th scope="col">Target</th></tr></thead>
-                  <tbody>{data.manuscript.chapters.map((chapter) => (
-                    <tr key={chapter.id}>
-                      <td className="ui-mono">{chapter.id}</td>
-                      <td><GateBadge status={chapter.state === "complete" ? "passed" : "unknown"} /></td>
-                      <td>{chapter.words.toLocaleString()}</td>
-                      <td>{chapter.targetWords?.toLocaleString() ?? "—"}</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            )}
-          <p className="ui-state-hint">PDF: {data.manuscript.pdfBuilt ? "built" : "not built"}. A placeholder build is never release-ready.</p>
-        </section>
+        <>
+          <section className="overview-section metric-row" aria-label="Manuscript progress">
+            <article className="ui-metric-card"><h3>Current draft</h3><p className="ui-metric-value">{data.manuscript.totalWords.toLocaleString()} words</p><p className="ui-metric-source">exact · chapters/*.md</p></article>
+            <article className="ui-metric-card"><h3>Planned draft</h3><p className="ui-metric-value">{data.manuscript.draftTargetWords?.toLocaleString() ?? "—"} words</p><p className="ui-metric-source">exact · outline.json</p></article>
+            <article className="ui-metric-card"><h3>Project target</h3><p className="ui-metric-value">{data.manuscript.projectTargetWords?.toLocaleString() ?? "—"} words</p><p className="ui-metric-source">exact · longwrite.yaml</p></article>
+            <article className="ui-metric-card"><h3>Rendered PDF</h3><p className="ui-metric-value">{data.manuscript.pdf.status === "compiled" ? "compiled" : "not built"}</p><p className="ui-metric-source">{data.manuscript.pdf.warningCount} LaTeX warning{data.manuscript.pdf.warningCount === 1 ? "" : "s"}</p></article>
+          </section>
+          <section className="overview-section">
+            <h2>Current chapter version</h2>
+            {data.manuscript.chapters.length === 0
+              ? <p className="ui-state-hint">The outline has not been produced yet.</p>
+              : (
+                <div className="ui-table-scroll">
+                  <table className="ui-table">
+                    <caption className="sr-only">Chapters</caption>
+                    <thead><tr><th scope="col">Chapter</th><th scope="col">Draft state</th><th scope="col">Words</th><th scope="col">Evidence</th></tr></thead>
+                    <tbody>{data.manuscript.chapters.map((chapter) => {
+                      const progress = chapter.targetWords ? Math.round((chapter.words / chapter.targetWords) * 100) : undefined;
+                      return <tr key={chapter.id}>
+                        <td><span className="ui-mono">{chapter.id}</span>{chapter.title && <><br /><small>{chapter.title}</small></>}</td>
+                        <td><GateBadge status={chapter.state === "drafted" ? "passed" : "unknown"} /> <small>{chapter.state}</small></td>
+                        <td>{chapter.words.toLocaleString()}{chapter.targetWords ? ` / ${chapter.targetWords.toLocaleString()} (${progress}%)` : ""}</td>
+                        <td>{chapter.sourceCount} planned source{chapter.sourceCount === 1 ? "" : "s"}</td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </div>
+              )}
+            <p className="ui-state-hint">Open the compiled paper from <Link to="/artifacts">Artifacts</Link> → <span className="ui-mono">build/manuscript.pdf</span>. Compilation alone is not a release verdict.</p>
+          </section>
+        </>
       )}</Guard>
     </Frame>
   );

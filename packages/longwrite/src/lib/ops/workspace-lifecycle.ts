@@ -20,7 +20,7 @@ const CANONICAL_ARCHIVE_PATHS = [
 const FINAL_OUTPUT_PATHS = [
   "build/manuscript.pdf", "build/manuscript.tex", "paper/main.tex", "paper/references.bib",
   "sources/bibliography.bib", "sources/classified_sources.jsonl", "sources/citation_plan.jsonl",
-  "evidence/citation-ledger.jsonl", "evidence/chunks.jsonl", "evidence/source-packets.json",
+  "evidence/citation-ledger.jsonl", "evidence/chunks.jsonl", "evidence/source-packets.json", "evidence/validated-source-evidence.json", "evidence/active-validated-source-evidence.json",
   "codebases/manifest.json",
   "reports/corpus-gates.json", "reports/longwrite-validation.md", "reports/release-gates.json",
 ] as const;

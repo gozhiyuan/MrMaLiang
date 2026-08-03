@@ -422,6 +422,51 @@ diagram. Read the [Repository Study Paper Flagship Guide](../../../docs/flagship
 for the complete command and configuration. See [Paper Profiles](./paper-profiles.md)
 for the profile registry boundary and extension rules.
 
+### Research gates: configurable targets and fixed evidence rules
+
+The agentic paper workflow has gates at three different points. They are not
+hidden: generated workspaces write the tunable targets to `longwrite.yaml`,
+and each evaluation writes a report explaining the current pass/fail result.
+
+| Point in workflow | Tunable `longwrite.yaml` settings | If below target | Report |
+| --- | --- | --- | --- |
+| Before outlining | `research.corpus_gates` (`min_candidates`, `min_sources_per_taxonomy_cell`, `min_core_sources`, `min_recent_ratio`, `min_source_type_diversity`) | The bounded corpus-evidence recovery loop runs. If it still fails after its two declared rounds, the workflow stops before drafting. | `reports/corpus-gates.md` and `.json` |
+| Evidence depth | `research.semantic_screen` budgets and claim counts (`max_candidates`, `max_evidence_sources`, `min_supported_claims_for_a`, `min_supported_claims_for_b`) | A source remains C-level contextual material rather than becoming A/B-depth evidence. | `reports/semantic-screen-repair.md`, `reports/source-evidence-repair.md`, `reports/evidence-depth-finalization.md` |
+| Final release / packaging | `research.release_gates`, `figures.quality_gates`, `writing.target_length_words`, and `publication` limits | A manuscript may exist, but final validation and submission packaging fail closed until the issue is repaired. | `reports/release-gates.json` and `reports/longwrite-validation.md` |
+
+For the flagship `literature_survey` profile, the default corpus gate is
+`min_core_sources: 20`. A core source means an A- or B-depth source: it must
+have passed semantic screening, have retrieved local full text, and have a
+validated packet of exact supporting excerpts. It does **not** mean merely a
+retrieved or metadata-ranked paper. This is the threshold that stopped the RSI
+run before drafting.
+
+The numbers differ by paper profile: `repository_study` defaults to six core
+sources, while creative/non-research LongWrite modes do not use scholarly
+corpus gates. Thus this is a shared rule for agentic research-paper workflows,
+not a universal rule for every LongWrite artifact. Profiles establish sensible
+initial values; the generated workspace owns the final values.
+
+Some rules are deliberately not tunable quality shortcuts: an A/B source must
+be backed by locally retrieved full text and exact excerpts, agents cannot
+invent citations or experimental results, and the flow retains failure reports
+instead of drafting through a failed release gate. You may lower a numerical
+threshold only as an explicit scope decision (for example, a short focused
+survey), not to make an unchanged flagship scope pass.
+
+Make threshold changes before starting a run, then regenerate and validate the
+derived manifest:
+
+```bash
+maliang writing sync .
+maliang writing validate config .
+```
+
+Do not change gates underneath an active or failed run simply to resume it:
+archive or preserve that attempt, record the narrower scope decision, and
+start a new/forked workspace so its provenance accurately reflects the chosen
+standard.
+
 ### `research.codebases`
 
 An agentic paper can take one or more repositories as first-class **codebase
@@ -691,13 +736,15 @@ research:
     approval_mode: auto # or human
 ```
 
-Each round runs the deterministic survey contract and structure audit, asks an
-LLM reviewer to critique the outline against `evidence/source-packets.json`,
-validates its named sections/sources, computes `outline_readiness`, and asks
-the outline architect to revise. `outline_readiness = 1` requires both script
-audits to pass and no major/critical reviewer finding. The final human approval
-gate occurs only after this re-audited loop; `max_rounds` is deliberately
-bounded from 1 to 4. `approval_mode: auto` is the agentic flagship default:
+The workflow first audits and reviews the initial outline. Each `max_rounds`
+repair attempt then revises a failed outline, re-runs both deterministic audits,
+asks an LLM reviewer to critique it against `evidence/source-packets.json`,
+validates its named sections/sources, and recomputes `outline_readiness`.
+Thus every revision receives a follow-up assessment; `max_rounds` is the number
+of revision attempts, not the number of unverified revisions. `outline_readiness = 1`
+requires both script audits to pass and no major/critical reviewer finding. The
+final human approval gate occurs only after this re-audited loop; `max_rounds`
+is deliberately bounded from 1 to 4. `approval_mode: auto` is the agentic flagship default:
 the script-owned readiness gate still must pass, but MalaClaw does not pause.
 Set `approval_mode: human` to pause before initial drafting and before any
 later `reopen_outline` action.

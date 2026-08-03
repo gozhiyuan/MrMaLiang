@@ -48,6 +48,41 @@ async function seedClassified(ws: string): Promise<void> {
   );
 }
 
+/** Nothing reaches the publication manifest unless the artifact planner asked
+ * for it, so a backend test has to select its own subjects. These select the
+ * two figures whose rendering path is under test: a year plot, which the
+ * Python backend owns, and a concept map, which the Mermaid/SVG backend owns. */
+async function selectYearPlotAndConceptMap(ws: string): Promise<void> {
+  await fs.mkdir(path.join(ws, "reviews"), { recursive: true });
+  await fs.writeFile(path.join(ws, "reviews", "artifact-plan.json"), JSON.stringify({
+    version: 1,
+    intents: [{
+      id: "corpus-recency",
+      kind: "metadata_plot",
+      rationale: "The background section claims the field is recent, so the retrieved corpus's year distribution has to be checkable.",
+      section_id: "section-1",
+      plot_metric: "publication_year",
+      acceptance_criteria: [{ metric: "verified_metadata_plots", target: 1 }],
+    }],
+  }, null, 2), "utf-8");
+  await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+  await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+    version: 1,
+    placements: [],
+    concept_map: {
+      title: "Evidence map",
+      caption: "The map separates memory design evidence from evaluation evidence.",
+      placement: { section_id: "section-1", discussion: "The map anchors the background synthesis." },
+      nodes: [
+        { id: "design", label: "Memory design" },
+        { id: "evaluation", label: "Evaluation" },
+        { id: "safety", label: "Safety" },
+      ],
+      edges: [{ from: "design", to: "evaluation" }, { from: "evaluation", to: "safety" }],
+    },
+  }, null, 2), "utf-8");
+}
+
 describe("deterministic backend sources", () => {
   it("emits a pipeline Mermaid diagram and copies the versioned matplotlib module", () => {
     expect(researchPipelineMermaid()).toContain("flowchart LR");
@@ -99,6 +134,7 @@ describe("manifest integration", () => {
   it("only lists backend figures that actually rendered", async () => {
     const ws = await makeWorkspace();
     await seedClassified(ws);
+    await selectYearPlotAndConceptMap(ws);
     process.env.LONGWRITE_MMDC_BIN = "/nonexistent/mmdc";
     process.env.LONGWRITE_PYTHON_BIN = "/nonexistent/python3";
     await buildFigureWorkspace(ws);
@@ -109,6 +145,7 @@ describe("manifest integration", () => {
   it("keeps rendered backend figures out of the publication manifest until they have a LaTeX placement contract", async () => {
     const ws = await makeWorkspace();
     await seedClassified(ws);
+    await selectYearPlotAndConceptMap(ws);
     process.env.LONGWRITE_MMDC_BIN = await writeStub(ws, "mmdc-stub", `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "10.0-stub"; exit 0; fi
 printf '<svg>stub</svg>' > "$4"
@@ -123,6 +160,7 @@ printf '<svg>stub</svg>' > "$4"
   it("writes source-year data before invoking the Python backend", async () => {
     const ws = await makeWorkspace();
     await seedClassified(ws);
+    await selectYearPlotAndConceptMap(ws);
     process.env.LONGWRITE_MMDC_BIN = "/nonexistent/mmdc";
     process.env.LONGWRITE_PYTHON_BIN = await writeStub(ws, "python-stub", `#!/bin/sh
 if [ "$1" = "-c" ]; then exit 0; fi
@@ -239,6 +277,15 @@ describe("nanobanana backend", () => {
       process.env.LONGWRITE_PYTHON_BIN = "/nonexistent/python3";
       const ws = await nbWorkspace(baseConfig("      enabled: true"));
       await seedClassified(ws);
+      // Enabling the backend only makes the illustration available. It reaches
+      // the manuscript only once the visual plan places it in a section.
+      await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+        version: 1,
+        placements: [{
+          id: "concept-illustration",
+          placement: { section_id: "section-1", discussion: "The illustration orients the reader before the formal taxonomy." },
+        }],
+      }, null, 2), "utf-8");
       await buildFigureWorkspace(ws);
       const manifest = await readFigureManifest(ws);
       const illustration = manifest?.figures.find((figure) => figure.id === "concept-illustration");

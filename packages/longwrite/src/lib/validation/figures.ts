@@ -39,9 +39,9 @@ async function loadManifest(workspaceDir: string): Promise<{ manifest?: FigureMa
 
 async function checkManifest(workspaceDir: string): Promise<{ check: ValidationCheck; manifest?: FigureManifest }> {
   const { manifest, findings } = await loadManifest(workspaceDir);
-  if (manifest && manifest.figures.length === 0 && manifest.tables.length === 0) {
-    findings.push("figure_manifest: manifest must contain at least one figure or table");
-  }
+  // An empty manifest is valid for a reader-focused survey whose configured
+  // visual minima are zero. The full-mode contract below remains the single
+  // authority when a profile actually requires visual artifacts.
   return { check: { id: "figure_manifest", pass: findings.length === 0, findings }, manifest };
 }
 

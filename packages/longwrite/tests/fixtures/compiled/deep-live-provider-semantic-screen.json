@@ -441,6 +441,7 @@
         ],
         "outputs": [
           "evidence/source-packets.json",
+          "evidence/validated-source-evidence.json",
           "reports/source-evidence-repair.md"
         ],
         "validators": [
@@ -469,12 +470,14 @@
         "inputs": [
           "sources/metadata-classified_sources.jsonl",
           "sources/semantic-screening.json",
-          "evidence/source-packets.json"
+          "evidence/source-packets.json",
+          "evidence/validated-source-evidence.json"
         ],
         "outputs": [
           "sources/classified_sources.jsonl",
           "sources/bibliography.bib",
           "sources/citation_plan.jsonl",
+          "evidence/active-validated-source-evidence.json",
           "reports/evidence-depth-finalization.md"
         ],
         "validators": [
@@ -743,6 +746,7 @@
             ],
             "outputs": [
               "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json",
               "reports/source-evidence-repair.md"
             ],
             "validators": [
@@ -772,12 +776,14 @@
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
               "sources/semantic-screening.json",
-              "evidence/source-packets.json"
+              "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json"
             ],
             "outputs": [
               "sources/classified_sources.jsonl",
               "sources/bibliography.bib",
               "sources/citation_plan.jsonl",
+              "evidence/active-validated-source-evidence.json",
               "reports/evidence-depth-finalization.md"
             ],
             "validators": [
@@ -858,6 +864,7 @@
           "project_brief.md",
           "sources/classified_sources.jsonl",
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "reports/corpus-gates.md"
         ],
         "optional_inputs": [
@@ -873,7 +880,7 @@
           "When feedback/outline-revision.md is present, treat it as the human's requested changes for this outline revision. Implement it while preserving the evidence-first scope and emit matching outline.md and outline.json.",
           "Every outline.json section MUST include: id, title, role, target_words, purpose, keywords (at least two strings), and source_ids. keywords are the retrieval terms used for its section evidence packet.",
           "For a survey contract, assign exactly these role values where applicable: introduction_gap_contributions, multi_axis_taxonomy, method_family (at least two sections), related_work_differentiation, limitations_future_work, or body. Include each required role at least once, and use body only for remaining sections.",
-          "Use evidence/source-packets.json as the compact deep-reading dossier: organize sections around supported contributions, comparisons, tensions, and limitations rather than bibliography order. Do not claim to have read or synthesize a source beyond its supplied packet.",
+          "Use evidence/active-validated-source-evidence.json as the citation-ready cumulative deep-reading dossier; it contains exactly the current A/B classified sources with validated packets. evidence/source-packets.json is only the latest working round. Organize sections around supported contributions, comparisons, tensions, and limitations rather than bibliography order. Do not claim to have read or synthesize a source beyond its supplied validated packet.",
           "For every substantive outline section, select source_ids that can support its intended argument and make the section purpose state the comparative or analytical question it resolves. Preserve explicit taxonomy coverage and leave unresolved evidence gaps visible rather than papering them over."
         ],
         "requires_human_approval": false,
@@ -883,23 +890,204 @@
         ],
         "skills": [
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "reports/corpus-gates.md",
           "sources/semantic-screening.json"
         ]
       },
       {
+        "id": "outline_initial_survey_contract",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Audit initial outline survey contract",
+        "inputs": [
+          "outline.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "reports/survey-contract.json",
+          "reports/survey-contract.md",
+          "tables/related-work-matrix.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "survey-contract",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "outline_initial_structure_audit",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Audit initial outline structure",
+        "inputs": [
+          "outline.json"
+        ],
+        "outputs": [
+          "reports/structure-audit.json",
+          "reports/structure-audit.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "structure",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "outline_initial_review",
+        "owner": "skeptical-reviewer",
+        "title": "Critique initial outline against source evidence",
+        "inputs": [
+          "outline.md",
+          "outline.json",
+          "reports/survey-contract.md",
+          "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "optional_inputs": [
+          "reports/structure-audit.md",
+          "sources/semantic-screening.json",
+          "reports/corpus-gates.md",
+          "feedback/outline-revision.md"
+        ],
+        "skills": [
+          "outline.json",
+          "reports/survey-contract.md",
+          "reports/structure-audit.md",
+          "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
+          "sources/classified_sources.jsonl",
+          "reports/corpus-gates.md"
+        ],
+        "instructions": [
+          "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
+          "Review the outline as a research argument, not a table of contents. Use the citation-ready cumulative evidence dossier, not only the latest packet file or archival history. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
+          "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval."
+        ],
+        "outputs": [
+          "reviews/outline-review.json",
+          "reports/outline-review-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "review",
+              "repair-outline-review",
+              "."
+            ]
+          }
+        ],
+        "retry": {
+          "max_attempts": 2
+        }
+      },
+      {
+        "id": "outline_initial_readiness_score",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Score initial deterministic outline readiness",
+        "inputs": [
+          "reviews/outline-review.json",
+          "reports/survey-contract.json"
+        ],
+        "optional_inputs": [
+          "reports/structure-audit.json"
+        ],
+        "outputs": [
+          "reports/outline-readiness.md",
+          "reports/metrics.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "score-outline-readiness",
+            "."
+          ]
+        }
+      },
+      {
         "type": "loop",
         "id": "outline_quality_loop",
-        "title": "Review and revise the evidence-aware outline",
+        "title": "Repair and re-audit the evidence-aware outline",
         "max_rounds": 3,
         "stop_when": "outline_readiness >= 1",
         "on_exhaustion": "fail",
         "stages": [
           {
-            "id": "outline_survey_contract",
+            "id": "outline_revise",
+            "owner": "outline-architect",
+            "title": "Revise outline from evidence-aware critique",
+            "inputs": [
+              "project_brief.md",
+              "outline.md",
+              "outline.json",
+              "reviews/outline-review.json",
+              "reports/outline-readiness.md",
+              "evidence/source-packets.json",
+              "evidence/active-validated-source-evidence.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "optional_inputs": [
+              "feedback/outline-revision.md",
+              "sources/semantic-screening.json",
+              "reports/corpus-gates.md"
+            ],
+            "skills": [
+              "outline.json",
+              "reviews/outline-review.json",
+              "reports/survey-contract.md",
+              "reports/structure-audit.md",
+              "evidence/source-packets.json",
+              "evidence/active-validated-source-evidence.json",
+              "sources/classified_sources.jsonl"
+            ],
+            "instructions": [
+              "Rewrite outline.md and outline.json to address every major/critical review finding with the smallest evidence-grounded structural change. Preserve valid sections when there are no blocking findings; do not add generic filler or a revision log to reader-facing outline artifacts.",
+              "Every outline.json section must retain id, title, role, target_words, purpose, at least two keywords, and source_ids. Use only current classified source IDs. Keep the paper's organizing argument explicit: taxonomy, comparisons, limitations, and evidence gaps must be structurally visible before drafting begins."
+            ],
+            "outputs": [
+              "outline.md",
+              "outline.json"
+            ],
+            "validators": [
+              "required_output_exists",
+              "non_empty_markdown"
+            ],
+            "retry": {
+              "max_attempts": 2
+            },
+            "when": "outline_readiness < 1"
+          },
+          {
+            "id": "outline_recheck_survey_contract",
             "owner": "analyst",
             "runtime": "script",
-            "title": "Audit outline survey contract",
+            "title": "Re-audit revised outline survey contract",
             "inputs": [
               "outline.json",
               "sources/classified_sources.jsonl"
@@ -920,13 +1108,14 @@
                 "survey-contract",
                 "."
               ]
-            }
+            },
+            "when": "outline_readiness < 1"
           },
           {
-            "id": "outline_structure_audit",
+            "id": "outline_recheck_structure_audit",
             "owner": "analyst",
             "runtime": "script",
-            "title": "Audit outline structure",
+            "title": "Re-audit revised outline structure",
             "inputs": [
               "outline.json"
             ],
@@ -945,17 +1134,19 @@
                 "structure",
                 "."
               ]
-            }
+            },
+            "when": "outline_readiness < 1"
           },
           {
-            "id": "outline_review",
+            "id": "outline_recheck_review",
             "owner": "skeptical-reviewer",
-            "title": "Critique outline against source evidence",
+            "title": "Critique revised outline against source evidence",
             "inputs": [
               "outline.md",
               "outline.json",
               "reports/survey-contract.md",
               "evidence/source-packets.json",
+              "evidence/active-validated-source-evidence.json",
               "sources/classified_sources.jsonl"
             ],
             "optional_inputs": [
@@ -969,12 +1160,13 @@
               "reports/survey-contract.md",
               "reports/structure-audit.md",
               "evidence/source-packets.json",
+              "evidence/active-validated-source-evidence.json",
               "sources/classified_sources.jsonl",
               "reports/corpus-gates.md"
             ],
             "instructions": [
               "Write ONLY reviews/outline-review.json as {version:1,summary,strengths,findings:[{id,severity,category,summary,section_ids,source_ids}]}. severity is minor, major, or critical; category is scope, taxonomy, evidence, comparison, sequence, gap, or clarity.",
-              "Review the outline as a research argument, not a table of contents. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
+              "Review the outline as a research argument, not a table of contents. Use the citation-ready cumulative evidence dossier, not only the latest packet file or archival history. Check whether its taxonomy is mutually useful rather than a list, whether comparisons and limitations have a home, whether the sequence supports the stated contribution, and whether the chosen section source_ids have packet-backed support. Ground every named section/source in the supplied artifacts; do not invent papers, claims, sections, or experimental evidence.",
               "Use major or critical for a problem that blocks evidence-grounded drafting. Use no major/critical findings only when the deterministic audits pass and the outline can proceed to human approval."
             ],
             "outputs": [
@@ -997,13 +1189,14 @@
             ],
             "retry": {
               "max_attempts": 2
-            }
+            },
+            "when": "outline_readiness < 1"
           },
           {
-            "id": "outline_readiness_score",
+            "id": "outline_recheck_readiness_score",
             "owner": "analyst",
             "runtime": "script",
-            "title": "Score deterministic outline readiness",
+            "title": "Score revised deterministic outline readiness",
             "inputs": [
               "reviews/outline-review.json",
               "reports/survey-contract.json"
@@ -1026,49 +1219,8 @@
                 "score-outline-readiness",
                 "."
               ]
-            }
-          },
-          {
-            "id": "outline_revise",
-            "owner": "outline-architect",
-            "title": "Revise outline from evidence-aware critique",
-            "inputs": [
-              "project_brief.md",
-              "outline.md",
-              "outline.json",
-              "reviews/outline-review.json",
-              "reports/outline-readiness.md",
-              "evidence/source-packets.json",
-              "sources/classified_sources.jsonl"
-            ],
-            "optional_inputs": [
-              "feedback/outline-revision.md",
-              "sources/semantic-screening.json",
-              "reports/corpus-gates.md"
-            ],
-            "skills": [
-              "outline.json",
-              "reviews/outline-review.json",
-              "reports/survey-contract.md",
-              "reports/structure-audit.md",
-              "evidence/source-packets.json",
-              "sources/classified_sources.jsonl"
-            ],
-            "instructions": [
-              "Rewrite outline.md and outline.json to address every major/critical review finding with the smallest evidence-grounded structural change. Preserve valid sections when there are no blocking findings; do not add generic filler or a revision log to reader-facing outline artifacts.",
-              "Every outline.json section must retain id, title, role, target_words, purpose, at least two keywords, and source_ids. Use only current classified source IDs. Keep the paper's organizing argument explicit: taxonomy, comparisons, limitations, and evidence gaps must be structurally visible before drafting begins."
-            ],
-            "outputs": [
-              "outline.md",
-              "outline.json"
-            ],
-            "validators": [
-              "required_output_exists",
-              "non_empty_markdown"
-            ],
-            "retry": {
-              "max_attempts": 2
-            }
+            },
+            "when": "outline_readiness < 1"
           }
         ]
       },
@@ -1136,6 +1288,7 @@
           "outline.md",
           "outline.json",
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "sources/classified_sources.jsonl",
           "evidence/coverage.json"
         ],
@@ -1148,13 +1301,14 @@
           "project_brief.md",
           "outline.json",
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "sources/classified_sources.jsonl",
           "evidence/coverage.json"
         ],
         "instructions": [
           "Write ONLY reviews/artifact-plan.json as {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?]}]}. It is a creative strategy record, not a request to write TeX, code, coordinates, dates, or results.",
           "Choose only source-grounded artifacts that materially improve the approved outline. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot. A formalization must clarify a sourced definition, objective, comparison, or analytical claim; it is never decorative mathematics. A comparison_matrix or timeline requires a target section and at least three representative classified source IDs. An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. A metadata_plot uses publication_year, citation_depth, or venue and derives values from verified workspace metadata.",
-          "For a long survey, use the configured visual quality targets as an artifact budget: select enough independent comparison/table, metadata, timeline, or diagram intents for the visual planner to meet them, but do not duplicate weak inventory tables. The visual planner will turn these intents into a strict source-bound figure-spec contract.",
+          "Every artifact must earn its place by helping a reader compare evidence, understand a mechanism, or evaluate a stated limitation. Do not select pipeline telemetry, source-inventory metadata, DOI/venue lists, packet-status fields, full-title lists, or a decorative chart merely to meet a count. Use an empty intents array when no analytical artifact is justified. The visual planner will turn selected intents into a strict source-bound figure-spec contract.",
           "empirical_pilot is legal only when research.paper_kind is empirical. It creates a preregistration request with hypothesis, control, and trial acceptance criterion; it never invents findings and does not render an empirical result plot until LongExperiment provides verified result data.",
           "Choose at most five intents. Do not invent source IDs, sections, taxonomy cells, numerical values, experimental results, or unsupported equations. Use an empty intents array when no artifact is justified."
         ],
@@ -1194,8 +1348,8 @@
           "figures/placement-plan.json"
         ],
         "instructions": [
-          "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes (each label at most 48 characters) and only edges that express the survey's actual organizing relationship (edge labels at most 36 characters). In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files.",
-          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables.",
+          "Write strict JSON with version:1 and placements:[{id,placement:{section_id,discussion}}]. Select no artifact unless it makes a specific argument easier to understand. You—not a preset menu—choose the reader question, visual form, placement, and supporting sources. A legacy concept_map remains supported, but prefer diagrams:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[existing classified source ids],nodes:[{id,label}],edges:[{from,to,label?}]}] for any explanatory relationship: a taxonomy, mechanism, causal/control loop, process, trade-off, or argument map. Each diagram needs 3--10 short nodes and only relationships supported by its cited corpus. Add concept-illustration only when it is explicitly selected, the optional Nano Banana backend is enabled, and it provides orientation rather than evidence. Never select corpus bookkeeping, source inventories, DOI/venue listings, or a decorative chart.",
+          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:<agent-chosen reader purpose>,comparative?:true|false,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. The agent chooses whether a timeline, table, diagram, verified numeric plot, imported empirical figure, or no artifact best serves the paper. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, unsupported ratings, or unknown source ids.",
           "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section.",
           "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
           "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph."
@@ -1208,7 +1362,8 @@
         ],
         "skills": [
           "reviews/artifact-plan.json",
-          "evidence/source-packets.json"
+          "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json"
         ]
       },
       {
@@ -1239,13 +1394,14 @@
               "outline.json",
               "evidence/section-{{section.id}}.json",
               "reviews/artifact-plan.json",
-              "evidence/source-packets.json"
+              "evidence/source-packets.json",
+              "evidence/active-validated-source-evidence.json"
             ],
             "instructions": [
               "Follow the injected project brief for audience, target length, and style. Do not cite a URL/file directly from the brief: recognized scholarly links enter through authoritative reference seeds and may be cited only after they appear in the section evidence packet; all other links/files remain contextual leads. Cite factual claims only with exact packet chunk ids.",
               "Write complete reader-facing prose for this section, aiming for its outline.json target_words allocation. Do not emit a scaffold, source inventory, or a shorter placeholder merely because later revision exists.",
               "Do not emit Markdown pipe tables, hand-numbered Table/Figure references, or prose pretending to be a diagram. The artifact builder owns captions, labels, table layout, and rendered figures; explain the comparison or relationship in prose and let the placed artifact carry the formal reference.",
-              "Use inline `$...$` or display `$$...$$` notation only when it formalizes a sourced definition, objective, comparison, or analytical claim that materially helps the reader. Define every symbol in nearby prose; never add decorative equations or imply a theorem/experiment not supported by the evidence packet.",
+              "Use inline `$...$` or display `$$...$$` notation when it clarifies a sourced definition, objective, comparison, or analytical claim. Define every symbol in nearby prose and cite the supporting packet immediately before or after it. A literature-derived equation must be attributed; an author-created formalization must be labelled as a definition, model, or illustrative bound with its assumptions and must not be called a theorem, result, or empirical finding. Never add decorative equations or imply an experiment not supported by the evidence packet.",
               "For research prose, cite only exact chunk ids from the injected evidence packet: [source:<source-id>:p<paragraph>]. A generic [source:<source-id>] marker is not enough for publication validation.",
               "Do not cite a source merely because it appears in source_ids. If no packet chunk supports a factual claim, remove or qualify the claim.",
               "Read only the pre-draft artifact intents that name this section. If a validated formalization is selected, decide its exact source-grounded notation from the evidence packet, define every symbol nearby, and omit it if a useful formalization cannot be supported. Do not add arbitrary mathematics. Explain nearby planned figures/tables in prose, but leave their labels, captions, data, and placement to the artifact builder."
@@ -1508,6 +1664,7 @@
         "instructions": [
           "Treat every metadata-only or missing-evidence citation in reports/evidence-audit.md as a major review finding. Do not reward prose whose factual claims are not backed by exact evidence-packet chunk citations.",
           "Review the rendered PDF hierarchy, placed figures, placed tables, captions, and in-text references. A file path or literal [source:...] marker printed in the manuscript is a blocking artifact defect, not a figure, table, or reader-facing citation.",
+          "Reward a well-designed explanatory diagram, source-grounded timeline, or qualitative comparison matrix when it makes the manuscript's argument more legible than prose. Review these for a clear analytical takeaway, source grounding, readable labels, and non-redundancy. For every equation, verify nearby symbol definitions and a literature citation or an explicit author-formalization label with stated assumptions; treat an unsupported theorem, conjecture, quantitative chart, or percentage as a major finding.",
           "Treat a failing reviews/visual-qa.json as an independently verified major/critical artifact finding. Do not award a high review score while its page-specific legibility defects remain unresolved.",
           "Use the injected project brief and outline.json as the length contract. Treat a manuscript materially below its total target or a section materially below its target_words as a release-blocking finding; name the sections and the evidence-grounded expansion needed, never recommend filler.",
           "When feedback/user-feedback.md is present, evaluate the manuscript against the operator's requests as well as the evidence and release criteria. Make each unresolved request explicit in the review."
@@ -1572,7 +1729,7 @@
               "evidence/coverage.json"
             ],
             "instructions": [
-              "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified.",
+              "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
               "The current artifact-plan contract additionally permits timeline and architecture_diagram intents. A timeline needs a target section and at least three classified source IDs; an architecture diagram follows this profile's requirement: An architecture_diagram requires a target section and at least 3 classified scholarly source IDs. The visual renderer derives dates from metadata and never accepts handwritten coordinates or result values.",
               "Schema: {version:1,intents:[{id,kind,rationale,section_id?,source_ids?,taxonomy_cell?,plot_metric?,experiment_hypothesis?,control?,acceptance_criteria:[{metric,target,scope?}]}]}. kind is formalization, comparison_matrix, metadata_plot, timeline, architecture_diagram, taxonomy_recall, or empirical_pilot.",
               "Formalization is a request for the chapter writer to introduce a compact definition/objective with locally defined symbols; it requires a target section and supporting classified source ids. Do not request decorative mathematics.",
@@ -1877,6 +2034,7 @@
             ],
             "outputs": [
               "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json",
               "reports/source-evidence-repair.md"
             ],
             "validators": [
@@ -1906,12 +2064,14 @@
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
               "sources/semantic-screening.json",
-              "evidence/source-packets.json"
+              "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json"
             ],
             "outputs": [
               "sources/classified_sources.jsonl",
               "sources/bibliography.bib",
               "sources/citation_plan.jsonl",
+              "evidence/active-validated-source-evidence.json",
               "reports/evidence-depth-finalization.md"
             ],
             "validators": [
@@ -2835,6 +2995,7 @@
             ],
             "outputs": [
               "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json",
               "reports/source-evidence-repair.md"
             ],
             "validators": [
@@ -2864,12 +3025,14 @@
             "inputs": [
               "sources/metadata-classified_sources.jsonl",
               "sources/semantic-screening.json",
-              "evidence/source-packets.json"
+              "evidence/source-packets.json",
+              "evidence/validated-source-evidence.json"
             ],
             "outputs": [
               "sources/classified_sources.jsonl",
               "sources/bibliography.bib",
               "sources/citation_plan.jsonl",
+              "evidence/active-validated-source-evidence.json",
               "reports/evidence-depth-finalization.md"
             ],
             "validators": [
@@ -3601,6 +3764,7 @@
           "outline.json",
           "sources/classified_sources.jsonl",
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "reports/corpus-gates.md"
         ],
         "optional_inputs": [
@@ -3613,10 +3777,11 @@
           "outline.json",
           "sources/classified_sources.jsonl",
           "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json",
           "reports/corpus-gates.md"
         ],
         "instructions": [
-          "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and source-packet-backed contributions; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
+          "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and contributions backed by the cumulative validated-evidence dossier; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
           "Write feedback/outline-revision.md with the exact action-plan findings addressed, the structural change, and any remaining evidence limitation. Do not draft chapters, alter figures, fabricate sources, or turn an unresolved empirical question into a result. The following scripts re-audit the outline before downstream evidence allocation."
         ],
         "outputs": [
@@ -3696,12 +3861,12 @@
           "figures/placement-plan.json"
         ],
         "instructions": [
-          "Write strict JSON: {\"version\":1,\"placements\":[{\"id\":\"source-years\"|\"concept-map\"|\"concept-illustration\"|\"evidence-profile\"|\"taxonomy-coverage\"|\"method-comparison\"|\"benchmark-metadata\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"}}],\"concept_map\":{\"title\":\"...\",\"caption\":\"...\",\"placement\":{\"section_id\":\"<outline section id>\",\"discussion\":\"<specific reader-facing reason>\"},\"nodes\":[{\"id\":\"...\",\"label\":\"...\"}],\"edges\":[{\"from\":\"...\",\"to\":\"...\",\"label\":\"optional\"}]}}. Include every required full-mode visual/table and taxonomy-coverage when evidence/coverage.json has taxonomy cells. Add concept-illustration only when the optional Nano Banana backend is explicitly enabled. concept_map needs 3--7 short, evidence-grounded reader-facing nodes (each label at most 48 characters) and only edges that express the survey's actual organizing relationship (edge labels at most 36 characters). In agentic remediation, table_overrides is optional and only supports method-comparison or benchmark-metadata: {id,title?,caption?,headers:[...],rows:[{cells:[...],source_ids:[existing classified source ids]}]}. Use it only for a review-requested substantive table change; the builder validates IDs and renders the generated table files.",
-          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:comparison_matrix|taxonomy_matrix|evidence_matrix,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, or unknown source ids. Use source-bound table_specs for distinct survey comparisons when configured quality gates require more than the built-in tables.",
+          "Write strict JSON with version:1 and placements:[{id,placement:{section_id,discussion}}]. Select no artifact unless it makes a specific argument easier to understand. You—not a preset menu—choose the reader question, visual form, placement, and supporting sources. A legacy concept_map remains supported, but prefer diagrams:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[existing classified source ids],nodes:[{id,label}],edges:[{from,to,label?}]}] for any explanatory relationship: a taxonomy, mechanism, causal/control loop, process, trade-off, or argument map. Each diagram needs 3--10 short nodes and only relationships supported by its cited corpus. Add concept-illustration only when it is explicitly selected, the optional Nano Banana backend is enabled, and it provides orientation rather than evidence. Never select corpus bookkeeping, source inventories, DOI/venue listings, or a decorative chart.",
+          "The same JSON also supports a declarative figure-spec contract: timelines:[{id,title,caption,insight,placement:{section_id,discussion},source_ids:[three or more existing classified source ids]}] and table_specs:[{id,kind:<agent-chosen reader purpose>,comparative?:true|false,title,caption,insight,placement:{section_id,discussion},headers:[2--6 labels],rows:[{cells:[one per header],source_ids:[one or more existing classified source ids]}]}]. The agent chooses whether a timeline, table, diagram, verified numeric plot, imported empirical figure, or no artifact best serves the paper. Timelines derive dates and coordinates from verified metadata; table_specs derive the generated CSV, Markdown, longtable TeX, caption, label, and placement from this contract. Never supply raw TeX, plot code, arbitrary numbers, unsupported ratings, or unknown source ids.",
           "Place each artifact in the section whose argument it supports. Do not create an appendix-style generated-artifacts section.",
           "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
           "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph.",
-          "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. For a substantive method or benchmark table repair, use table_overrides only for method-comparison or benchmark-metadata: each row must have exactly one cell per header and cite one or more existing classified source IDs in source_ids. A validated metadata_plot intent is rendered from verified metadata by the normal artifact builder; do not invent plot values or use Nano Banana as evidence.",
+          "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. Remove any artifact that is pipeline telemetry, a source inventory, or decorative rather than analytical. A validated metadata_plot is rendered from verified metadata only when it is essential to a stated reader-facing claim; do not invent plot values or use Nano Banana as evidence.",
           "For new survey-native artifacts, use table_specs for source-bound comparison/taxonomy/evidence matrices and timelines for source-selected milestones. The builder validates all source IDs and derives timeline years; do not insert raw TeX, chart code, coordinates, or unsupported numerical results."
         ],
         "validators": [
@@ -3714,7 +3879,8 @@
         ],
         "skills": [
           "reviews/artifact-plan.json",
-          "evidence/source-packets.json"
+          "evidence/source-packets.json",
+          "evidence/active-validated-source-evidence.json"
         ],
         "max_invocations": 1
       },

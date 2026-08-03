@@ -221,9 +221,11 @@ pinned repositories rather than first-repository-wins.
 ### Outline review gate and first manuscript
 
 In the live agentic workflow, the LLM creates an evidence-aware outline from
-the compact source packets—not a blind reading of every cached paper. A bounded
-two-round loop then runs: script survey/structure audits, LLM critique grounded
-in named source packets, script-owned `outline_readiness`, and LLM revision.
+the compact source packets—not a blind reading of every cached paper. The flow
+first audits and reviews that initial outline. A bounded two-revision loop then
+revises a failed outline and follows each revision with script survey/structure
+audits, LLM critique grounded in named source packets, and script-owned
+`outline_readiness`; no revision is counted without a follow-up assessment.
 The default flow automatically continues when the final re-audit passes; set
 `research.outline_review.approval_mode: human` when an operator must approve it.
 Immediately after readiness, an LLM creates `reviews/artifact-plan.json` and a
@@ -378,8 +380,9 @@ The default LLM-owned units are `intake`, `search_planner`, `outline`,
 `research.semantic_screen.enabled: true`, the initial pass additionally runs
 `semantic_screen` (bounded title/abstract triage) and `source_evidence_extract`
 (claim extraction from approved local full text). When
-`research.outline_review.enabled: true`, it also runs `outline_review` and
-`outline_revise` before the readiness gate. The dispatcher materializes
+`research.outline_review.enabled: true`, it also runs an initial
+`outline_review`, then `outline_revise` followed by a readiness re-check for
+each configured repair attempt. The dispatcher materializes
 an LLM revision or visual-plan unit only when that declared action is selected.
 Retrieval, metadata LQS, candidate selection, full-text download, excerpt
 verification, final citation-depth gating, evidence indexing, citation/evidence
@@ -838,6 +841,15 @@ For the complete initialization-flag mapping and the editable configuration
 fields, see the [configuration reference](../../packages/longwrite/docs/configuration.md). `maliang init
 --help` prints the current CLI options installed on your machine.
 
+> **Quality-gate note.** The flagship profile intentionally requires 20
+> evidence-backed A/B-depth core sources before outlining, as well as the
+> later bibliography, figure, length, and release gates. These are workspace
+> settings—not opaque dashboard rules—and `reports/corpus-gates.md` explains
+> any current failure. See [Research gates: configurable targets and fixed
+> evidence rules](../../packages/longwrite/docs/configuration.md#research-gates-configurable-targets-and-fixed-evidence-rules)
+> before changing a threshold; change it only when you deliberately narrow the
+> paper's scope, then sync and validate before starting a new run.
+
 ### What this demo is sized to do
 
 The generated `longwrite.yaml` makes the normal controls visible. Use the
@@ -1038,6 +1050,18 @@ from any directory:
 maliang writing dashboard
 ```
 
+For a **MalaClaw source checkout**, build its dashboard once before this first
+launch. Published installations already include these generated files:
+
+```bash
+cd /path/to/MalaClaw/dashboard
+npm install
+npm run build
+```
+
+If the dashboard launcher reports that `dashboard/server/index.js` is missing,
+run the source-checkout build above, then retry `maliang writing dashboard`.
+
 Open the printed local URL, choose the **LongWrite** tab, and paste the absolute
 path of `llm-memory-agentic` into the workspace field. The first invocation
 registers the extension in local `~/.malaclaw/dashboard.yaml` using the
@@ -1167,8 +1191,12 @@ maliang run llm-memory-agentic-smoke --runtime dry-run
 # then run the same command again until complete
 ```
 
-`seed` provides deterministic fixture data and `dry-run` calls no model. Do
-not convert that smoke workspace into the real project; retain your current
+`seed` provides deterministic fixture data and `dry-run` calls no model. This
+rehearsal validates installation, manifest topology, local script contracts,
+and resume/approval mechanics; it does **not** exercise live-provider recall,
+open-access retrieval, semantic evidence recovery, or the scholarly judgment
+made by an outline review. Do not convert that smoke workspace into the real
+project; retain your current
 fresh `multi` workspace for the Codex run.
 
 For Claude Code:

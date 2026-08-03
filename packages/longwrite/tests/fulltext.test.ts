@@ -133,4 +133,16 @@ describe("fulltext ingestion", () => {
     expect(results[0]).toMatchObject({ sourceId: "pdf-only", status: "ingested", detail: "https://example.test/paper.pdf" });
     await expect(fs.readFile(path.join(ws, "fulltext", "pdf-only.md"), "utf-8")).resolves.toContain("Format: pdf");
   });
+
+  it("resolves a provider open-access landing page to its linked PDF", async () => {
+    const ws = await makeWorkspace([source("landing", "C", undefined, "https://repository.example.test/record/42")]);
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith("/record/42")) return new Response('<html><body><a href="/record/42/download/paper.pdf">Download</a></body></html>', { status: 200, headers: { "content-type": "text/html" } });
+      if (url.endsWith("/record/42/download/paper.pdf")) return new Response(new Uint8Array([37, 80, 68, 70, 45]), { status: 200, headers: { "content-type": "application/pdf" } });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    const extractor = async () => "Resolved PDF full text. ".repeat(150);
+    const { results } = await ingestFulltext(ws, fetchImpl, extractor);
+    expect(results[0]).toMatchObject({ sourceId: "landing", status: "ingested", detail: "https://repository.example.test/record/42/download/paper.pdf" });
+  });
 });

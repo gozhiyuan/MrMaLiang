@@ -22,6 +22,9 @@ export type PrepareResearchOptions = {
   providerFactory?: (id: ResearchProviderId) => ResearchProvider;
   targetCandidates?: number;
   queryBudget?: number;
+  /** Recovery expansions append newly recalled sources to the durable corpus
+   * instead of replacing earlier evidence-backed records. */
+  mergeExisting?: boolean;
 };
 
 export type BuildResearchArtifactsOptions = {
@@ -116,6 +119,16 @@ export async function recallSources(opts: PrepareResearchOptions): Promise<strin
   const countPerQuery = Math.max(1, Math.ceil(targetCandidates / queries.length));
 
   let raw: Array<RawSource & { provenance?: { query: string; provider: string; retrieved_at: string } }> = [];
+  let retainedCount = 0;
+  if (opts.mergeExisting) {
+    try {
+      const existing = await readJsonlArtifact<RawSource & { provenance?: { query: string; provider: string; retrieved_at: string } }>(opts.workspaceDir, "sources/deduped_sources.jsonl");
+      raw.push(...existing);
+      retainedCount = existing.length;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   let providerUsed: ResearchProviderId = providerId;
   let fallbackReason: string | undefined;
   const retrievedAt = new Date().toISOString();
@@ -156,6 +169,7 @@ export async function recallSources(opts: PrepareResearchOptions): Promise<strin
       "reports/recall-plan.md",
       `# Planned recall\n\nExecuted ${queries.length} query variants from ${SEARCH_PLAN_PATH}; ` +
       `targeted ${targetCandidates} candidates (${countPerQuery} per query); ` +
+      (retainedCount > 0 ? `retained ${retainedCount} prior deduplicated sources; ` : "") +
       `dropped ${exclusion.dropped} sources matching exclusion terms.\n` +
       (plan.taxonomy_cells.length > 0 ? `Taxonomy cells: ${plan.taxonomy_cells.map((cell) => `${cell.cell} (${cell.query_variants.length})`).join(", ")}\n` : "") +
       (plan.venue_priorities.length > 0 ? `Venue priorities: ${plan.venue_priorities.join(", ")}\n` : ""),
