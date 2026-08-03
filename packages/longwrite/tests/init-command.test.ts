@@ -107,7 +107,13 @@ describe("runInit", () => {
     expect(config.writing.target_length_words).toBe(10000);
     expect(config.publication.min_pages).toBeUndefined();
     expect(config.publication.presentation).toMatchObject({ citation_style: "numeric", show_production_statistics: false });
-    expect(config.figures.quality_gates).toMatchObject({ min_figures: 3, min_tables: 3 });
+    // A repository study sets no artifact quota either; the architecture
+    // diagram is required by id below because it is a domain requirement of
+    // this paper kind, not a count target.
+    expect(config.figures.quality_gates).toMatchObject({
+      min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0,
+      require_insight_statements: true,
+    });
     expect(config.research.provider).toBe("multi");
     expect(manifest).toContain("semantic_candidate_select");
     expect(await fs.readFile(path.join(target, ".malaclaw", "fixtures", "chapters", "section-1.md"), "utf8")).toContain("[codebase:repo-longexperiment]");
