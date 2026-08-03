@@ -74,6 +74,10 @@ describe("runInit", () => {
       min_cited_ab_sources_per_taxonomy_cell: 2,
     });
     expect(config.figures.quality_gates).toEqual({ min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: true });
+    // The only paid backend is emitted disabled rather than omitted: an
+    // operator should be able to find the control without knowing the schema,
+    // and must never have it default on.
+    expect(config.figures.backends.nanobanana).toMatchObject({ enabled: false, requires_approval: true });
     expect(config.publication.presentation).toMatchObject({
       citation_style: "author_year", show_production_statistics: false,
       disclosure: { enabled: false, provenance: { enabled: false } },
