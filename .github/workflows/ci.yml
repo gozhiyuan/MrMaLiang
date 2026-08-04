@@ -42,6 +42,12 @@ jobs:
         run: |
           npm ci --prefix .dependencies/MalaClaw
           npm run build --prefix .dependencies/MalaClaw
+      # Ahead of `npm ci`: a drifted internal range makes that step fail with a
+      # 404 for a package never published to the registry, which says nothing
+      # about the real cause. Naming it first turns a confusing install error
+      # into a one-line diagnosis.
+      - name: Check workspace version coherence
+        run: npm run check:versions
       - run: npm ci
       - run: npm run build
       # Stdlib unittest only — the experiment runner protocol deliberately has
