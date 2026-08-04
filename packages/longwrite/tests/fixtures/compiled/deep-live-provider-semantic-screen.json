@@ -1451,6 +1451,37 @@
                 "."
               ]
             }
+          },
+          {
+            "id": "verify_section_citations",
+            "owner": "source-curator",
+            "runtime": "script",
+            "title": "Verify the sources this section cites",
+            "inputs": [
+              "sources/classified_sources.jsonl"
+            ],
+            "optional_inputs": [
+              "chapters/{{item.id}}.md"
+            ],
+            "outputs": [
+              "reports/source-verification-{{item.id}}.md"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "verify",
+                ".",
+                "--section",
+                "{{item.id}}",
+                "--max-sources",
+                "20"
+              ]
+            }
           }
         ]
       },

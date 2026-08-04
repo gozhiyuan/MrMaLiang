@@ -794,7 +794,26 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     ];
     const draftSections = next.stages.find((stage) => stage.id === "draft_sections");
     if (draftSections && Array.isArray(draftSections.steps)) {
-      draftSections.steps = draftSections.steps.map((raw) => {
+      // Verify each section's citations as it is drafted rather than batching
+      // every URL into one check at the release gate. Batched verification
+      // finds a systemic problem — a provider that rewrote its URLs, a run of
+      // fabricated records — only after the whole manuscript exists, when the
+      // work to redo is at its most expensive.
+      const existingSteps = draftSections.steps as Array<Record<string, unknown>>;
+      draftSections.steps = [
+        ...existingSteps,
+        scriptStage({
+          id: "verify_section_citations",
+          title: "Verify the sources this section cites",
+          owner: "source-curator",
+          inputs: ["sources/classified_sources.jsonl"],
+          optional_inputs: ["chapters/{{item.id}}.md"],
+          outputs: [`reports/source-verification-{{item.id}}.md`],
+          validators: ["required_output_exists"], runtime: "script",
+          command: longwriteCommand(["research", "verify", ".", "--section", "{{item.id}}", "--max-sources", "20"]),
+        }),
+      ];
+      draftSections.steps = (draftSections.steps as Array<Record<string, unknown>>).map((raw) => {
         const step = raw as Record<string, unknown>;
         if (step.id !== "draft") return step;
         return {

@@ -47,7 +47,7 @@ resulting manifests still invoke the same subcommands.
 | `research stall-status` | — | `stall_status` |
 | `research survey-contract` | — | `outline_initial_survey_contract`, `outline_recheck_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
 | `research venue-upgrade` | — | `venue_upgrade` |
-| `research verify` | `--max-sources` | `final_release_verify_citations`, `verify_citations` |
+| `research verify` | `--max-sources` `--section` | `final_release_verify_citations`, `verify_citations`, `verify_section_citations` |
 | `review claims` | — | `claim_score` |
 | `review outline-approval` | — | `outline_approval_gate` |
 | `review request-clarification` | `--action-plan` | `request_operator_clarification` |

@@ -19,6 +19,16 @@ export type VerifySourceOptions = {
   maxSources?: number;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Verify only the sources a single drafted section cites.
+   *
+   * Batching every citation into one check at the release gate means a
+   * systemic problem — a provider that rewrote its URLs, a run of fabricated
+   * records — is discovered after the whole manuscript is written. Scoping the
+   * check to a section lets it run as that section is drafted, so the same
+   * defect surfaces while there is still cheap work to redo.
+   */
+  section?: string;
 };
 
 const OUTPUT = "sources/citation-verification.jsonl";
@@ -28,7 +38,7 @@ async function readJsonl<T>(workspaceDir: string, rel: string): Promise<T[]> {
   return parseJsonl<T>(await fs.readFile(path.join(workspaceDir, rel), "utf-8"));
 }
 
-async function citedIds(workspaceDir: string): Promise<Set<string>> {
+async function citedIds(workspaceDir: string, section?: string): Promise<Set<string>> {
   const dir = path.join(workspaceDir, "chapters");
   let names: string[] = [];
   try {
@@ -36,6 +46,7 @@ async function citedIds(workspaceDir: string): Promise<Set<string>> {
   } catch {
     return new Set();
   }
+  if (section) names = names.filter((name) => name === `${section}.md`);
   const ids = new Set<string>();
   for (const name of names) {
     const content = await fs.readFile(path.join(dir, name), "utf-8");
@@ -85,7 +96,7 @@ export async function verifyCitedSourceUrls(
   opts: VerifySourceOptions = {},
 ): Promise<{ results: CitationUrlVerification[]; written: string[] }> {
   const sources = await readJsonl<ClassifiedSource>(workspaceDir, "sources/classified_sources.jsonl");
-  const cited = await citedIds(workspaceDir);
+  const cited = await citedIds(workspaceDir, opts.section);
   const selected = (cited.size > 0 ? sources.filter((source) => cited.has(source.id)) : sources)
     .slice(0, opts.maxSources ?? 30);
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -97,9 +108,11 @@ export async function verifyCitedSourceUrls(
   }
   await fs.mkdir(path.join(workspaceDir, "sources"), { recursive: true });
   await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
-  await fs.writeFile(path.join(workspaceDir, OUTPUT), results.map((result) => JSON.stringify(result)).join("\n") + (results.length ? "\n" : ""), "utf-8");
+  const outputPath = opts.section ? OUTPUT.replace(/\.jsonl$/, `-${opts.section}.jsonl`) : OUTPUT;
+  const reportPath = opts.section ? REPORT.replace(/\.md$/, `-${opts.section}.md`) : REPORT;
+  await fs.writeFile(path.join(workspaceDir, outputPath), results.map((result) => JSON.stringify(result)).join("\n") + (results.length ? "\n" : ""), "utf-8");
   const counts = Object.fromEntries(["live", "redirect", "dead", "unknown"].map((status) => [status, results.filter((result) => result.status === status).length]));
-  await fs.writeFile(path.join(workspaceDir, REPORT), [
+  await fs.writeFile(path.join(workspaceDir, reportPath), [
     "# Citation URL Verification",
     "",
     `Checked ${results.length} ${cited.size > 0 ? "cited" : "available"} source URL(s).`,
@@ -108,5 +121,5 @@ export async function verifyCitedSourceUrls(
     ...results.map((result) => `- [${result.status}] ${result.source_id}: ${result.url}${result.http_status ? ` (HTTP ${result.http_status})` : ""}${result.detail ? `: ${result.detail}` : ""}`),
     "",
   ].join("\n"), "utf-8");
-  return { results, written: [OUTPUT, REPORT] };
+  return { results, written: [outputPath, reportPath] };
 }

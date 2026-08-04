@@ -438,13 +438,13 @@ export async function runResearchFulltext(workspaceDir: string, opts: { maxSourc
   for (const file of written) console.log(`  + ${file}`);
 }
 
-export async function runResearchVerify(workspaceDir: string, opts: { maxSources?: string } = {}): Promise<void> {
+export async function runResearchVerify(workspaceDir: string, opts: { maxSources?: string; section?: string } = {}): Promise<void> {
   const { verifyCitedSourceUrls } = await import("../lib/research/verify.js");
   const maxSources = opts.maxSources ? Number.parseInt(opts.maxSources, 10) : undefined;
   if (maxSources !== undefined && (!Number.isInteger(maxSources) || maxSources < 1 || maxSources > 200)) {
     throw new Error("--max-sources must be an integer from 1 to 200");
   }
-  const { results, written } = await verifyCitedSourceUrls(path.resolve(workspaceDir), { maxSources });
+  const { results, written } = await verifyCitedSourceUrls(path.resolve(workspaceDir), { maxSources, section: opts.section });
   for (const result of results) console.log(`  [${result.status}] ${result.source_id}: ${result.url}`);
   for (const file of written) console.log(`  + ${file}`);
 }

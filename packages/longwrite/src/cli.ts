@@ -717,7 +717,8 @@ research
   .command("verify <workspace>")
   .description("Verify URLs for cited sources and write a reproducible verification report")
   .option("--max-sources <n>", "Maximum cited source URLs to verify", "30")
-  .action(async (workspace, opts) => {
+    .option("--section <id>", "Verify only the sources cited by one drafted section")
+.action(async (workspace, opts) => {
     const { runResearchVerify } = await import("./commands/research.js");
     await runResearchVerify(workspace, opts);
   });
