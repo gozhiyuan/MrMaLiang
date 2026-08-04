@@ -438,13 +438,13 @@ export async function runResearchFulltext(workspaceDir: string, opts: { maxSourc
   for (const file of written) console.log(`  + ${file}`);
 }
 
-export async function runResearchVerify(workspaceDir: string, opts: { maxSources?: string } = {}): Promise<void> {
+export async function runResearchVerify(workspaceDir: string, opts: { maxSources?: string; section?: string } = {}): Promise<void> {
   const { verifyCitedSourceUrls } = await import("../lib/research/verify.js");
   const maxSources = opts.maxSources ? Number.parseInt(opts.maxSources, 10) : undefined;
   if (maxSources !== undefined && (!Number.isInteger(maxSources) || maxSources < 1 || maxSources > 200)) {
     throw new Error("--max-sources must be an integer from 1 to 200");
   }
-  const { results, written } = await verifyCitedSourceUrls(path.resolve(workspaceDir), { maxSources });
+  const { results, written } = await verifyCitedSourceUrls(path.resolve(workspaceDir), { maxSources, section: opts.section });
   for (const result of results) console.log(`  [${result.status}] ${result.source_id}: ${result.url}`);
   for (const file of written) console.log(`  + ${file}`);
 }
@@ -750,5 +750,55 @@ export async function runResearchComparisonOpportunities(workspaceDir: string): 
   const written = await writeComparisonOpportunities(resolved);
   const unserved = report.sections.filter((section) => section.packet_backed_sources > 0 && section.placed_artifacts.length === 0);
   console.log(`Comparison opportunities: ${report.sections.length} sections, ${unserved.length} with validated evidence and no placed artifact`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Reports which release gates the current corpus can still satisfy. Never
+ * fails: a gate out of reach is an operator decision, and failing here would
+ * only relocate the same dead end to an earlier stage. */
+export async function runResearchGateReachability(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeGateReachability } = await import("../lib/research/gate-reachability.js");
+  const { report, written } = await writeGateReachability(resolved);
+  const blocked = report.gates.filter((gate) => !gate.reachable);
+  console.log(report.evaluated
+    ? `Release-gate reachability: ${report.gates.length} gates, ${blocked.length} already out of reach`
+    : "Release-gate reachability: no classified corpus yet");
+  for (const gate of blocked) console.log(`  [unreachable] ${gate.id}: ${gate.detail}`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Folds the previous round's artifact plan into append-only history so the
+ * next planner can see what the loop has already tried. */
+export async function runResearchDirectionMemory(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeDirectionMemory } = await import("../lib/research/direction-memory.js");
+  const { memory, written } = await writeDirectionMemory(resolved);
+  console.log(`Directions tried: ${memory.directions.length} across ${memory.rounds_recorded} planning round(s)`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Decides from recorded scores whether the loop must change its frame. An
+ * agent judging its own progress is what produced the flat rounds, so this is
+ * computed rather than asked. */
+export async function runResearchStallStatus(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeStallStatus } = await import("../lib/research/stall.js");
+  const { status, written } = await writeStallStatus(resolved);
+  console.log(`Loop posture: ${status.posture} (${status.stale_rounds} round(s) without improvement across ${status.rounds})`);
+  console.log(`  eligible actions: ${status.eligible_tools.join(", ")}`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Rebuilds the comparison-dimension vocabulary from existing evidence. Also
+ * the migration path for a corpus that predates the registry: the promotion
+ * rule supplies the only judgment needed — whether sources converged on an
+ * axis — so no LLM pass is required to bootstrap it. */
+export async function runResearchComparisonRegistry(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { refreshComparisonRegistry, PROMOTION_THRESHOLD } = await import("../lib/research/comparison-registry.js");
+  const { registry, written } = await refreshComparisonRegistry(resolved);
+  console.log(`Comparison dimensions: ${registry.dimensions.length} in vocabulary, ${registry.proposed.length} proposed (promote at ${PROMOTION_THRESHOLD} sources)`);
+  for (const entry of registry.dimensions.slice(0, 10)) console.log(`  ${entry.sources.length}x  ${entry.label}`);
   for (const file of written) console.log(`  + ${file}`);
 }

@@ -47,7 +47,7 @@ export async function copyPublicationTemplateAssets(workspaceDir: string, paperD
   return (await relativeFiles(source)).map((rel) => path.join("paper", rel));
 }
 
-async function pageCount(pdfPath: string): Promise<number | null> {
+export async function pageCount(pdfPath: string): Promise<number | null> {
   return await new Promise((resolve) => {
     execFile("pdfinfo", [pdfPath], { timeout: 15_000 }, (error, stdout) => {
       if (error) return resolve(null);

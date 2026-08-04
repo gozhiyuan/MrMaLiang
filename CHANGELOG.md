@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.0 — 2026-08-03
+
+Seven changes, every one of them found by measuring a live flagship run rather
+than by reading the code.
+
+### Added
+
+- **Release-gate reachability** (`gate_reachability`, immediately after
+  `finalize_evidence_depth`). That run drafted 14k words and then met
+  `min_citation_depths_per_section.A: 1` against a corpus holding **zero**
+  A-level sources. No revision could have cleared it — the supply was fixed
+  before drafting began. The check reports which gates the classified corpus can
+  still satisfy, and never fails: a gate out of reach is a decision, and failing
+  there would only move the dead end earlier.
+- **A comparison-dimension vocabulary** (`evidence/comparison-dimensions.json`).
+  Two fields in the same evidence file behaved completely differently —
+  `taxonomy_cells` had 5 configured, 5 used, zero drift; `comparison_dimensions`
+  had 113 strings, 111 distinct. The difference is a registry, not the
+  difficulty of the judgment. The extractor now reuses a label whenever one
+  fits; a new label is a proposal that joins the vocabulary once a second
+  independent source names it. `research comparison-registry` rebuilds it and
+  doubles as the migration. It recovers little from a pre-registry corpus — the
+  flagship's 111 strings promote 2 — because a vocabulary cannot be retrofitted
+  onto free text; the value is forward.
+- **Loop memory** (`direction_memory`). Each round re-planned from scratch, so
+  it could spend itself re-proposing what the loop had settled. History is a set
+  of tried directions, not a transcript, and records what was chosen rather than
+  whether it was right — a memory that also ruled things out would become a
+  second planner.
+- **Structural pivot on stall** (`stall_status`). At two rounds without beating
+  the best score, prose and visual revision drop out and only frame-changing
+  actions remain; at four, the report says the constraint is likely outside what
+  the loop can change. Computed from recorded scores, because an agent judging
+  its own progress is what produced the flat rounds. The flagship's history is
+  `3 → 2.6 → 1.4` — declining for two rounds with a fourth queued to repeat the
+  same shape.
+- **Per-section citation verification** (`research verify --section`). Batching
+  every URL into one check at the release gate finds a systemic problem only
+  after the whole manuscript exists. It does not fail the drafting unit: a dead
+  URL is a source-quality problem, not a drafting error.
+- **Length-relative artifact density** in the opportunities report, measured
+  against the compiled page count.
+
+### Changed
+
+- **The evidence budget now scales with the paper profile.**
+  `semantic_screen.max_evidence_sources` was a flat 32 for every agentic paper —
+  a 60-page survey and a 10k-word repository study alike. A/B depth requires a
+  validated packet, so that cap is the ceiling on a manuscript's evidentiary
+  depth: 129 metadata-provisional A/B sources collapsed to 24, and the draft
+  reached 37 of its 60 target pages. Surveys now get 200/96, repository studies
+  100/40. **This is roughly a 3× increase in full-text downloads and evidence
+  extractions per run.**
+
 ## 0.3.4 — 2026-08-03
 
 ### Added

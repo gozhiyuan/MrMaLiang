@@ -1,6 +1,6 @@
 {
   "name": "@mr-maliang/longexperiment",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Long-running experiment workflows compiled to MalaClaw",
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@mr-maliang/research-protocol": "^0.3.0",
+    "@mr-maliang/research-protocol": "^0.4.0",
     "commander": "^12.1.0",
     "yaml": "^2.4.5",
     "zod": "^3.23.8"

@@ -717,7 +717,8 @@ research
   .command("verify <workspace>")
   .description("Verify URLs for cited sources and write a reproducible verification report")
   .option("--max-sources <n>", "Maximum cited source URLs to verify", "30")
-  .action(async (workspace, opts) => {
+    .option("--section <id>", "Verify only the sources cited by one drafted section")
+.action(async (workspace, opts) => {
     const { runResearchVerify } = await import("./commands/research.js");
     await runResearchVerify(workspace, opts);
   });
@@ -761,6 +762,38 @@ research
   .action(async (workspace) => {
     const { runResearchReconcileIdentities } = await import("./commands/research.js");
     await runResearchReconcileIdentities(workspace);
+  });
+
+research
+  .command("comparison-registry <workspace>")
+  .description("Rebuild the comparison-dimension vocabulary from existing evidence (also the migration for a pre-registry corpus)")
+  .action(async (workspace) => {
+    const { runResearchComparisonRegistry } = await import("./commands/research.js");
+    await runResearchComparisonRegistry(workspace);
+  });
+
+research
+  .command("stall-status <workspace>")
+  .description("Decide from recorded review scores whether the loop must change its frame")
+  .action(async (workspace) => {
+    const { runResearchStallStatus } = await import("./commands/research.js");
+    await runResearchStallStatus(workspace);
+  });
+
+research
+  .command("direction-memory <workspace>")
+  .description("Record the previous round's artifact intents so the next planner sees what was already tried")
+  .action(async (workspace) => {
+    const { runResearchDirectionMemory } = await import("./commands/research.js");
+    await runResearchDirectionMemory(workspace);
+  });
+
+research
+  .command("gate-reachability <workspace>")
+  .description("Report which release gates the current corpus can still satisfy")
+  .action(async (workspace) => {
+    const { runResearchGateReachability } = await import("./commands/research.js");
+    await runResearchGateReachability(workspace);
   });
 
 research

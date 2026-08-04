@@ -43,6 +43,12 @@ export type SectionOpportunity = {
 export type ComparisonOpportunityReport = {
   version: 1;
   sections: SectionOpportunity[];
+  /** Absent until a real PDF has been compiled. */
+  density?: {
+    pages: number;
+    published_artifacts: number;
+    pages_per_artifact: number | null;
+  };
 };
 
 type EvidenceEntry = {
@@ -114,6 +120,7 @@ export async function evaluateComparisonOpportunities(workspaceDir: string): Pro
   }
 
   const placed = await placementsBySection(workspaceDir);
+  const density = await artifactDensity(workspaceDir);
   const sections = (outline?.sections ?? []).flatMap((section) => {
     const sectionId = typeof section.id === "string" ? section.id : undefined;
     if (!sectionId) return [];
@@ -128,7 +135,32 @@ export async function evaluateComparisonOpportunities(workspaceDir: string): Pro
       placed_artifacts: placed.get(sectionId) ?? [],
     }];
   });
-  return { version: 1, sections };
+  return { version: 1, sections, ...(density ? { density } : {}) };
+}
+
+/**
+ * Artifact density against the manuscript that actually rendered.
+ *
+ * The quota this replaced was pinned to the *target* length: a profile asking
+ * for 12 tables and 6 figures was calibrated for 60 pages, and when the paper
+ * came in at 37 the target did not shrink with it — roughly 1 artifact per 2
+ * pages, against the 1-per-3-to-4 that comparable surveys run. The gap was
+ * filled with corpus bookkeeping. Measuring against rendered pages is what
+ * makes this an observation the planner can calibrate against instead of a
+ * number it has to hit.
+ */
+async function artifactDensity(workspaceDir: string): Promise<ComparisonOpportunityReport["density"]> {
+  const manifest = await readJson<{ figures?: unknown[]; tables?: unknown[] }>(workspaceDir, path.join("figures", "manifest.json"));
+  if (!manifest) return undefined;
+  const { pageCount } = await import("../publication.js");
+  const pages = await pageCount(path.join(workspaceDir, "build", "manuscript.pdf"));
+  if (pages === null || pages <= 0) return undefined;
+  const published = (manifest.figures?.length ?? 0) + (manifest.tables?.length ?? 0);
+  return {
+    pages,
+    published_artifacts: published,
+    pages_per_artifact: published > 0 ? Math.round((pages / published) * 10) / 10 : null,
+  };
 }
 
 function markdown(report: ComparisonOpportunityReport): string {
@@ -141,9 +173,23 @@ function markdown(report: ComparisonOpportunityReport): string {
     "evidence may still be better served by prose. Selecting an artifact that",
     "no evidence here supports is the failure this report exists to prevent.",
     "",
+  ];
+  if (report.density) {
+    const { pages, published_artifacts, pages_per_artifact } = report.density;
+    lines.push(
+      `The compiled manuscript is **${pages} pages** carrying **${published_artifacts}** artifact(s)` +
+      `${pages_per_artifact === null ? "" : `, one per ${pages_per_artifact} pages`}. ` +
+      "Published surveys of this kind tend to run one artifact per three to four pages. " +
+      "That is a calibration point measured against the manuscript that actually rendered, " +
+      "not a target: matching it with artifacts the evidence below does not support is worse " +
+      "than staying sparse.",
+      "",
+    );
+  }
+  lines.push(
     "| Section | Packet-backed sources | Taxonomy cells | Recorded limitations | Artifacts placed |",
     "| --- | ---: | ---: | ---: | --- |",
-  ];
+  );
   for (const section of report.sections) {
     const placed = section.placed_artifacts.length > 0 ? section.placed_artifacts.join(", ") : "—";
     lines.push(`| ${section.section_id} ${section.title} | ${section.packet_backed_sources} | ${section.taxonomy_cells.length} | ${section.recorded_limitations} | ${placed} |`);

@@ -514,15 +514,25 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         outputs: ["sources/source-evidence-candidates.json"], validators: ["required_output_exists"], runtime: "script",
         command: longwriteCommand(["research", "select-source-evidence-candidates", "."]),
       }),
+      scriptStage({
+        id: "comparison_registry",
+        title: "Refresh the comparison-dimension vocabulary",
+        owner: "analyst",
+        inputs: [],
+        optional_inputs: ["evidence/active-validated-source-evidence.json", "evidence/validated-source-evidence.json", "evidence/source-packets.json"],
+        outputs: ["evidence/comparison-dimensions.json", "reports/comparison-dimensions.md"],
+        validators: ["required_output_exists"], runtime: "script",
+        command: longwriteCommand(["research", "comparison-registry", "."]),
+      }),
       agentStage({
         id: "source_evidence_extract",
         title: "Extract source-level evidence from retrieved full text",
         owner: "analyst",
-        inputs: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl"],
+        inputs: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "evidence/comparison-dimensions.json"],
         optional_inputs: ["fulltext/*.md"],
-        skills: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "fulltext/*.md"],
+        skills: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "fulltext/*.md", "evidence/comparison-dimensions.json"],
         instructions: [
-          "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}.",
+          "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
           "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must copy an exact contiguous run of at least four normalized words from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
           "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The validator checks every excerpt against the retrieved text before accepting this attempt and controls final A/B depth.",
         ],
@@ -536,6 +546,18 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         outputs: ["sources/classified_sources.jsonl", "sources/bibliography.bib", "sources/citation_plan.jsonl", "evidence/active-validated-source-evidence.json", "reports/evidence-depth-finalization.md"],
         validators: ["required_output_exists", "jsonl_parseable"], runtime: "script",
         command: longwriteCommand(["research", "finalize-evidence-depth", "."]),
+      }),
+      // Depths are final here, so this is the earliest point a release gate can
+      // be shown to be already out of reach — and the last one before drafting
+      // spends a manuscript's worth of work against a target nothing can meet.
+      scriptStage({
+        id: "gate_reachability",
+        title: "Report which release gates the classified corpus can still satisfy",
+        owner: "analyst", inputs: ["sources/classified_sources.jsonl"],
+        optional_inputs: ["outline.json"],
+        outputs: ["reports/gate-reachability.md", "reports/gate-reachability.json"],
+        validators: ["required_output_exists"], runtime: "script",
+        command: longwriteCommand(["research", "gate-reachability", "."]),
       }),
       scriptStage({
         id: "corpus_gate_assessment",
@@ -611,7 +633,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
             owner: "analyst", when: "corpus_gate_pass < 1",
             inputs: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl"], optional_inputs: ["fulltext/*.md"], skills: ["sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "fulltext/*.md"],
             instructions: [
-              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
+              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
               "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Explain comparison dimensions and limitations faithfully so the deterministic validator can finalize citation depth.",
             ],
             outputs: ["evidence/source-packets.json", "evidence/validated-source-evidence.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
@@ -782,7 +804,26 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     ];
     const draftSections = next.stages.find((stage) => stage.id === "draft_sections");
     if (draftSections && Array.isArray(draftSections.steps)) {
-      draftSections.steps = draftSections.steps.map((raw) => {
+      // Verify each section's citations as it is drafted rather than batching
+      // every URL into one check at the release gate. Batched verification
+      // finds a systemic problem — a provider that rewrote its URLs, a run of
+      // fabricated records — only after the whole manuscript exists, when the
+      // work to redo is at its most expensive.
+      const existingSteps = draftSections.steps as Array<Record<string, unknown>>;
+      draftSections.steps = [
+        ...existingSteps,
+        scriptStage({
+          id: "verify_section_citations",
+          title: "Verify the sources this section cites",
+          owner: "source-curator",
+          inputs: ["sources/classified_sources.jsonl"],
+          optional_inputs: ["chapters/{{item.id}}.md"],
+          outputs: [`reports/source-verification-{{item.id}}.md`],
+          validators: ["required_output_exists"], runtime: "script",
+          command: longwriteCommand(["research", "verify", ".", "--section", "{{item.id}}", "--max-sources", "20"]),
+        }),
+      ];
+      draftSections.steps = (draftSections.steps as Array<Record<string, unknown>>).map((raw) => {
         const step = raw as Record<string, unknown>;
         if (step.id !== "draft") return step;
         return {
@@ -803,6 +844,28 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   // affordance: a long list of what not to select, and nothing showing where a
   // comparison would be justified. This restores the affordance as evidence
   // rather than as a number — it emits no target and cannot fail.
+  const stallStatus = scriptStage({
+    id: "stall_status",
+    title: "Decide whether this round must change the frame",
+    owner: "analyst",
+    inputs: [],
+    optional_inputs: ["reports/score-history.json", "reports/metrics.json"],
+    outputs: ["reports/stall-status.md", "reports/stall-status.json"],
+    validators: ["required_output_exists"], runtime: "script",
+    command: longwriteCommand(["research", "stall-status", "."]),
+  });
+
+  const directionMemory = scriptStage({
+    id: "direction_memory",
+    title: "Record the artifact directions this loop has already tried",
+    owner: "analyst",
+    inputs: [],
+    optional_inputs: ["reviews/artifact-plan.json", "reports/directions-tried.json"],
+    outputs: ["reports/directions-tried.md", "reports/directions-tried.json"],
+    validators: ["required_output_exists"], runtime: "script",
+    command: longwriteCommand(["research", "direction-memory", "."]),
+  });
+
   const comparisonOpportunities = scriptStage({
     id: "comparison_opportunities",
     title: "Report where validated evidence sits and what the visual plan serves",
@@ -818,9 +881,9 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     id: "artifact_plan",
     title: "Choose source-grounded analytical artifacts",
     owner: "analyst",
-    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "reports/comparison-opportunities.md"],
+    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "reports/comparison-opportunities.md", "reports/directions-tried.md"],
     optional_inputs: ["reports/metrics.json", "evidence/coverage.json", "feedback/user-feedback.md"],
-    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json", "reports/comparison-opportunities.md"],
+    skills: ["reviews/scorecard.json", "reports/evidence-audit.md", "outline.json", "sources/classified_sources.jsonl", "evidence/coverage.json", "reports/comparison-opportunities.md", "reports/directions-tried.md"],
     instructions: [
       "Read the review evidence and decide whether an additional analytical artifact would materially improve this paper. Write ONLY reviews/artifact-plan.json; use an empty intents array when no artifact is justified. Never use a count target to justify pipeline telemetry, source inventories, venue/DOI lists, packet-status fields, full-title lists, or decorative charts.",
       "reports/comparison-opportunities.md lists, per outline section, the sources carrying validated evidence packets, the taxonomy cells they span, the limitations they record, the comparison dimensions their claims name verbatim, and which artifacts the manuscript already carries there. Read it before deciding. A section holding several packet-backed sources across multiple taxonomy cells with no artifact is where a comparison is most likely to earn its place; a section already served needs no second artifact. It is an observation, never a target: there is no correct number of artifacts, a section may be better served by prose, and an artifact the listed evidence does not support is exactly the failure this report exists to prevent. Judge the dimensions yourself — they are free text, so two sources can name the same axis in different words, and only some of them are worth a table.",
@@ -841,11 +904,12 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     id: "action_plan",
     title: "Plan bounded remediation actions",
     owner: "analyst",
-    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "reviews/artifact-plan.json"],
+    inputs: ["reviews/scorecard.json", "reports/evidence-audit.md", "reviews/artifact-plan.json", "reports/stall-status.md"],
     optional_inputs: ["reports/metrics.json", "feedback/user-feedback.md", "reports/claim-gate.md", "reports/artifact-plan-repair.md"],
-    skills: ["reviews/scorecard.json", "reports/metrics.json", "reports/evidence-audit.md", "feedback/user-feedback.md", "reports/claim-gate.md", "reviews/artifact-plan.json"],
+    skills: ["reviews/scorecard.json", "reports/metrics.json", "reports/evidence-audit.md", "feedback/user-feedback.md", "reports/claim-gate.md", "reviews/artifact-plan.json", "reports/stall-status.md"],
     instructions: [
       "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
+      "reports/stall-status.md decides which tools are eligible this round, from recorded scores rather than from your own judgment of progress. When its posture is `structural`, several rounds have already failed to beat the best score, and every action you emit must use a tool it lists as eligible — repeating prose or visual revision would run a shape that has demonstrably not worked. Pivot the structure, not the tactics: change the outline's frame or the evidence the paper rests on. When the posture is `escalate`, say so plainly in the findings: the binding constraint is likely outside what this loop can change.",
       "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
       "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
       "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
@@ -981,7 +1045,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       optional_inputs: ["evidence/source-packets.json", "fulltext/*.md"],
       skills: ["reports/action-dispatch-research.json", "sources/source-evidence-candidates.json", "evidence/chunks.jsonl", "evidence/source-packets.json", "fulltext/*.md"],
       instructions: [
-        "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
+        "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
         "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one.",
       ],
       outputs: ["evidence/source-packets.json", "evidence/validated-source-evidence.json", "reports/source-evidence-repair.md"], validators: ["required_output_exists"],
@@ -1040,6 +1104,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     }),
   ] : [];
   const adaptiveChildren: Array<Record<string, unknown>> = [
+    stallStatus,
+    directionMemory,
     comparisonOpportunities,
     artifactPlanner,
     planner,
