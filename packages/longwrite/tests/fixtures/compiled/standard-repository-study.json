@@ -994,6 +994,33 @@
         "on_exhaustion": "succeed",
         "stages": [
           {
+            "id": "stall_status",
+            "owner": "analyst",
+            "runtime": "script",
+            "title": "Decide whether this round must change the frame",
+            "inputs": [],
+            "optional_inputs": [
+              "reports/score-history.json",
+              "reports/metrics.json"
+            ],
+            "outputs": [
+              "reports/stall-status.md",
+              "reports/stall-status.json"
+            ],
+            "validators": [
+              "required_output_exists"
+            ],
+            "command": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "stall-status",
+                "."
+              ]
+            }
+          },
+          {
             "id": "direction_memory",
             "owner": "analyst",
             "runtime": "script",
@@ -1127,7 +1154,8 @@
             "inputs": [
               "reviews/scorecard.json",
               "reports/evidence-audit.md",
-              "reviews/artifact-plan.json"
+              "reviews/artifact-plan.json",
+              "reports/stall-status.md"
             ],
             "optional_inputs": [
               "reports/metrics.json",
@@ -1146,6 +1174,7 @@
               "feedback/user-feedback.md",
               "reports/claim-gate.md",
               "reviews/artifact-plan.json",
+              "reports/stall-status.md",
               "codebases/manifest.json",
               "evidence/codebase-context.md",
               "evidence/codebase-analysis.json",
@@ -1153,6 +1182,7 @@
             ],
             "instructions": [
               "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
+              "reports/stall-status.md decides which tools are eligible this round, from recorded scores rather than from your own judgment of progress. When its posture is `structural`, several rounds have already failed to beat the best score, and every action you emit must use a tool it lists as eligible — repeating prose or visual revision would run a shape that has demonstrably not worked. Pivot the structure, not the tactics: change the outline's frame or the evidence the paper rests on. When the posture is `escalate`, say so plainly in the findings: the binding constraint is likely outside what this loop can change.",
               "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
               "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
               "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",

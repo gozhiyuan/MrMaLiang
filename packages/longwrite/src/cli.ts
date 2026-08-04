@@ -764,6 +764,14 @@ research
   });
 
 research
+  .command("stall-status <workspace>")
+  .description("Decide from recorded review scores whether the loop must change its frame")
+  .action(async (workspace) => {
+    const { runResearchStallStatus } = await import("./commands/research.js");
+    await runResearchStallStatus(workspace);
+  });
+
+research
   .command("direction-memory <workspace>")
   .description("Record the previous round's artifact intents so the next planner sees what was already tried")
   .action(async (workspace) => {

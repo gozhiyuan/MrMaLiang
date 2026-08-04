@@ -44,6 +44,7 @@ resulting manifests still invoke the same subcommands.
 | `research select-semantic-candidates` | — | `semantic_candidate_select` |
 | `research select-source-evidence-candidates` | — | `corpus_recovery_source_candidate_select`, `quality_source_evidence_candidate_select`, `source_evidence_candidate_select` |
 | `research snowball` | — | `snowball_recall` |
+| `research stall-status` | — | `stall_status` |
 | `research survey-contract` | — | `outline_initial_survey_contract`, `outline_recheck_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
 | `research venue-upgrade` | — | `venue_upgrade` |
 | `research verify` | `--max-sources` | `final_release_verify_citations`, `verify_citations` |

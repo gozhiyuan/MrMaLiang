@@ -777,3 +777,15 @@ export async function runResearchDirectionMemory(workspaceDir: string): Promise<
   console.log(`Directions tried: ${memory.directions.length} across ${memory.rounds_recorded} planning round(s)`);
   for (const file of written) console.log(`  + ${file}`);
 }
+
+/** Decides from recorded scores whether the loop must change its frame. An
+ * agent judging its own progress is what produced the flat rounds, so this is
+ * computed rather than asked. */
+export async function runResearchStallStatus(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeStallStatus } = await import("../lib/research/stall.js");
+  const { status, written } = await writeStallStatus(resolved);
+  console.log(`Loop posture: ${status.posture} (${status.stale_rounds} round(s) without improvement across ${status.rounds})`);
+  console.log(`  eligible actions: ${status.eligible_tools.join(", ")}`);
+  for (const file of written) console.log(`  + ${file}`);
+}
