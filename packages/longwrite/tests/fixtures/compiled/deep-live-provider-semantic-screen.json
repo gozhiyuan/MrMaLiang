@@ -419,12 +419,41 @@
         }
       },
       {
+        "id": "comparison_registry",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Refresh the comparison-dimension vocabulary",
+        "inputs": [],
+        "optional_inputs": [
+          "evidence/active-validated-source-evidence.json",
+          "evidence/validated-source-evidence.json",
+          "evidence/source-packets.json"
+        ],
+        "outputs": [
+          "evidence/comparison-dimensions.json",
+          "reports/comparison-dimensions.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "comparison-registry",
+            "."
+          ]
+        }
+      },
+      {
         "id": "source_evidence_extract",
         "owner": "analyst",
         "title": "Extract source-level evidence from retrieved full text",
         "inputs": [
           "sources/source-evidence-candidates.json",
-          "evidence/chunks.jsonl"
+          "evidence/chunks.jsonl",
+          "evidence/comparison-dimensions.json"
         ],
         "optional_inputs": [
           "fulltext/*.md"
@@ -432,10 +461,11 @@
         "skills": [
           "sources/source-evidence-candidates.json",
           "evidence/chunks.jsonl",
-          "fulltext/*.md"
+          "fulltext/*.md",
+          "evidence/comparison-dimensions.json"
         ],
         "instructions": [
-          "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}.",
+          "Read only the approved candidates and their retrieved full-text evidence. Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
           "Create packets only for sources listed in sources/source-evidence-candidates.json. supporting_excerpt must copy an exact contiguous run of at least four normalized words from the local retrieved full text; locator identifies its section/paragraph. Faithfully summarize supported claims, comparison dimensions, and limitations. Do not invent findings, quotes, page numbers, experiments, or sources.",
           "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Omit a source rather than fabricate support. The validator checks every excerpt against the retrieved text before accepting this attempt and controls final A/B depth."
         ],
@@ -769,7 +799,7 @@
               "fulltext/*.md"
             ],
             "instructions": [
-              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations.",
+              "Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]}. Use only supplied candidate IDs and exact contiguous excerpts of at least four normalized words from local retrieved full text. Omit unsupported sources; do not invent claims, pages, results, or citations. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
               "A-level recommendation needs at least two independently useful supported claims; B needs at least one. Explain comparison dimensions and limitations faithfully so the deterministic validator can finalize citation depth."
             ],
             "outputs": [
@@ -2181,7 +2211,7 @@
               "fulltext/*.md"
             ],
             "instructions": [
-              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
               "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one."
             ],
             "outputs": [
@@ -3145,7 +3175,7 @@
               "fulltext/*.md"
             ],
             "instructions": [
-              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates.",
+              "A targeted_research_expansion was dispatched this round (this stage runs only then). Write ONLY evidence/source-packets.json as {version:1,packets:[{source_id,recommended_depth,claims:[{claim,supporting_excerpt,locator,comparison_dimensions,limitations}]}]} for the current approved full-text candidates. comparison_dimensions must reuse a label from evidence/comparison-dimensions.json whenever one fits: a shared label is what lets two sources be recognized as being on the same axis, and an axis only one source names is that source's framing rather than a comparison. Write a new label only when none fits; it is recorded as a proposal and joins the vocabulary once a second source independently names it. Do not restate a claim as a dimension — a dimension is the axis, not the finding.",
               "Every supporting_excerpt must be an exact contiguous excerpt of at least four normalized words from local retrieved full text. Create packets only for the supplied candidate IDs, faithfully state limitations, and omit unsupported sources rather than fabricating support. A-level recommendation needs at least two independently useful claims; B needs at least one."
             ],
             "outputs": [

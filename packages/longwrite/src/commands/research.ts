@@ -789,3 +789,16 @@ export async function runResearchStallStatus(workspaceDir: string): Promise<void
   console.log(`  eligible actions: ${status.eligible_tools.join(", ")}`);
   for (const file of written) console.log(`  + ${file}`);
 }
+
+/** Rebuilds the comparison-dimension vocabulary from existing evidence. Also
+ * the migration path for a corpus that predates the registry: the promotion
+ * rule supplies the only judgment needed — whether sources converged on an
+ * axis — so no LLM pass is required to bootstrap it. */
+export async function runResearchComparisonRegistry(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { refreshComparisonRegistry, PROMOTION_THRESHOLD } = await import("../lib/research/comparison-registry.js");
+  const { registry, written } = await refreshComparisonRegistry(resolved);
+  console.log(`Comparison dimensions: ${registry.dimensions.length} in vocabulary, ${registry.proposed.length} proposed (promote at ${PROMOTION_THRESHOLD} sources)`);
+  for (const entry of registry.dimensions.slice(0, 10)) console.log(`  ${entry.sources.length}x  ${entry.label}`);
+  for (const file of written) console.log(`  + ${file}`);
+}

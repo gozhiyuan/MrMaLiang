@@ -29,6 +29,7 @@ resulting manifests still invoke the same subcommands.
 | `research classify` | `--topic` | `classify` |
 | `research codebases` | — | `codebase_prepare` |
 | `research comparison-opportunities` | — | `comparison_opportunities` |
+| `research comparison-registry` | — | `comparison_registry` |
 | `research corpus-gates` | `--advisory` | `corpus_gate_assessment`, `corpus_gates`, `corpus_recovery_assessment`, `quality_corpus_gates` |
 | `research direction-memory` | — | `direction_memory` |
 | `research dispatch-metrics` | — | `quality_dispatch_metrics` |

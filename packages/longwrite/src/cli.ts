@@ -765,6 +765,14 @@ research
   });
 
 research
+  .command("comparison-registry <workspace>")
+  .description("Rebuild the comparison-dimension vocabulary from existing evidence (also the migration for a pre-registry corpus)")
+  .action(async (workspace) => {
+    const { runResearchComparisonRegistry } = await import("./commands/research.js");
+    await runResearchComparisonRegistry(workspace);
+  });
+
+research
   .command("stall-status <workspace>")
   .description("Decide from recorded review scores whether the loop must change its frame")
   .action(async (workspace) => {
