@@ -1,164 +1,106 @@
-# MrMaLiang
+<div align="center">
+  <h1>🖌️ MrMaLiang</h1>
+  <p><b>An evidence-first workflow for long-form research artifacts.</b></p>
+  <h3>The agent decides what to argue. A script decides what counts as evidence.<br>Nothing reaches the manuscript that cannot be traced back to a source.</h3>
+  <p>Surveys, repository studies, audited experiment suites, and empirical papers that join those results — from one
+  public CLI, <code>maliang</code>. Every scholarly claim resolves to an exact locator in retrieved full text, every
+  empirical claim to an audited trial manifest, and every figure and table to the sources it compares. When the
+  evidence isn't there, the run stops and says so.</p>
+  <p><i>Named after 神笔马良 — Ma Liang and his magic brush, whose drawings became real. Grown up, and now required to
+  show his sources.</i></p>
+</div>
 
-MrMaLiang is a unified, evidence-first workflow for producing long-form
-research artifacts: literature surveys, repository studies, audited experiment
-suites, and empirical papers that join those results. Its one public CLI is
-`maliang`.
+<p align="center">
+  <a href="#-what-is-mrmaliang">What is MrMaLiang</a> |
+  <a href="#-why-mrmaliang">Why MrMaLiang</a> |
+  <a href="#-what-you-can-build">What You Can Build</a> |
+  <a href="#-quick-start">Quick Start</a> |
+  <a href="#-flagship-runs">Flagship Runs</a> |
+  <a href="#-how-evidence-becomes-a-claim">How Evidence Becomes a Claim</a> |
+  <a href="#-what-the-scripts-refuse">What the Scripts Refuse</a> |
+  <a href="#-setup">Setup</a> |
+  <a href="#-commands">Commands</a> |
+  <a href="#-repository-layout">Repository Layout</a> |
+  <a href="#-documentation">Documentation</a>
+</p>
 
-MrMaLiang coordinates two internal components:
+---
 
-- **LongWrite** gathers and verifies literature/code evidence, plans and writes
-  manuscripts, renders PDF/LaTeX, and applies review/release gates.
-- **LongExperiment** designs controlled study suites, locks inputs, runs a
-  reviewed executor, audits trial records, and emits a checksummed experiment
-  manifest.
+## 📚 What is MrMaLiang
 
-[MalaClaw](https://github.com/gozhiyuan/MalaClaw) remains an external workflow
-runtime. It owns durable flow state, approvals, retries, quotas, and worker
-execution. MrMaLiang owns the research-specific evidence and handoff contracts.
+MrMaLiang is **not a writing assistant.** It is the part of a research pipeline that refuses to let an unsupported
+claim through.
 
-## A small origin story
+An LLM can draft a survey in an afternoon. What it cannot do on its own is guarantee that the paper's 200th citation
+points at a real paper, that a comparison table's columns reflect what the sources actually measured, or that an
+empirical result came from a trial that was really run. MrMaLiang supplies that guarantee — and stops the run when
+it can't.
 
-The name comes from **Shen Bi Ma Liang** (神笔马良), the Chinese folk tale about
-Ma Liang and a magic brush whose drawings can become real. Here, Ma Liang has
-grown up into **MrMaLiang**: instead of drawing objects into existence, he uses
-bounded, evidence-first agent workflows to help turn a research brief into a
-long survey, repository study, controlled experiment, or book-length draft.
+- **Evidence packets, not summaries.** A source becomes citable only after semantic screening, full-text retrieval,
+  and a validated packet whose every supporting excerpt is an exact contiguous run of words from the retrieved text.
+  A script checks each excerpt against the source before granting the depth.
+- **Citation depth is earned.** `A` and `B` sources carry validated packets; `C` is metadata-level context; `D` is
+  dropped. Depth is assigned by a script from evidence that exists, never by the model's own assessment.
+- **Artifacts must argue something.** There is no figure or table quota. A table is published only when the artifact
+  planner selects it, binds it to classified source ids, and states why a reader needs it — and corpus bookkeeping
+  dressed as analysis is a major review finding.
+- **Empirical claims need an audited manifest.** No experimental number enters a manuscript without a checksummed
+  LongExperiment result bundle behind it.
+- **Gates fail closed and explain themselves.** Every gate writes a report saying what it measured, what it needed,
+  and what to do about it.
 
-The magic is deliberately constrained. A useful figure still needs verified
-metadata or evidence; a scholarly claim still needs a traceable source; and an
-empirical result still needs audited trials. MrMaLiang helps with the long,
-iterative craft of writing without pretending that evidence or scientific
-results can be conjured from nothing.
+One division explains most of the design: **the agent makes the intellectual judgment; a script owns schemas,
+provenance, locators, statistics, rendering, and release gates.** That is why gates are code and never prompts.
 
-## Development and recommended runtime
+MrMaLiang coordinates two internal components and runs on an external runtime:
 
-MrMaLiang is developed with **OpenAI Codex 5.6 models**. For live flagship
-runs, we recommend the local `codex` runtime with an active Codex subscription:
-it is the most exercised configuration for the agentic planning, drafting, and
-review stages in this repository. Complete the local Codex CLI login before
-running `maliang preflight … --runtime codex`.
+| Component | Owns |
+| --- | --- |
+| **LongWrite** | Literature and code evidence, outline review, drafting, LaTeX/PDF rendering, review and release gates |
+| **LongExperiment** | Controlled study suites, locked inputs, a reviewed executor, trial audits, checksummed manifests |
+| **[MalaClaw](https://github.com/gozhiyuan/MalaClaw)** *(external)* | Durable flow state, approvals, retries, quotas, worker execution |
 
-Codex is recommended, not mandatory. MalaClaw can also use a supported
-Claude/Claude Code runtime, and the offline `seed` + `dry-run` combination is
-available for a no-quota smoke test.
+## 🤔 Why MrMaLiang
 
-## What to use it for
+### It builds on what you already have
 
-| Goal | Start with | Uses |
+| You already have | MrMaLiang adds |
+| --- | --- |
+| **Claude Code / Codex** | They stay the writers and reviewers, with your subscription and permissions |
+| **A literature search** | Multi-provider recall, deduplication, quality scoring, and a citation ledger that survives the run |
+| **A prompt saying "cite your sources"** | A validator that checks each excerpt against retrieved full text and refuses the depth when it doesn't match |
+| **A LaTeX template** | A renderer owning captions, labels, table layout, and placement, so an agent never hand-writes a "Figure 3" that doesn't exist |
+| **A results CSV** | An audited manifest with checksums, trial records, and a verified handoff into the manuscript |
+
+### Compared with the alternatives
+
+| Approach | Great at | Falls short when |
 | --- | --- | --- |
-| Long literature survey | `paper.survey` | LongWrite |
-| Survey or architecture study of a GitHub/local repository | `paper.survey --repository …` | LongWrite + pinned code evidence; no execution |
-| Audited benchmark/model experiment without a paper | `experiment.*` | LongExperiment; prescribed protocols remain incubating |
-| New experiment paper, optionally starting from a repository | `paper.empirical` | LongExperiment → verified handoff → LongWrite |
-| Experiment paper with a human-supplied protocol/runner | `paper.empirical --experiment-authoring prescribed` | Prescribed LongExperiment → verified handoff → LongWrite |
-| Paper from an existing audited experiment bundle | `paper.empirical-import` | LongWrite only; optional repository binding |
-| Novel or technical book | `writing.novel` / `writing.technical-book` | LongWrite |
+| **Asking an LLM for a survey** | A fast, readable overview you'll verify yourself | The bibliography must be real and every claim traceable |
+| **Deep-research tools** | Broad synthesis with linked sources | You need exact locators, citation depth, and a release gate that can fail |
+| **Reference managers** | Organizing what you already found | Nothing decides what deserves an A-level reading, or checks the draft used it |
+| **Notebook + hand-written paper** | Full control | Long runs where the evidence pipeline itself must be auditable |
+| **MrMaLiang** | Long research artifacts where being wrong is expensive and provenance is the product | You want a quick draft to edit by hand |
 
-The project does not fabricate experimental results: empirical claims require
-an audited LongExperiment manifest. It also does not promise a fixed page count
-or a scientific discovery outcome; templates set measurable output targets and
-report failed gates honestly.
+Reach for MrMaLiang when the artifact **runs longer than one sitting**, makes **claims someone will check**, and
+would be **expensive to get wrong.**
 
-## Three public paper modes
+## 🚀 What You Can Build
 
-Users choose the research action, not a Cartesian product of internal axes:
+Choose the research action. MrMaLiang resolves it into internal declarations and checks them before running anything.
 
-| Public mode | Inputs | What MrMaLiang does |
+| Public mode | Inputs | What happens |
 | --- | --- | --- |
-| `paper.survey` | Topic, optional `--repository`, `--discover-repositories`, and `--reference-link` | Searches literature, optionally indexes pinned code, and writes a source-grounded survey. It never runs experiments. |
-| `paper.empirical` | Topic, hypothesis, optional repository, optional `--experiment-authoring` | Runs a controlled agentic or prescribed experiment, audits it, then writes from the verified result packet. |
-| `paper.empirical-import` | Existing audited manifest, optional repository | Runs no experiment; verifies and imports an existing result bundle before writing. |
+| `paper.survey` | Topic, optional `--repository`, `--discover-repositories`, `--reference-link` | Searches literature, optionally indexes pinned code, writes a source-grounded survey. **Never runs experiments.** |
+| `paper.empirical` | Topic, hypothesis, optional repository, optional `--experiment-authoring` | Runs a controlled agentic or prescribed experiment, audits it, then writes from the verified result packet |
+| `paper.empirical-import` | An existing audited manifest, optional repository | Runs no experiment; verifies and imports the bundle before writing |
 
-Supplying a GitHub or local repository **never selects experiment mode**. With
-`paper.survey`, it only changes the evidence profile from literature to
-repository and creates no LongExperiment component. New execution happens only
-when the operator explicitly selects `paper.empirical`.
+Also available: `writing.novel` and `writing.technical-book` (LongWrite only, no research gates), and `experiment.*`
+for an audited suite with no manuscript.
 
-MrMaLiang resolves the public choice into four internal declarations, stores
-them in `maliang.yaml`, and checks them before running either component:
-
-| Axis | Values | Meaning |
-| --- | --- | --- |
-| Paper kind | `survey` / `empirical` | Whether the manuscript reports new experimental results. |
-| Evidence profile | `literature` / `repository` | Whether a pinned existing codebase is central evidence. |
-| Experiment source | `none` / `run` / `import` | Whether experiment evidence is absent, newly executed, or imported as an audited bundle. |
-| Experiment authoring | `prescribed` / `agentic` | Whether a human supplies the runner/protocol or the LLM proposes and implements a bounded candidate. This applies only when source is `run`. |
-
-The initializer infers `evidenceProfile: repository` from `--repository` or
-`--discover-repositories` and
-defaults new experiments to `experimentAuthoring: agentic`. Passing
-`--experiment-authoring prescribed` changes only who supplies the protocol and
-runner. Surveys reject experiment options; imports reject authoring options;
-`run` requires LongExperiment; and `import` remains blocked until a valid
-manifest is handed off. Repository empirical initialization additionally binds
-the same immutable Git commit into the experiment and paper. Blueprints select
-these modes—they do not execute Markdown instructions. Use
-`maliang template list` to see each public contract or
-`maliang template show <id>` to inspect its component and handoff contract.
-
-Recognized arXiv, DOI, and OpenReview `--reference-link` values are resolved
-exactly and inserted as authoritative scholarly recall seeds. A failed exact
-resolution stops a live run. Other URLs remain unverified scope/style context.
-GitHub discovery is bounded and opt-in: scripts search and filter metadata,
-the LLM selects relevant candidates, and scripts reject duplicates before Git
-pins any selection. Mentioned repositories found in pinned README/CITATION
-content are only written to an operator candidate list; they are never crawled
-recursively.
-
-```bash
-maliang init related-software-survey \
-  --template paper.survey \
-  --topic "Agent memory systems and their implementation patterns" \
-  --discover-repositories \
-  --repository-query-budget 4 \
-  --repository-max-selected 3 \
-  --repository-language Python TypeScript
-```
-
-For a custom integrated run, choose the preset explicitly:
-
-```bash
-# LLM proposes and authors the bounded experiment.
-maliang init new-discovery \
-  --template paper.empirical \
-  --topic "A controlled intervention" \
-  --hypothesis "The intervention improves the fixed primary metric."
-
-# A human supplies the protocol/runner in experiment/experiment.yaml.
-maliang init prescribed-study \
-  --template paper.empirical \
-  --experiment-authoring prescribed \
-  --topic "Evaluation of a declared protocol" \
-  --hypothesis "The declared treatment improves the fixed primary metric."
-
-# Supplying a repository pins a starting codebase but does not otherwise change
-# the experiment command.
-maliang init repository-experiment \
-  --template paper.empirical \
-  --topic "A controlled repository intervention" \
-  --hypothesis "The intervention improves the fixed primary metric." \
-  --repository https://github.com/example/project.git
-
-# No experiment is run; an existing audited manifest is verified and imported.
-maliang init imported-study \
-  --template paper.empirical-import \
-  --topic "Analysis of an audited result bundle"
-maliang handoff import imported-study --manifest /absolute/path/to/experiment-manifest.json
-```
-
-The prescribed scaffold intentionally fails preflight until its pinned inputs,
-primary metric/direction, baseline and treatment conditions, repeated seeds,
-trial ceiling, and runner are explicitly configured. The agentic scaffold
-supplies a bounded envelope but still requires the operator to review it.
-
-When an existing repository has a paper, figures, or README result tables but
-does not have an audited MrMaLiang-compatible manifest with per-trial evidence,
-use `paper.survey`. Cite the original paper for its experimental conclusions and
-describe them as results reported by the authors. Do not select import merely
-because the upstream publication is empirical.
-
-### Survey versus experiment boundary
+> **Supplying a repository never selects experiment mode.** With `paper.survey` it only changes the evidence profile
+> from literature to repository and creates no LongExperiment component. New execution happens only when you
+> explicitly choose `paper.empirical`.
 
 ```mermaid
 flowchart LR
@@ -173,104 +115,91 @@ flowchart LR
     X --> M["Empirical outline → methods/results → review → manuscript"]
 ```
 
-Survey mode may accurately summarize an upstream experiment, but it attributes
-the finding to that source. Experiment mode adds LongExperiment before writing
-and exposes only its verified comparison packet to outline, drafting, visual,
-review, and release stages. Repository code, README prose, screenshots, and
-runner logs can never substitute for that packet.
+Survey mode may accurately summarize an upstream experiment, but it attributes the finding to that source.
+Experiment mode adds LongExperiment before writing and exposes only its verified comparison packet to the outline,
+drafting, visual, review, and release stages. Repository code, README prose, screenshots, and runner logs can never
+substitute for that packet.
 
-## Prerequisites
+> **When a repository has a paper but no audited manifest** — figures, README result tables, published numbers —
+> use `paper.survey`. Cite the original paper for its conclusions and describe them as results reported by its
+> authors. Do not select import merely because the upstream publication is empirical.
 
-Required for all workflows:
+<details>
+<summary><b>The four internal axes</b> — what your choice resolves into</summary>
 
-- Node.js **22+** and npm
-- [MalaClaw](https://github.com/gozhiyuan/MalaClaw) **>=2.0.0 <3.0.0** on `PATH`
-- Git, for repository studies and immutable input pins
+| Axis | Values | Meaning |
+| --- | --- | --- |
+| Paper kind | `survey` / `empirical` | Whether the manuscript reports new experimental results |
+| Evidence profile | `literature` / `repository` | Whether a pinned existing codebase is central evidence |
+| Experiment source | `none` / `run` / `import` | Whether experiment evidence is absent, newly executed, or imported |
+| Experiment authoring | `prescribed` / `agentic` | Whether a human supplies the runner, or the LLM proposes a bounded candidate |
 
-Required for a real survey or manuscript run:
+Surveys reject experiment options; imports reject authoring options; `run` requires LongExperiment; and `import`
+stays blocked until a valid manifest is handed off. Repository empirical initialization binds the same immutable Git
+commit into both the experiment and the paper. Inspect any contract with `maliang template show <id>`.
 
-- **Recommended:** an authenticated `codex` runtime with an active Codex
-  subscription. It is the primary live-run configuration used to develop this
-  repository.
-- Alternatively, an authenticated `claude`/`claude-code` runtime
-- A LaTeX engine (`tectonic` or `latexmk`) for final PDF output
-- `pdftotext`, Mermaid CLI, and Matplotlib only when their selected evidence or
-  figure features require them
+</details>
 
-Required only for agent-authored experiment flagships:
-
-- Pinned code/model/benchmark inputs and a declared trial budget
-- A reviewed Modal adapter and provider account for the selected workload. The
-  checked-in runtime profile selects the maintained GPU base and overlay; normal
-  researchers do not build or publish a container image.
-- Human approval of the proposal, generated code before any remote test/smoke
-  execution, and full-trial compute after smoke
-
-The two agentic empirical flagships run generated candidate code only through
-their Modal remote-job adapter. The control plane validates and materializes
-the candidate but does not execute it locally. Surveys never need Modal.
-
-## Shared optional integrations and environment
-
-The available workflows share this setup. Configure only the capabilities you
-actually select; a missing optional key is reported by preflight rather than
-silently replaced. Keep writing credentials in `<workspace>/writing/.env`,
-which is ignored by Git:
+<details>
+<summary><b>Choosing a preset explicitly</b> — empirical variants</summary>
 
 ```bash
-cd <workspace>/writing
-cp .env.example .env
+# The LLM proposes and authors the bounded experiment.
+maliang init new-discovery \
+  --template paper.empirical \
+  --topic "A controlled intervention" \
+  --hypothesis "The intervention improves the fixed primary metric."
+
+# A human supplies the protocol/runner in experiment/experiment.yaml.
+maliang init prescribed-study \
+  --template paper.empirical \
+  --experiment-authoring prescribed \
+  --topic "Evaluation of a declared protocol" \
+  --hypothesis "The declared treatment improves the fixed primary metric."
+
+# A repository pins a starting codebase; the experiment command is unchanged.
+maliang init repository-experiment \
+  --template paper.empirical \
+  --topic "A controlled repository intervention" \
+  --hypothesis "The intervention improves the fixed primary metric." \
+  --repository https://github.com/example/project.git
+
+# No experiment runs; an existing audited manifest is verified and imported.
+maliang init imported-study --template paper.empirical-import \
+  --topic "Analysis of an audited result bundle"
+maliang handoff import imported-study --manifest /absolute/path/to/experiment-manifest.json
 ```
 
-| Capability | Required for | Credential or setup | Where it belongs |
-| --- | --- | --- | --- |
-| Codex or Claude Code harness | Any live writing run | Complete the local CLI login. | Local runtime login; not `.env` by default. |
-| Broad scholarly recall | Deep survey/repository survey (recommended) | `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` | `writing/.env` |
-| GitHub metadata and private/rate-limited repository access | Repository studies (optional for public clone) | `GITHUB_TOKEN` | `writing/.env` |
-| Hybrid embedding retrieval or direct API worker | Only when enabled in `longwrite.yaml` | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` (or the matching `MALACLAW_*` key) | `writing/.env` |
-| Nano Banana conceptual illustration | Only when explicitly enabled and approved | `LONGWRITE_NANOBANANA_API_KEY`, or `GEMINI_API_KEY` / `GOOGLE_API_KEY` | `writing/.env` |
-| Remote GPU experiments | Prescribed Modal runner after its local adapter smoke test | Modal login, or `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` for unattended jobs | Trusted launcher environment or secrets manager—**never** workspace `.env`, YAML, or Git. |
+The prescribed scaffold intentionally fails preflight until its pinned inputs, primary metric and direction,
+baseline and treatment conditions, repeated seeds, trial ceiling, and runner are explicitly configured. The agentic
+scaffold supplies a bounded envelope that still requires operator review.
 
-Nano Banana is optional and limited to an explicitly approved, non-evidentiary
-conceptual illustration. It must never stand in for a source-grounded diagram,
-comparison table, metadata plot, or experimental result. The detailed
-configuration and approval contract is in the [long survey runbook](docs/flagships/long-agentic-survey.md#9-optional-nano-banana-conceptual-diagram).
+Recognized arXiv, DOI, and OpenReview `--reference-link` values are resolved exactly and inserted as authoritative
+recall seeds; a failed exact resolution stops a live run. Other URLs remain unverified scope context. GitHub
+discovery is bounded and opt-in: scripts search and filter metadata, the LLM selects candidates, and scripts reject
+duplicates before Git pins anything.
 
-For Modal account setup, remote-job adapters, cancellation, and conservative
-first-pilot caps, see [Remote GPU / Modal setup](docs/remote-gpu-modal.md).
-Surveys and repository studies do not need Modal or a GPU.
+</details>
 
-## Install from source
+## ⚡ Quick Start
+
+**Requires Node.js 22+ and [MalaClaw](https://github.com/gozhiyuan/MalaClaw) `>=2.0.0 <3.0.0` on `PATH`.**
 
 ```bash
-git clone https://github.com/gozhiyuan/MrMaLiang.git
-cd MrMaLiang
-
-node --version                 # v22 or newer
-malaclaw --version             # >=2.0.0 <3.0.0
-npm install
-npm run build
+git clone https://github.com/gozhiyuan/MrMaLiang.git && cd MrMaLiang
+npm install && npm run build
 npm link --workspace @mr-maliang/maliang
 
-maliang --version
 maliang template list
 ```
 
-From an unlinked checkout, replace `maliang …` below with `npm run maliang -- …`.
-LongWrite and LongExperiment commands are internal component interfaces; do not
-install them globally for new workspaces.
+From an unlinked checkout, use `npm run maliang -- …`. LongWrite and LongExperiment are internal component
+interfaces — don't install them globally.
 
-## First run: free survey smoke test
+### 🧪 The free smoke test
 
-Complete [Install from source](#install-from-source) first: this smoke test
-still requires Node 22+, MalaClaw on `PATH`, and the built `maliang` command.
-It intentionally uses the offline `seed` provider and `dry-run` runtime, so it
-requires **none** of the optional keys or LLM/Modal setup above. Configure
-[Shared optional integrations and environment](#shared-optional-integrations-and-environment)
-only before a live survey, repository study, image-generation feature, or
-remote experiment.
-
-Run the smoke test before spending model quota or configuring a real survey:
+Run this before spending any model quota. It uses the offline `seed` provider and the `dry-run` runtime, so it needs
+**no API keys, no LLM, and no GPU** — while exercising the real engine, gates, validators, and artifact contracts.
 
 ```bash
 maliang init survey-smoke \
@@ -283,49 +212,27 @@ maliang init survey-smoke \
 
 maliang preflight survey-smoke --runtime dry-run
 maliang run survey-smoke --runtime dry-run
-maliang writing approve survey-smoke --batch
+maliang writing approve survey-smoke --batch   # the first run pauses at the outline gate
 maliang run survey-smoke --runtime dry-run
 ```
 
-The first run pauses at the outline approval gate. The second run completes the
-offline fixture workflow. A live `multi`-provider survey uses the same lifecycle
-with `--runtime codex` or `--runtime claude-code`.
+A live run uses the same lifecycle with `--runtime codex` or `--runtime claude-code`.
 
-## Flagship runs
+> **What the rehearsal does not prove.** It validates installation, manifest topology, script contracts, and
+> resume/approval mechanics. It does not exercise live-provider recall, open-access retrieval, semantic evidence
+> recovery, or the scholarly judgment in an outline review. Don't convert a smoke workspace into a real project.
 
-Every flagship has a detailed runbook in [docs/flagships](docs/flagships/) and
-a versioned starting configuration in [examples/flagships](examples/flagships/).
-`maliang init --blueprint <id>` reads the machine-readable blueprint and
-materializes the matching workspace configuration.
+## 🏁 Flagship Runs
+
+Each flagship has a runbook in [docs/flagships](docs/flagships/) and a versioned blueprint in
+[examples/flagships](examples/flagships/).
 
 | Flagship | Start command | Compute |
 | --- | --- | --- |
 | [Long agentic survey](docs/flagships/long-agentic-survey.md) | `maliang init llm-memory-agentic --blueprint long-agentic-survey` | Codex/Claude; no GPU |
-| [Repository survey](docs/flagships/repository-survey.md) | `maliang init repo-study --blueprint repository-survey --repository <Git-URL-or-local-Git-path>` | Codex/Claude; no GPU |
+| [Repository survey](docs/flagships/repository-survey.md) | `maliang init repo-study --blueprint repository-survey --repository <git-url>` | Codex/Claude; no GPU |
 | [Nanochat agentic empirical paper](docs/flagships/nanochat-agentic-empirical-paper.md) | `maliang init nanochat-agentic-paper --blueprint nanochat-agentic-empirical-paper` | Codex/Claude + reviewed Modal adapter |
 | [Self-play autonomous empirical paper](docs/flagships/self-play-autonomous-empirical-paper.md) | `maliang init self-play-agentic-paper --blueprint self-play-autonomous-empirical-paper` | Codex/Claude + reviewed Modal adapter |
-
-The commands above already select the current public templates through each
-blueprint: `paper.survey` for surveys and `paper.empirical` for empirical
-papers. Do not replace them with an `experiment.*` template. The empirical
-blueprints now use generalized Modal remote-job profiles with a workspace-owned,
-locked `uv` adapter: verify its provider-fake tests, run one bounded GPU smoke,
-and issue a config-bound lease before running them. The adoption procedure is in [Flagship platform
-adoption](docs/flagships/platform-adoption.md).
-
-The runtime catalog is platform-maintained: it pins the shared CUDA/PyTorch
-base and any approved workload overlay. A researcher authenticates Modal and
-runs an approved blueprint; they do not manage images, registries, or provider
-credentials inside the research workspace.
-
-Recommended validation order: survey smoke → long survey → repository survey →
-Nanochat remote pilot → self-play remote pilot. The first two are validated writing
-flagships. The empirical workflows are executable release candidates with
-complete contracts and runbooks, but they do not ship precomputed scientific
-results; promote a result only after a real run passes every audit and paper
-release gate.
-
-### Run a 60+ page-target survey
 
 ```bash
 maliang init llm-memory-agentic --blueprint long-agentic-survey
@@ -333,165 +240,196 @@ maliang preflight llm-memory-agentic --runtime codex
 maliang run llm-memory-agentic --runtime codex
 ```
 
-The blueprint configures a 24,000-word target, 60-page minimum, 80 woven
-sources, six figures, twelve tables, and author–year citations. Actual pages
-depend on content and layout; the release report records whether each gate was
-met.
+The survey blueprint sets a 24,000-word target, a 60-page minimum, 80 woven sources, and author–year citations. It
+sets **no figure or table quota** — artifacts are selected because they carry an argument, not to reach a count.
+Actual length depends on content and layout; the release report records every gate and whether it was met.
 
-### Run a repository survey
+Recommended order: smoke → long survey → repository survey → Nanochat pilot → self-play pilot. The two writing
+flagships are validated. The empirical workflows are executable release candidates with complete contracts and
+runbooks; **they ship no precomputed scientific results.** Promote a result only after a real run passes every audit
+and release gate. The empirical blueprints use generalized Modal remote-job profiles with a workspace-owned locked
+`uv` adapter — verify its provider-fake tests, run one bounded GPU smoke, and issue a config-bound lease first, per
+[Flagship platform adoption](docs/flagships/platform-adoption.md).
 
-```bash
-maliang init repo-study \
-  --blueprint repository-survey \
-  --repository https://github.com/your-org/your-repository.git
+## 🔬 How Evidence Becomes a Claim
 
-maliang preflight repo-study --runtime codex
-maliang run repo-study --runtime codex
+The survey pipeline, and where a run can legitimately stop:
+
+```text
+recall ──▶ score ──▶ classify ──▶ semantic screen ──▶ full text ──▶ evidence packets
+  │          │          │              │                  │              │
+  │          │          │              │                  │              └─ exact excerpts, script-checked
+  │          │          │              │                  └─ open-access retrieval only
+  │          │          │              └─ bounded title/abstract triage
+  │          │          └─ A / B / C / D depth from evidence that exists
+  │          └─ recency · citations · venue · acceptance
+  └─ arXiv · Semantic Scholar · OpenAlex · DBLP · Crossref
+                                    │
+     corpus gates ◀─────────────────┘        ← stops here when evidence is too thin
+          │
+          ▼
+   gate reachability ──▶ outline ──▶ review ──▶ draft ──▶ quality loop ──▶ release gates ──▶ PDF
+          │                                                    │
+          │                                                    └─ a stall pivots the frame, not the prose
+          └─ names gates already unsatisfiable, before a word is drafted
 ```
 
-The codebase is cloned and resolved to an immutable commit before the paper can
-cite implementation evidence. The survey still gathers scholarly literature for
-context and comparison.
+Two properties are worth calling out because they are unusual:
 
-### Run a repository experiment and empirical paper
+**Reachability is reported before drafting.** Once citation depths are final, a script states which release gates the
+corpus can still satisfy. A per-section A-level requirement against a corpus holding zero A-level sources is
+unsatisfiable however well the draft is written — far cheaper to learn before 14,000 words than after.
+
+**A stalled loop changes its frame.** When review rounds stop beating the best score, prose and visual revision drop
+out of the eligible actions and only frame-changing ones remain: reopen the outline, or expand the evidence. The
+decision comes from recorded scores, not from asking the agent whether it is stuck.
+
+## 🛡️ What the Scripts Refuse
+
+The gates are the product. A run that stops because one held is a successful run.
+
+| Gate | Refuses |
+| --- | --- |
+| **Excerpt validation** | A packet whose supporting excerpt is not an exact contiguous run from the retrieved text |
+| **Corpus gates** | Drafting on a corpus below its configured candidate, taxonomy, core-source, recency, or diversity targets |
+| **Citation verification** | Runs per section as it is drafted rather than batched at the end, so a systemic problem surfaces while the work to redo is cheap |
+| **Evidence audit** | A factual claim with no packet chunk behind it |
+| **Artifact relevance** | Pipeline telemetry, source inventories, DOI/venue listings, or packet-status tables presented as analysis |
+| **Insight statements** | A figure or table with no stated reason a reader needs it — the renderer may label an artifact, never argue for it |
+| **Publication layout** | A file path or raw `[source:...]` marker printed in the manuscript |
+| **Release gates** | Bibliography depth, figure and table contracts, length targets, and submission packaging |
+
+Some rules are deliberately not tunable: an A/B source must have locally retrieved full text and exact excerpts,
+agents cannot invent citations or experimental results, and the flow keeps failure reports rather than drafting
+through a failed gate. Numerical thresholds *are* yours to set — lower one as an explicit scope decision recorded
+before the run, never to make an unchanged scope pass. See
+[research gates and what is safe to tune](packages/longwrite/docs/configuration.md#research-gates-configurable-targets-and-fixed-evidence-rules).
+
+## 🔧 Setup
+
+<details>
+<summary><b>Prerequisites</b></summary>
+
+**Everything:** Node.js 22+, MalaClaw `>=2.0.0 <3.0.0` on `PATH`, Git.
+
+**A real manuscript run:** an authenticated `codex` runtime (recommended — the most exercised configuration, and
+what this repository is developed against) or `claude-code`; a LaTeX engine (`tectonic` or `latexmk`); plus
+`pdftotext`, Mermaid CLI, or Matplotlib only when a selected feature needs them.
+
+**Agent-authored experiment flagships:** pinned code/model/benchmark inputs, a declared trial budget, a reviewed
+Modal adapter, and human approval of the proposal, of generated code before any remote execution, and of full-trial
+compute after smoke. Generated candidate code runs **only** through the Modal remote-job adapter — the control plane
+validates and materializes a candidate but never executes it locally. Surveys never need Modal; see
+[Remote GPU / Modal setup](docs/remote-gpu-modal.md).
+
+</details>
+
+<details>
+<summary><b>Credentials</b> — configure only what you select</summary>
+
+Keep writing credentials in `<workspace>/writing/.env` (Git-ignored; start from `.env.example`). A missing optional
+key is reported by preflight rather than silently worked around.
+
+| Capability | Required for | Credential |
+| --- | --- | --- |
+| Codex / Claude Code harness | Any live run | Local CLI login, not `.env` |
+| Broad scholarly recall | Deep surveys (recommended) | `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` |
+| GitHub metadata / private repos | Repository studies | `GITHUB_TOKEN` |
+| Embedding retrieval or a direct API worker | Only when enabled in `longwrite.yaml` | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` |
+| Nano Banana illustration | Only when explicitly enabled **and** approved | `LONGWRITE_NANOBANANA_API_KEY` or `GEMINI_API_KEY` |
+| Remote GPU experiments | The Modal runner, after its adapter smoke test | Modal login — **never** in workspace `.env`, YAML, or Git |
+
+Nano Banana is optional, off by default, and limited to a non-evidentiary orienting illustration. It must never
+stand in for a source-grounded diagram, comparison table, metadata plot, or experimental result.
+
+</details>
+
+## 🛠️ Commands
 
 ```bash
-maliang init nanochat-agentic-paper \
-  --blueprint nanochat-agentic-empirical-paper
-maliang preflight nanochat-agentic-paper --runtime codex
-maliang run nanochat-agentic-paper --runtime codex
+# lifecycle
+maliang template list                          # public contracts
+maliang init <workspace> --blueprint <id>      # materialize a flagship configuration
+maliang preflight <workspace> --runtime codex  # check every declared capability
+maliang run <workspace> --runtime codex        # advance from wherever state left off
+maliang run <workspace> --reset                # restart component flow state
+maliang status <workspace>
+maliang provenance <workspace>
+
+# components
+maliang writing --help
+maliang experiment --help
+maliang writing sync .                         # regenerate the compiled manifest after a config edit
+maliang writing validate config .
+
+# the runtime stays separate for flow inspection
+malaclaw flow runtimes
+malaclaw flow status
 ```
 
-This path first uses literature and the pinned Nanochat codebase to propose and
-test a bounded intervention. After explicit design and full-trial approvals,
-LongExperiment freezes and audits the multi-seed result; only then can LongWrite
-use it as empirical evidence. Follow the dedicated runbook before spending
-compute.
+> ⚠️ **A config edit needs a sync, and a sync needs a fresh run.** `longwrite.yaml` is your configuration;
+> `malaclaw.yaml` is the compiled manifest a run executes. Editing the former changes nothing until
+> `maliang writing sync .` regenerates the latter — and that changes the workflow hash, which an in-flight run
+> cannot adopt without a reset. Decide thresholds before starting, not during.
 
-### Run a from-scratch autonomous empirical paper
+**Development**
 
 ```bash
-maliang init self-play-agentic-paper \
-  --blueprint self-play-autonomous-empirical-paper
-maliang preflight self-play-agentic-paper --runtime codex
-maliang run self-play-agentic-paper --runtime codex
+npm run build                  # build all workspaces
+npm test                       # complete suite
+npm run release:check          # version coherence + tests + template catalog
 ```
 
-Here “from scratch” means no central implementation repository. Public
-benchmark/model revisions and the evaluation envelope remain fixed; the LLM
-authors only the bounded candidate project.
-
-### Continue after an approval gate
-
-```bash
-maliang writing review agenda <workspace>
-maliang writing approve <workspace> <approval-id>
-maliang run <workspace> --runtime codex
-```
-
-### Optional dashboard
-
-The MalaClaw dashboard can create and edit survey workspaces through the
-**MrMaLiang** tab. It accepts a parent MrMaLiang workspace and offers **Browse
-folders** for local selection. Its **Repository evidence** field accepts one Git URL or
-local Git path per line. A non-empty field selects the repository-study
-evidence profile; it does not execute the repository or start an experiment.
-
-```bash
-maliang writing dashboard --install-only
-malaclaw dashboard-extensions doctor
-maliang writing dashboard
-```
-
-When MalaClaw is used from a source checkout, build its dashboard once before
-the first launch:
-
-```bash
-cd /path/to/MalaClaw/dashboard
-npm install
-npm run build
-```
-
-The dashboard exposes the pinned-code manifest, validated architecture dossier,
-and locator-repair report alongside normal outline/review/build artifacts. The
-CLI blueprint remains the recommended reproducible starting point for a
-flagship run.
-
-## Workspace and repository structure
+## 📁 Repository Layout
 
 A workspace has one public parent and fixed component subdirectories:
 
 ```text
 my-project/
   maliang.yaml                 # template and component lifecycle contract
-  writing/                     # present for writing/paper templates
-    longwrite.yaml             # editable writing/research configuration
+  writing/                     # writing/paper templates
+    longwrite.yaml             # editable configuration — yours
+    malaclaw.yaml              # compiled manifest — generated, never hand-edited
     .env                       # local secrets; never commit
-    evidence/  reports/  paper/
-  experiment/                  # present for experiment/empirical templates
-    experiment.yaml            # runner, pins, trials, and suite contract
+    evidence/  sources/  chapters/  paper/  reports/
+  experiment/                  # experiment/empirical templates
+    experiment.yaml            # runner, pins, trials, suite contract
     results/  reports/
-  reports/
-    maliang-preflight.json
+  reports/maliang-preflight.json
 ```
 
-The monorepo is structured similarly:
+The monorepo mirrors it:
 
 ```text
 apps/maliang/                  # public CLI, templates, lifecycle coordinator
-packages/longwrite/            # literature/code evidence, drafting, rendering
+packages/longwrite/            # evidence, drafting, rendering, gates
 packages/longexperiment/       # study suites, result audit, manifests
-packages/research-protocol/    # shared evidence, result, and provenance schemas
+packages/research-protocol/    # shared evidence, result, provenance schemas
 examples/flagships/            # versioned full-config blueprints
 docs/flagships/                # canonical operator runbooks
 ```
 
-Completed runs are deliberately not committed: PDFs, full text, chunks, SQLite
-indexes, logs, and model artifacts can be large or sensitive. Keep final
-outputs with `reports/run-provenance.json`, checksums, and a verified archive.
+Completed runs are deliberately not committed: PDFs, full text, chunks, SQLite indexes, logs, and model artifacts
+are large or sensitive. Keep final outputs with `reports/run-provenance.json`, checksums, and a verified archive.
 
-## Useful commands
+## 📚 Documentation
 
-```bash
-npm run build                  # build all workspaces
-npm test                       # complete test suite
-npm run release:check          # build + tests + template catalog
+- [Quick Start](docs/quickstart.md) · [Template catalog](docs/templates.md) · [Architecture](docs/architecture.md)
+- [Flagship runbooks](docs/flagships/README.md) · [Blueprint catalog](examples/flagships/README.md)
+- [Configuration reference](packages/longwrite/docs/configuration.md) · [Preflight contract](docs/flagship-preflight.md)
+- [Remote GPU / Modal setup](docs/remote-gpu-modal.md) · [Release preparation](docs/release.md)
 
-maliang template list
-maliang status <workspace>
-maliang provenance <workspace>
-maliang preflight <workspace>
-maliang run <workspace> --runtime <runtime>
-maliang writing --help
-maliang experiment --help
-```
+## 🔗 Related Projects
 
-MalaClaw remains intentionally separate for runtime inspection and advanced
-flow operations:
+Architecture informed by, but not claiming to reproduce:
 
-```bash
-malaclaw flow runtimes
-(cd <workspace>/writing && malaclaw validate)
-```
-
-## References and related projects
-
-MrMaLiang’s architecture is informed by, but does not claim to reproduce, the
-following projects and published frameworks:
-
-- [MalaClaw](https://github.com/gozhiyuan/MalaClaw) — durable agent-workflow runtime
-- [Deli AutoResearch / AutoResearch V2](https://victorchen96.github.io/auto_research/framework.html) — long-horizon autonomous research reference
+- [MalaClaw](https://github.com/gozhiyuan/MalaClaw) — the durable agent-workflow runtime underneath
+- [Deli AutoResearch / AutoResearch V2](https://victorchen96.github.io/auto_research/framework.html) — long-horizon
+  autonomous research reference
 - [AutoScientists](https://github.com/mims-harvard/AutoScientists) — external autonomous-science runner integration
-- [Nanochat](https://github.com/karpathy/nanochat.git) — pinned ablation benchmark/codebase
+- [Nanochat](https://github.com/karpathy/nanochat.git) — pinned ablation benchmark
 - [ProteinGym](https://github.com/OATML-Markslab/ProteinGym) — public protein-fitness benchmark
 
-## Documentation
+## 📄 License
 
-- [Quick Start](docs/quickstart.md)
-- [Template catalog](docs/templates.md)
-- [Flagship runbook hub](docs/flagships/README.md)
-- [Flagship blueprint catalog](examples/flagships/README.md)
-- [Preflight contract](docs/flagship-preflight.md)
-- [Remote GPU / Modal setup](docs/remote-gpu-modal.md)
-- [Architecture](docs/architecture.md)
-- [Release preparation](docs/release.md)
+[MIT](LICENSE)
