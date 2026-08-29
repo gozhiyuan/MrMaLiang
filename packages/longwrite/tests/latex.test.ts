@@ -194,7 +194,6 @@ describe("LaTeX manuscript build", () => {
     await buildLatexWorkspace(ws);
     const section = await fs.readFile(path.join(ws, "paper", "sections", "section-1.tex"), "utf-8");
     expect(section).toContain("\\label{fig:metadata-citation_depth}");
-    expect(section).toContain("Figure~\\ref{fig:metadata-citation_depth}");
     expect(section).not.toContain("metadata-citation\\_depth");
   });
 

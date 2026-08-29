@@ -10,6 +10,7 @@ import { paperProfile, type PaperProfileId } from "../lib/paper-profiles.js";
 import type { CodebaseConfig } from "../lib/research/codebase-contract.js";
 import { withLongformStages as buildLongformWorkflow } from "./drafting.js";
 import { withResearchScriptStages as buildResearchCoreWorkflow } from "./research-core.js";
+import { withProductionAutoResearchV2 } from "./production-v2.js";
 
 export type CompileRunLimits = {
   max_recorded_tokens?: number;
@@ -21,10 +22,16 @@ export type CompileRunLimits = {
 export type CompileStageOverride = {
   runtime?: string;
   model?: string;
+  model_reasoning_effort?: string;
   model_tier?: string;
   enabled?: boolean;
   requires_human_approval?: boolean;
   max_parallel?: number;
+};
+
+export type CompileExecutionDefaults = {
+  model?: string;
+  model_reasoning_effort?: string;
 };
 
 export type CompileResearchPolicy = {
@@ -41,6 +48,7 @@ export type CompileResearchPolicy = {
   outlineReviewEnabled?: boolean;
   outlineReviewMaxRounds?: number;
   outlineApprovalMode?: "auto" | "human";
+  improvementMaxRounds?: number;
   verificationMaxSources: number;
   writingStrategy: "scaffold_then_revise" | "llm_sections";
   experiment?: { enabled: boolean; manifestPath?: string; codebaseId?: string; inputId?: string };
@@ -53,6 +61,7 @@ export type CompileOptions = {
   researchProvider?: ResearchProviderId;
   runtimeProfile?: RuntimeProfileDef;
   runLimits?: CompileRunLimits;
+  executionDefaults?: CompileExecutionDefaults;
   stageOverrides?: Record<string, CompileStageOverride>;
   researchPolicy?: CompileResearchPolicy;
 };
@@ -131,6 +140,10 @@ function buildVisualReviewCommand(): { cmd: string; args: string[] } {
 
 function assessResearchCommand(): { cmd: string; args: string[] } {
   return longwriteCommand(["research", "assess", "."]);
+}
+
+function validateEvidenceLedgerCommand(): { cmd: string; args: string[] } {
+  return longwriteCommand(["evidence", "validate-ledger", "."]);
 }
 
 function packagePublicationCommand(): { cmd: string; args: string[] } {
@@ -325,6 +338,12 @@ function withResearchScriptStages(
     if (String(stage.id) === "visual_review") {
       return {
         ...stage,
+        // A captionless intermediate PDF is itself a repairable release
+        // defect. Do not attach stale PNGs to a costly multimodal reviewer
+        // and then retry it for a contract it can never satisfy. The renderer
+        // records `visual_reviewable_pages = 0`; final validation still blocks
+        // release and routes the defect to revise_visual_plan.
+        when: "visual_reviewable_pages >= 1",
         validator_commands: [
           ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
           validateVisualReviewCommand(),
@@ -799,7 +818,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     visualPlan.skills = [...new Set([...((visualPlan.skills as string[] | undefined) ?? []), "reviews/artifact-plan.json", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json"])];
     visualPlan.instructions = [
       ...((visualPlan.instructions as string[] | undefined) ?? []),
-      "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
+      "Read the validated pre-draft reviews/artifact-plan.json. Realize compatible intents in the declarative figure-spec contract: formalizations inform the named chapter writer; comparison_matrix becomes a source-bound table_specs entry; timeline becomes a source-bound timelines entry with dates derived from classified metadata; architecture_diagram informs concept_map. For table_specs.kind, use a compact identifier with letters, digits, hyphens, or underscores only (for example, comparison_matrix), never prose with spaces. Do not claim an empirical result plot without a verified LongExperiment result artifact.",
       "Keep every rendered text field within its cap so the build never rejects the plan: title at most 180 characters, caption at most 500, insight at most 800; concept_map node labels at most 48 and edge labels at most 36. Captions are one or two sentences, not a paragraph.",
     ];
     const draftSections = next.stages.find((stage) => stage.id === "draft_sections");
@@ -911,7 +930,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
       "reports/stall-status.md decides which tools are eligible this round, from recorded scores rather than from your own judgment of progress. When its posture is `structural`, several rounds have already failed to beat the best score, and every action you emit must use a tool it lists as eligible — repeating prose or visual revision would run a shape that has demonstrably not worked. Pivot the structure, not the tactics: change the outline's frame or the evidence the paper rests on. When the posture is `escalate`, say so plainly in the findings: the binding constraint is likely outside what this loop can change.",
       "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
-      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, or empirical_trials. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
+      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,target,scope?}]}]}. severity is minor, major, or critical. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, empirical_trials, or review_score. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review >= 1 plus the smallest necessary figure/table repair. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
       "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
       "Select reopen_outline only when incremental chapter revision cannot address the review finding. Its rationale must name the defective organizing claim and evidence-backed replacement. It may co-occur with targeted_research_expansion: the dispatcher refreshes and validates the literature before it reopens the outline in the same bounded round.",
       "Output ownership is strict: revise_sections may change only chapters/*.md, paper/abstract.md, and reviews/revision-report.md. Never assign it a generated table/figure, placement, caption, rendered-PDF, bibliography-presentation, TeX, or build defect. Assign those findings to revise_visual_plan so the artifact builder can write the durable placement contract before the normal rebuild.",
@@ -956,6 +975,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     plan_path: "reviews/research-action-plan.json",
     allowed_actions: ["targeted_research_expansion"],
     max_actions: 1,
+    continue_on_recoverable_failure: true,
     outputs: ["reports/action-dispatch-research.json"],
   };
   const outlineDispatch = {
@@ -986,9 +1006,9 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   // wastes a full model turn per round before self-healing on retry.
   const dispatchMetrics = scriptStage({
     id: "quality_dispatch_metrics",
-    title: "Record whether an evidence expansion was dispatched this round",
+    title: "Record which recovery work changes evidence or manuscript claims",
     owner: "source-curator",
-    inputs: ["reports/action-dispatch-research.json"],
+    inputs: ["reports/action-dispatch-research.json", "reviews/revision-action-plan.json"],
     outputs: ["reports/metrics.json"],
     validators: ["required_output_exists"],
     runtime: "script",
@@ -1052,6 +1072,15 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
     }),
     scriptStage({
+      id: "quality_backfill_validated_evidence_history",
+      title: "Retain validated evidence from earlier successful recovery rounds",
+      owner: "source-curator",
+      inputs: ["evidence/validated-source-evidence.json"],
+      optional_inputs: [".malaclaw/flow/checkpoints/**/evidence/source-packets.json", ".malaclaw/flow/checkpoints/**/sources/semantic-screening.json"],
+      outputs: ["evidence/validated-source-evidence.json", "reports/validated-evidence-history-backfill.md"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "backfill-validated-evidence-history", "."]),
+    }),
+    scriptStage({
       id: "quality_finalize_evidence_depth",
       title: "Finalize refreshed citation depth from source evidence",
       owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json", "evidence/validated-source-evidence.json"],
@@ -1111,13 +1140,18 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     planner,
     splitActionPlan,
     researchDispatch,
-    ...(evidenceRefreshStages.length ? [dispatchMetrics] : []),
+    dispatchMetrics,
     ...evidenceRefreshStages,
     outlineDispatch,
     ...outlineReopenStages,
     revisionDispatch,
     ...children.filter((stage) => !["route", "expand_research", "revise"].includes(String(stage.id))),
   ];
+  for (const stage of adaptiveChildren) {
+    if (["claim_judge", "claim_score"].includes(String(stage.id))) {
+      stage.when = "manuscript_revision_planned >= 1";
+    }
+  }
   qualityLoop.stages = adaptiveChildren;
   for (const stage of adaptiveChildren) {
     if (stage.id !== "review") continue;
@@ -1131,10 +1165,18 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   // A final release validation has stricter, manuscript-wide checks than a
   // peer-review score alone (for example live URLs and woven A/B depth).  Do
   // not leave those findings as a dead-end after the normal quality budget:
-  // write them as an advisory report, then run at most two explicit recovery
+  // write them as an advisory report, then run a configured bounded number of
   // rounds through the same trusted dispatcher and deterministic rebuild.
   // The final hard validator still decides publication eligibility.
-  if (policy?.semanticScreenEnabled && provider !== "seed") {
+  {
+    const finalReleaseBaseline = scriptStage({
+      id: "final_release_baseline",
+      title: "Snapshot release metrics before one recovery round",
+      owner: "analyst",
+      inputs: ["reports/release-gates.json", "reports/evidence-audit.json", "reports/metrics.json"],
+      outputs: ["reports/final-release-baseline.json"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "final-release-baseline", "."]),
+    });
     const releaseAssessment = scriptStage({
       id: "final_release_assessment",
       title: "Assess final release gates for bounded recovery",
@@ -1144,30 +1186,54 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       validators: ["required_output_exists"], runtime: "script",
       command: validateResearchAdvisoryCommand(),
     });
-    const finalReleasePlanner = {
-      ...planner,
+    const finalReleaseProgress = scriptStage({
+      id: "final_release_progress",
+      title: "Require measurable final-release recovery progress",
+      owner: "analyst",
+      inputs: ["reports/final-release-baseline.json", "reports/release-gates.json", "reports/evidence-audit.json", "reports/metrics.json"],
+      outputs: ["reports/final-release-progress.json", "reports/final-release-progress.md"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "assess-final-release-progress", "."]),
+    });
+    const citationRepairPacket = scriptStage({
+      id: "citation_repair_packet",
+      title: "Materialize exact packet-backed citation repairs",
+      owner: "source-curator",
+      inputs: ["evidence/citation-ledger.jsonl", "evidence/section-*.json", "chapters/*.md"],
+      outputs: ["reviews/citation-repair-packet.json", "reviews/citation-repair-packet.md"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "citation-repair-packet", "."]),
+    });
+    const citedSourceUpgradePacket = scriptStage({
+      id: "cited_source_upgrade_packet",
+      title: "Materialize distinct and accepted source citation upgrades",
+      owner: "source-curator",
+      inputs: ["chapters/*.md", "evidence/section-*.json", "sources/classified_sources.jsonl"],
+      outputs: ["reviews/cited-source-upgrade-packet.json", "reviews/cited-source-upgrade-packet.md"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "cited-source-upgrade-packet", "."]),
+    });
+    const finalReleasePlanner = scriptStage({
       id: "final_release_plan",
       title: "Plan corrective actions for failed final release gates",
-      inputs: [...new Set([...(planner.inputs as string[]), "reports/longwrite-validation.json", "reports/longwrite-validation.md"])],
-      optional_inputs: [...new Set([...(planner.optional_inputs as string[]), "reports/source-verification.md", "reports/research-assessment.md"])],
-      skills: [...new Set([...(planner.skills as string[]), "reports/longwrite-validation.json", "reports/longwrite-validation.md", "reports/source-verification.md", "reports/research-assessment.md"])],
-      instructions: [
-        "This is a final-release recovery round. Read reports/longwrite-validation.json first. Its failed check IDs are authoritative: create one finding with the exact ID for every currently failed check, and select allowlisted corrective action(s) that cover every one. Never lower a target, waive a URL/claim/evidence gate, or claim a pass without a new deterministic assessment.",
-        "For a dead cited URL, revise the prose to remove or replace the citation with a currently evidence-backed source, or perform targeted research to obtain such a source; do not edit verification records or invent a replacement URL. For citation-depth quotas, weave a validated B-depth source into each named chapter rather than weakening the quota. For claim support or review score, repair the evidence-backed prose and/or placed artifact that the report and reviewer identify.",
-        "For rendered_visual_review, select revise_visual_plan with rendered_visual_review >= 1, then let the normal rebuild → PNG rendering → Codex visual-review path produce a fresh verdict. Never mark the visual QA JSON as passing by hand or waive a page-specific legibility finding.",
-        ...((planner.instructions as string[]) ?? []),
-      ],
-      outputs: ["reviews/action-plan.json", "reports/action-plan-repair.md", "reports/final-release-plan-repair.md"],
-      validator_commands: [
-        ...((planner.validator_commands as Array<Record<string, unknown>>) ?? []),
-        longwriteCommand(["research", "repair-final-release-plan", "."]),
-      ],
-    };
+      owner: "analyst",
+      // Recovery planning is an operational decision, not a fresh whole-paper
+      // review.  Passing the complete historical scorecard, source inventory,
+      // and prior planning trail caused retries to spend their entire unit
+      // budget re-reading stale criticism.  The deterministic release report,
+      // current scorecard, and finite citation-repair packet contain exactly
+      // the facts needed to select the next bounded action.
+      inputs: ["reports/longwrite-validation.json", "reports/release-gates.json", "reviews/scorecard.json"],
+      outputs: ["reviews/action-plan.json", "reports/final-release-plan-repair.md"],
+      validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "generate-final-release-plan", "."]),
+    });
     const recoveryWhen = (stage: Record<string, unknown>): Record<string, unknown> => ({
       ...stage,
-      when: "final_release_gate_pass < 1",
+      // Some children have a stronger local safety predicate (notably visual
+      // review requires fresh caption-page renders). The containing recovery
+      // loop is already entered only after a failed final-release assessment.
+      when: typeof stage.when === "string" ? stage.when : "final_release_gate_pass < 1",
     });
     const finalReleaseRecoveryChildren: Array<Record<string, unknown>> = [
+      recoveryWhen(finalReleaseBaseline),
       recoveryWhen(finalReleasePlanner),
       recoveryWhen(splitActionPlan),
       recoveryWhen(researchDispatch),
@@ -1178,6 +1244,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       ...evidenceRefreshStages,
       recoveryWhen(outlineDispatch),
       ...outlineReopenStages.map(recoveryWhen),
+      recoveryWhen(citationRepairPacket),
+      recoveryWhen(citedSourceUpgradePacket),
       recoveryWhen(revisionDispatch),
       ...children
         .filter((stage) => !["route", "expand_research", "revise"].includes(String(stage.id)))
@@ -1201,6 +1269,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         command: assessResearchCommand(),
       }),
       releaseAssessment,
+      finalReleaseProgress,
     ];
     const finalValidateIndex = next.stages.findIndex((stage) => stage.id === "final_validate");
     if (finalValidateIndex < 0) throw new Error("auto_research_agentic requires final_validate for final-release recovery");
@@ -1209,9 +1278,12 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       loopStage({
         id: "final_release_recovery_loop",
         title: "Recover failed final release gates",
-        max_rounds: 2,
+        max_rounds: policy?.improvementMaxRounds ?? 3,
         stop_when: "final_release_gate_pass >= 1",
-        on_exhaustion: "succeed",
+        // A bounded recovery that cannot satisfy deterministic publication
+        // gates must stay visibly failed. Treating exhaustion as success lets
+        // a bad manuscript proceed to packaging.
+        on_exhaustion: "fail",
         stages: finalReleaseRecoveryChildren,
       }),
     );
@@ -1224,8 +1296,8 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       inputs: [
         ...((expand.inputs as string[] | undefined) ?? []).filter((input) => input !== "reports/remediation-plan.json"),
         "reviews/action-plan.json",
-        "reviews/artifact-plan.json",
       ],
+      optional_inputs: [...new Set([...((expand.optional_inputs as string[] | undefined) ?? []), "reviews/artifact-plan.json"])],
       // The adaptive adapter reads reviews/action-plan.json; the fixed v2
       // command continues to read reports/remediation-plan.json.
       command: longwriteCommand(["research", "expand", ".", "--action-plan", "reviews/action-plan.json"]),
@@ -1235,11 +1307,11 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       id: "reopen_outline",
       title: "Reopen the approved outline for a structural correction",
       owner: "outline-architect",
-      inputs: ["reviews/action-plan.json", "reviews/artifact-plan.json", "outline.md", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"],
-      optional_inputs: ["sources/semantic-screening.json", "reports/evidence-depth-finalization.md", "reviews/scorecard.json"],
+      inputs: ["reviews/action-plan.json", "outline.md", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"],
+      optional_inputs: ["reviews/artifact-plan.json", "sources/semantic-screening.json", "reports/evidence-depth-finalization.md", "reviews/scorecard.json"],
       skills: ["reviews/action-plan.json", "outline.json", "sources/classified_sources.jsonl", "evidence/source-packets.json", "evidence/active-validated-source-evidence.json", "reports/corpus-gates.md"],
       instructions: [
-        "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and contributions backed by the cumulative validated-evidence dossier; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit.",
+        "This action is authorized only because the validated plan selected reopen_outline. Rewrite outline.md and outline.json to repair the named major/critical structural, scope, or taxonomy defect. Use only current classified source IDs and contributions backed by the cumulative validated-evidence dossier; make the replacement organizing argument, comparison logic, limitations, and section purposes explicit. Every outline.json section MUST retain a non-empty keywords array for deterministic evidence allocation; preserve existing keywords when a section survives, and provide 2–4 focused keywords for every new section. Once chapters/*.md exist, section IDs are immutable manuscript identity keys: preserve the exact existing ID sequence and section count. You may change titles, ordering logic, and chapter purposes, but never rename, add, remove, or repurpose an ID; an ID change requires an explicit chapter-migration action, which this tool does not have.",
         "Write feedback/outline-revision.md with the exact action-plan findings addressed, the structural change, and any remaining evidence limitation. Do not draft chapters, alter figures, fabricate sources, or turn an unresolved empirical question into a result. The following scripts re-audit the outline before downstream evidence allocation.",
       ],
       outputs: ["outline.md", "outline.json", "feedback/outline-revision.md"], validators: ["required_output_exists", "non_empty_markdown"],
@@ -1253,16 +1325,33 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       inputs: [
         ...((revise.inputs as string[] | undefined) ?? []).filter((input) => input !== "reports/routing.md"),
         "reviews/action-plan.json",
-        "reviews/artifact-plan.json",
       ],
       optional_inputs: [
         ...((revise.optional_inputs as string[] | undefined) ?? []),
+        "reviews/artifact-plan.json",
         "reports/action-dispatch.json",
+        "reviews/citation-repair-packet.json",
+        "reviews/citation-repair-packet.md",
+        "reviews/cited-source-upgrade-packet.json",
+        "reviews/cited-source-upgrade-packet.md",
       ],
       instructions: [
         ...((revise.instructions as string[] | undefined) ?? []),
+        "Source markers are executable evidence links, not optional editorial markup. Never delete or convert them to prose-only citations. Every non-empty chapter must retain at least one valid [source:<source-id>:<locator>] marker; when rewriting a factual passage, carry forward its resolving marker or replace it with a resolving marker from the current evidence packet. The deterministic citation-ledger validation runs immediately after this action and will request one corrective retry if any chapter loses its markers or any marker lacks a packet locator.",
+        "When reviews/citation-repair-packet.json is present, it is a binding, finite worklist: repair every listed chapter/source item using only its exact marker options or remove/rewrite the unsupported claim. Do not retain a source-only marker, invent a locator, or claim the repair is complete while any listed item remains. In reviews/revision-report.md, list each repaired work-item key as chapter_path + source_id and state whether it was replaced or removed.",
+        "When reviews/cited-source-upgrade-packet.json has required_distinct_additions > 0, it is a binding cited-source worklist. Add at least that many DISTINCT addition_candidates to their named chapters, writing a useful claim or evidence-boundary statement directly supported by each evidence_excerpt and preserving its exact_marker. Report every added source_id and chapter_path in reviews/revision-report.md. Bibliography padding, stacked citations without a supported textual role, and markers added only to raise a count do not satisfy the contract.",
+        "When reviews/cited-source-upgrade-packet.json has required_replacements > 0, it is also a binding release-ratio worklist. Replace at least that many listed nonaccepted citations with distinct accepted replacement markers in the named chapter, or narrow/remove the old claim and write an accepted, packet-backed claim. Do not merely change classification metadata or cite a replacement whose packet cannot support the prose.",
         "Use reviews/artifact-plan.json when it selects a formalization. Decide the exact notation and wording from the cited evidence, define every symbol nearby, and omit the formula if the evidence cannot support a useful formalization. Never fabricate an equation, theorem, or experimental result.",
       ],
+      validator_commands: [
+        ...((revise.validator_commands as Array<{ cmd: string; args: string[] }> | undefined) ?? []),
+        // The seed provider is a deliberately tiny offline dry-run fixture;
+        // live research workspaces use the same strict ledger command as
+        // final validation. Seed's advisory release validation remains the
+        // free control-plane rehearsal, not a provenance-quality claim.
+        ...(provider === "seed" ? [] : [validateEvidenceLedgerCommand()]),
+      ],
+      retry: { max_attempts: 2 },
       max_invocations: 1,
     }),
     action({
@@ -1270,12 +1359,12 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       id: "revise_visual_plan",
       title: "Repair the placed visual plan from review findings",
       inputs: [
-        ...((visualPlan.inputs as string[] | undefined) ?? []),
+        ...((visualPlan.inputs as string[] | undefined) ?? []).filter((input) => input !== "reviews/artifact-plan.json"),
         "reviews/action-plan.json",
-        "reviews/artifact-plan.json",
       ],
       optional_inputs: [
         ...((visualPlan.optional_inputs as string[] | undefined) ?? []),
+        "reviews/artifact-plan.json",
         "reviews/scorecard.json",
         "reports/action-dispatch.json",
       ],
@@ -1283,6 +1372,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         ...((visualPlan.instructions as string[] | undefined) ?? []),
         "Use reviews/action-plan.json, reviews/artifact-plan.json, and reviews/scorecard.json to repair only selected artifact findings. Preserve valid placements. Write a strict figures/placement-plan.json; do not edit manuscript prose, build outputs, or undeclared artifacts. Remove any artifact that is pipeline telemetry, a source inventory, or decorative rather than analytical. A validated metadata_plot is rendered from verified metadata only when it is essential to a stated reader-facing claim; do not invent plot values or use Nano Banana as evidence.",
         "For new survey-native artifacts, use table_specs for source-bound comparison/taxonomy/evidence matrices and timelines for source-selected milestones. The builder validates all source IDs and derives timeline years; do not insert raw TeX, chart code, coordinates, or unsupported numerical results.",
+        "For every repaired diagram whose review specifies rows, columns, or direction, encode that requirement structurally as layout:{kind:'grid',columns:1|2|3} or layout:{kind:'flow',direction:'left_to_right'|'top_to_bottom'}. Do not leave required geometry only in placement.discussion. LongWrite deterministically renders grid layouts and validates the layout contract before rebuilding the PDF.",
       ],
       max_invocations: 1,
     }),
@@ -1309,15 +1399,13 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       stage.skills = [...new Set([...((stage.skills as string[] | undefined) ?? []), ...codebaseInputs])];
       stage.instructions = [...((stage.instructions as string[] | undefined) ?? []), ...instructions];
     };
-    const findNestedStage = (id: string, stages: Array<Record<string, unknown>> = next.stages): Record<string, unknown> | undefined => {
+    const findNestedStages = (id: string, stages: Array<Record<string, unknown>> = next.stages): Array<Record<string, unknown>> => {
+      const found: Array<Record<string, unknown>> = [];
       for (const stage of stages) {
-        if (stage.id === id) return stage;
-        if (Array.isArray(stage.stages)) {
-          const found = findNestedStage(id, stage.stages as Array<Record<string, unknown>>);
-          if (found) return found;
-        }
+        if (stage.id === id) found.push(stage);
+        if (Array.isArray(stage.stages)) found.push(...findNestedStages(id, stage.stages as Array<Record<string, unknown>>));
       }
-      return undefined;
+      return found;
     };
     const outline = next.stages.find((stage) => stage.id === "outline");
     if (outline) {
@@ -1341,12 +1429,10 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       extendCodebaseEvidence(visualPlan, [codebaseInstruction, ...selectedPaperProfile.promptOverlays.visual]);
     }
     for (const id of ["outline_review", "outline_revise"]) {
-      const stage = findNestedStage(id);
-      if (stage) extendCodebaseEvidence(stage, [codebaseInstruction, architectureReviewInstruction]);
+      for (const stage of findNestedStages(id)) extendCodebaseEvidence(stage, [codebaseInstruction, architectureReviewInstruction]);
     }
     for (const id of ["initial_artifact_plan", "baseline_review", "artifact_plan", "action_plan", "review"]) {
-      const stage = findNestedStage(id);
-      if (stage) extendCodebaseEvidence(stage, [codebaseInstruction, architectureReviewInstruction]);
+      for (const stage of findNestedStages(id)) extendCodebaseEvidence(stage, [codebaseInstruction, architectureReviewInstruction]);
     }
     for (const id of ["reopen_outline", "revise_sections", "revise_visual_plan"]) {
       const stage = (next.tool_catalog as Array<Record<string, unknown>> | undefined)?.find((candidate) => candidate.id === id);
@@ -1530,11 +1616,34 @@ function applyRuntimeProfile(workflow: Record<string, unknown>, profile?: Runtim
 
 function executionFields(override: CompileStageOverride): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const key of ["runtime", "model", "model_tier", "requires_human_approval", "enabled"] as const) {
+  for (const key of ["runtime", "model", "model_reasoning_effort", "model_tier", "requires_human_approval", "enabled"] as const) {
     if (override[key] !== undefined) out[key] = override[key];
   }
   if (override.enabled === false) out.disabled_reason = "disabled by execution.stage_overrides";
   return out;
+}
+
+function applyExecutionDefaults(
+  workflow: Record<string, unknown>,
+  defaults: CompileExecutionDefaults | undefined,
+): Record<string, unknown> {
+  if (!defaults?.model && !defaults?.model_reasoning_effort) return workflow;
+  const runtimePolicy = typeof workflow.runtime_policy === "object" && workflow.runtime_policy !== null
+    ? workflow.runtime_policy as Record<string, unknown>
+    : {};
+  return {
+    ...workflow,
+    runtime_policy: {
+      ...runtimePolicy,
+      // LongWrite execution defaults describe Codex workers. Pin the primary
+      // only when no runtime profile has already made a deliberate choice, so
+      // `maliang run --runtime codex` receives the workspace model instead of
+      // falling back to ~/.codex/config.toml.
+      ...(runtimePolicy.primary === undefined ? { primary: "codex" } : {}),
+      ...(defaults.model ? { model: defaults.model } : {}),
+      ...(defaults.model_reasoning_effort ? { model_reasoning_effort: defaults.model_reasoning_effort } : {}),
+    },
+  };
 }
 
 function applyResearchWorkflowProfile(workflow: Record<string, unknown>, profile: ResearchWorkflowProfile): Record<string, unknown> {
@@ -1570,13 +1679,18 @@ function applyStageOverrides(
     const override = overrides[key];
     if (!override) return stage;
     pending.delete(key);
-    if (isScriptOwned(stage) && (override.runtime || override.model || override.model_tier)) {
-      throw new Error(`execution.stage_overrides.${key}: deterministic script stages cannot override runtime/model`);
-    }
+    // A generated workflow can evolve an operational decision from a model
+    // unit into a deterministic script (for example final-release routing).
+    // Old workspace configs should remain runnable: retain any enabled/approval
+    // setting but discard obsolete model fields rather than making `sync`
+    // impossible. New scaffolds never emit these fields for script stages.
+    const compatibleOverride = isScriptOwned(stage)
+      ? { ...override, runtime: undefined, model: undefined, model_reasoning_effort: undefined, model_tier: undefined }
+      : override;
     if (override.max_parallel !== undefined) {
       throw new Error(`execution.stage_overrides.${key}: max_parallel is only valid on a foreach stage`);
     }
-    return { ...stage, ...executionFields(override) };
+    return { ...stage, ...executionFields(compatibleOverride) };
   };
 
   const mapStage = (stage: Record<string, unknown>, parent?: string): Record<string, unknown> => {
@@ -1592,7 +1706,7 @@ function applyStageOverrides(
       const groupOverride = overrides[key];
       if (groupOverride) {
         pending.delete(key);
-        if (groupOverride.runtime || groupOverride.model || groupOverride.model_tier || groupOverride.requires_human_approval !== undefined) {
+        if (groupOverride.runtime || groupOverride.model || groupOverride.model_reasoning_effort || groupOverride.model_tier || groupOverride.requires_human_approval !== undefined) {
           throw new Error(`execution.stage_overrides.${key}: foreach execution settings belong to inner steps`);
         }
         stage = { ...stage, ...(groupOverride.max_parallel !== undefined ? { max_parallel: groupOverride.max_parallel } : {}) };
@@ -1628,7 +1742,16 @@ export function compileModeToManifest(
   const adaptiveWorkflow = isResearchMode(mode)
     ? withAgenticResearchStages(profiledWorkflow, opts.researchPolicy, opts.researchProvider ?? "seed")
     : profiledWorkflow;
-  const workflow = applyStageOverrides(applyRuntimeProfile(adaptiveWorkflow, opts.runtimeProfile), opts.stageOverrides);
+  const productionWorkflow = isResearchMode(mode)
+    ? withProductionAutoResearchV2(
+        adaptiveWorkflow as { stages: Array<Record<string, unknown>> } & Record<string, unknown>,
+        { offlineRehearsal: (opts.researchProvider ?? "seed") === "seed" },
+      )
+    : adaptiveWorkflow;
+  const workflow = applyExecutionDefaults(
+    applyStageOverrides(applyRuntimeProfile(productionWorkflow, opts.runtimeProfile), opts.stageOverrides),
+    opts.executionDefaults,
+  );
   return {
     version: 1,
     project: {

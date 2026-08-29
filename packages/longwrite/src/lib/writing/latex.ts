@@ -164,12 +164,22 @@ function markdownToLatex(markdown: string, citeKeys: Map<string, string>, sectio
   const output: string[] = [];
   let consumedTitle = false;
   let tableOrdinal = 0;
+  let omitBuilderOwnedTraceabilityList = false;
   for (const token of tokens) {
     if (token.type === "heading") {
       if (!consumedTitle) {
         consumedTitle = true;
         continue;
       }
+      // The visual builder owns a requested full-ID key and emits it adjacent
+      // to its source-bound matrix. Drop a model-written duplicate, especially
+      // one such as "Table 1 ...", which becomes a stale hand-numbered
+      // publication reference after the builder assigns the real label.
+      if (/\b(?:table|figure)\s+\d+\b.*\b(?:full[- ]?id|source[- ]?id).*\btraceability\b/i.test(token.text ?? "")) {
+        omitBuilderOwnedTraceabilityList = true;
+        continue;
+      }
+      omitBuilderOwnedTraceabilityList = false;
       const command = (token.depth ?? 2) <= 2 ? "subsection" : "subsubsection";
       output.push(`\\${command}{${inlineLatex(token.text ?? "", citeKeys, cited, citationStyle)}}`, "");
       continue;
@@ -185,11 +195,16 @@ function markdownToLatex(markdown: string, citeKeys: Map<string, string>, sectio
       continue;
     }
     if (token.type === "list") {
+      if (omitBuilderOwnedTraceabilityList) {
+        omitBuilderOwnedTraceabilityList = false;
+        continue;
+      }
       output.push("\\begin{itemize}");
       for (const item of token.items ?? []) output.push(`\\item ${inlineLatex(item.text ?? "", citeKeys, cited, citationStyle)}`);
       output.push("\\end{itemize}", "");
       continue;
     }
+    omitBuilderOwnedTraceabilityList = false;
     if (token.type === "blockquote") {
       output.push("\\begin{quote}", inlineLatex(token.text ?? "", citeKeys, cited, citationStyle), "\\end{quote}", "");
       continue;
@@ -427,16 +442,13 @@ function placedArtifacts(sectionId: string, manifest: FigureManifest | null): st
   const figures = manifest.figures.filter((figure) => figure.placement.section_id === sectionId);
   const tables = manifest.tables.filter((table) => table.placement.section_id === sectionId);
   return [
-    ...figures.flatMap((figure) => [
-      `Figure~\\ref{fig:${figure.id}}: ${escapeLatex(readerCaption(figure.insight))}`,
-      "",
-      figureLatex(figure),
-    ]),
-    ...tables.flatMap((table) => [
-      `Table~\\ref{tab:${table.id}}: ${escapeLatex(readerCaption(table.insight))}`,
-      "",
-      tableLatex(table),
-    ]),
+    // Placement prose frequently ends a page while a figure/longtable starts
+    // the next. Even a correctly numbered reference then reads as a detached
+    // pseudo-caption. The manifest retains each artifact's reader insight for
+    // validation and planning; the published artifact itself owns the sole
+    // reader-facing caption and its exact placement.
+    ...figures.flatMap((figure) => [figureLatex(figure)]),
+    ...tables.flatMap((table) => [tableLatex(table)]),
   ].join("\n");
 }
 

@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 const RENDER_DPI = 144;
-const CAPTION_PAGE_RE = /\b(?:Figure|Table)\s+\d+\s*:/i;
+const CAPTION_PAGE_RE = /\b(?:Figure|Table)\s+\d+(?:\s*[:.]|\s)/i;
 
 export type VisualRenderManifest = {
   version: 1;
@@ -16,10 +16,28 @@ export type VisualRenderManifest = {
   caption_pages: number[];
   rendered_pages: Array<{ page: number; path: string; sha256: string }>;
   coverage_complete: boolean;
+  /** A machine-readable reason when no reviewable visual pages were found.
+   * This is deliberately reportable rather than exceptional: a repair loop
+   * needs a failed release gate it can act on, not a crashed worker. */
+  coverage_failure?: string;
 };
 
 function sha256(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function writeVisualRenderabilityMetric(workspaceDir: string, pageCount: number): Promise<void> {
+  const target = path.join(workspaceDir, "reports", "metrics.json");
+  let metrics: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await fs.readFile(target, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metrics = parsed as Record<string, unknown>;
+  } catch {
+    // A renderability signal is advisory routing evidence; do not let a
+    // missing/intermediate metrics snapshot block artifact inspection.
+  }
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify({ ...metrics, visual_reviewable_pages: pageCount }, null, 2)}\n`, "utf8");
 }
 
 async function pageCount(pdfPath: string): Promise<number> {
@@ -47,7 +65,22 @@ export async function renderVisualReviewPages(workspaceDir: string): Promise<Vis
   if (!pdf || pdf.length === 0) throw new Error("build/manuscript.pdf is missing or empty; build before visual review");
   const pages = await pageCount(pdfPath);
   const captions = await captionPages(pdfPath, pages);
-  if (captions.length === 0) throw new Error("no Figure/Table caption pages were found in build/manuscript.pdf; a research paper visual review cannot proceed");
+  if (captions.length === 0) {
+    const manifest: VisualRenderManifest = {
+      version: 1,
+      pdf_path: "build/manuscript.pdf",
+      pdf_sha256: sha256(pdf),
+      render_dpi: RENDER_DPI,
+      caption_pages: [],
+      rendered_pages: [],
+      coverage_complete: false,
+      coverage_failure: "no Figure/Table caption pages were found in build/manuscript.pdf",
+    };
+    await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "reports", "visual-render-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await writeVisualRenderabilityMetric(workspaceDir, 0);
+    return manifest;
+  }
 
   const outputDir = path.join(workspaceDir, "reports", "visual-review");
   await fs.rm(outputDir, { recursive: true, force: true });
@@ -72,5 +105,6 @@ export async function renderVisualReviewPages(workspaceDir: string): Promise<Vis
   };
   await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
   await fs.writeFile(path.join(workspaceDir, "reports", "visual-render-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeVisualRenderabilityMetric(workspaceDir, rendered.length);
   return manifest;
 }

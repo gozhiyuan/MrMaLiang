@@ -19,7 +19,7 @@ export type ResearchProjection = {
     projectTargetWords?: number;
     pdf: { status: "compiled" | "not_built"; warningCount: number };
   };
-  release: { gates: Array<{ id: string; status: "passed" | "failed" | "unknown"; detail?: string }>; ready: boolean };
+  release: { gates: Array<{ id: string; status: "passed" | "failed" | "pending" | "unknown"; detail?: string }>; ready: boolean };
   score: { review?: number; claimSupport?: number };
 };
 
@@ -63,7 +63,7 @@ function Guard({ query, children }: { query: ReturnType<typeof useResearch>; chi
 }
 
 /** Status is conveyed by text, matching the core dashboard's badge contract. */
-function GateBadge({ status }: { status: "passed" | "failed" | "unknown" }) {
+function GateBadge({ status }: { status: "passed" | "failed" | "pending" | "unknown" }) {
   const tone = status === "passed" ? "success" : status === "failed" ? "danger" : "idle";
   return <span className={`ui-badge ui-badge-${tone}`}><span className="ui-badge-dot" aria-hidden="true" />{status}</span>;
 }
@@ -166,7 +166,7 @@ export function Release() {
       <Guard query={research}>{(data) => (
         <section className="overview-section">
           <h2>{data.release.ready ? "Release gates pass" : "Release is blocked"}</h2>
-          <p className="ui-state-hint">An absent report reads as unknown, never as passed.</p>
+          <p className="ui-state-hint">An absent report reads as unknown; checks awaiting their producing stage read as pending. Neither is a pass.</p>
           <div className="ui-table-scroll">
             <table className="ui-table">
               <caption className="sr-only">Release gates</caption>

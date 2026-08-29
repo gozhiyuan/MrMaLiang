@@ -32,10 +32,16 @@ export type CompileRunLimits = {
 export type CompileStageOverride = {
   runtime?: string;
   model?: string;
+  model_reasoning_effort?: string;
   model_tier?: string;
   enabled?: boolean;
   requires_human_approval?: boolean;
   max_parallel?: number;
+};
+
+export type CompileExecutionDefaults = {
+  model?: string;
+  model_reasoning_effort?: string;
 };
 
 export type CompileResearchPolicy = {
@@ -64,6 +70,7 @@ export type CompileOptions = {
   researchProvider?: ResearchProviderId;
   runtimeProfile?: RuntimeProfileDef;
   runLimits?: CompileRunLimits;
+  executionDefaults?: CompileExecutionDefaults;
   stageOverrides?: Record<string, CompileStageOverride>;
   researchPolicy?: CompileResearchPolicy;
 };

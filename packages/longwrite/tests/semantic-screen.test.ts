@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { runInit } from "../src/commands/init.js";
 import {
+  backfillValidatedEvidenceHistory,
   finalizeEvidenceBackedDepth,
   repairSemanticScreen,
   repairSourceEvidencePackets,
@@ -79,6 +80,23 @@ describe("agentic semantic-screen contract", () => {
     expect(finalized.map((item: { citation_depth: string }) => item.citation_depth)).toEqual(["A", "B"]);
   });
 
+  it("normalizes lossless locator and limitation shapes before exact-excerpt validation", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-loose-packet-"));
+    dirs.push(dir);
+    await runInit(dir, { mode: "auto_research_agentic", topic: "Memory architecture", researchProvider: "multi", taxonomy: ["memory architecture"] });
+    await fs.writeFile(path.join(dir, "sources", "classified_sources.jsonl"), `${JSON.stringify(source("paper", "B"))}\n`, "utf-8");
+    await fs.writeFile(path.join(dir, "sources", "semantic-screening.json"), JSON.stringify({ version: 1, screenings: [{ source_id: "paper", taxonomy_cells: ["memory architecture"], chapter_role: "comparison", semantic_relevance: "high", rationale: "It supplies an evidence-backed comparison for the configured memory architecture topic.", recommended_depth: "B", fulltext_priority: true }] }), "utf-8");
+    await fs.mkdir(path.join(dir, "fulltext"), { recursive: true });
+    await fs.writeFile(path.join(dir, "fulltext", "paper.md"), "Memory architecture stores episodic traces for planning and tool use.", "utf-8");
+    await fs.writeFile(path.join(dir, "fulltext", "manifest.json"), JSON.stringify({ results: [{ sourceId: "paper", status: "ingested", path: "fulltext/paper.md" }] }), "utf-8");
+    await selectSourceEvidenceCandidates(dir);
+    await fs.mkdir(path.join(dir, "evidence"), { recursive: true });
+    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "The architecture stores episodic traces for planning.", supporting_excerpt: "Memory architecture stores episodic traces for planning and tool use", locator: { paragraph: 1 }, comparison_dimensions: [], limitations: "The excerpt does not measure every planning setting." }] }] }), "utf-8");
+    await repairSourceEvidencePackets(dir);
+    const repaired = JSON.parse(await fs.readFile(path.join(dir, "evidence", "source-packets.json"), "utf8"));
+    expect(repaired.packets[0].claims[0]).toMatchObject({ locator: "paragraph: 1", limitations: ["The excerpt does not measure every planning setting."] });
+  });
+
   it("retains earlier validated evidence and can promote a later C-level source", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-history-"));
     dirs.push(dir);
@@ -129,6 +147,34 @@ describe("agentic semantic-screen contract", () => {
     expect(active.entries.map((entry: { packet: { source_id: string } }) => entry.packet.source_id)).toEqual(["earlier-a", "later-c"]);
   });
 
+  it("backfills validated evidence from quality and final-release checkpoints", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-checkpoint-history-"));
+    dirs.push(dir);
+    const checkpoints = path.join(dir, ".malaclaw", "flow", "checkpoints");
+    const screenCheckpoint = path.join(checkpoints, "2026-08-11T05-00-00-000Z-final_release_recovery_loop-r2-quality_semantic_screen");
+    const packetCheckpoint = path.join(checkpoints, "2026-08-11T05-01-00-000Z-final_release_recovery_loop-r2-quality_source_evidence_extract");
+    await fs.mkdir(path.join(screenCheckpoint, "sources"), { recursive: true });
+    await fs.mkdir(path.join(packetCheckpoint, "evidence"), { recursive: true });
+    const screening = {
+      source_id: "retained-a", taxonomy_cells: ["memory architecture"], chapter_role: "protagonist",
+      semantic_relevance: "high", rationale: "It directly evaluates a memory architecture with a reproducible planning comparison.",
+      recommended_depth: "A", fulltext_priority: true,
+    };
+    const packet = {
+      source_id: "retained-a", recommended_depth: "A", claims: [
+        { claim: "One supported claim describes the source's evaluated memory architecture.", supporting_excerpt: "This exact excerpt is retained as validated evidence", locator: "one" },
+        { claim: "A second supported claim independently describes the planning comparison.", supporting_excerpt: "This exact excerpt is retained as validated evidence", locator: "two" },
+      ],
+    };
+    await fs.writeFile(path.join(screenCheckpoint, "sources", "semantic-screening.json"), JSON.stringify({ version: 1, screenings: [screening] }), "utf-8");
+    await fs.writeFile(path.join(packetCheckpoint, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [packet] }), "utf-8");
+
+    const result = await backfillValidatedEvidenceHistory(dir);
+    expect(result.recovered).toBe(1);
+    const history = JSON.parse(await fs.readFile(path.join(dir, VALIDATED_SOURCE_EVIDENCE_HISTORY_PATH), "utf-8"));
+    expect(history.entries.map((entry: { packet: { source_id: string } }) => entry.packet.source_id)).toEqual(["retained-a"]);
+  });
+
   it("fails a fabricated source-evidence excerpt instead of accepting an LLM assertion", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-screen-invalid-"));
     dirs.push(dir);
@@ -140,6 +186,20 @@ describe("agentic semantic-screen contract", () => {
     await fs.writeFile(path.join(dir, "fulltext", "paper.md"), "This is retrieved text with a real supported statement.");
     await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "Fabricated claim has no support.", supporting_excerpt: "invented text never appears", locator: "none" }] }] }));
     await expect(repairSourceEvidencePackets(dir)).rejects.toThrow(/invalid source-evidence contract/);
+  });
+
+  it("rejects exact provider metadata as non-claim evidence", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-semantic-screen-metadata-"));
+    dirs.push(dir);
+    await Promise.all(["sources", "fulltext", "evidence"].map((name) => fs.mkdir(path.join(dir, name), { recursive: true })));
+    await fs.writeFile(path.join(dir, "longwrite.yaml"), `version: 1\nproject: { id: test, artifact_type: research_paper, mode: auto_research_agentic }\nresearch: { topic: test, taxonomy: [], semantic_screen: { enabled: true, max_candidates: 2, min_candidates_per_taxonomy_cell: 0, max_evidence_sources: 2, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 } }\nwriting: {}\npublication: {}\nfigures: {}\nreview: {}\nexecution: {}\n`);
+    const title = "The Agent Operating System";
+    const metadata = "[Submitted on 4 Aug 2026] Title: The Agent Operating System Authors: A. Author View a PDF of the paper";
+    await fs.writeFile(path.join(dir, "sources", "source-evidence-candidates.json"), JSON.stringify({ version: 1, candidates: [{ id: "paper", title, fulltext_path: "fulltext/paper.md" }] }));
+    await fs.writeFile(path.join(dir, "fulltext", "paper.md"), metadata);
+    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "The source presents an operating architecture.", supporting_excerpt: metadata, locator: "paragraph: 1" }] }] }));
+    await expect(repairSourceEvidencePackets(dir)).rejects.toThrow(/invalid source-evidence contract/);
+    await expect(fs.readFile(path.join(dir, "reports", "source-evidence-repair.md"), "utf8")).resolves.toContain("bibliographic/provider metadata");
   });
 
   it("reports a too-short exact excerpt as a repairable contract error", async () => {

@@ -229,8 +229,10 @@ Each flagship has a runbook in [docs/flagships](docs/flagships/) and a versioned
 
 | Flagship | Start command | Compute |
 | --- | --- | --- |
-| [Long agentic survey](docs/flagships/long-agentic-survey.md) | `maliang init llm-memory-agentic --blueprint long-agentic-survey` | Codex/Claude; no GPU |
-| [Repository survey](docs/flagships/repository-survey.md) | `maliang init repo-study --blueprint repository-survey --repository <git-url>` | Codex/Claude; no GPU |
+| [Short survey](docs/flagships/paper-flagship-presets.md#short-survey) | `maliang init short-survey --template paper.survey --research-paper-profile flagship_short_paper --topic "<topic>"` | Codex/Claude; no GPU |
+| [Long survey](docs/flagships/long-agentic-survey.md) | `maliang init long-survey --template paper.survey --research-paper-profile flagship_long_paper --topic "<topic>"` | Codex/Claude; no GPU |
+| [Short GitHub paper](docs/flagships/paper-flagship-presets.md#short-github-paper) | `maliang init short-github-paper --template paper.survey --research-paper-profile flagship_short_github_paper --repository <git-url> --topic "<topic>"` | Codex/Claude; no GPU |
+| [Long GitHub paper](docs/flagships/repository-survey.md) | `maliang init long-github-paper --template paper.survey --research-paper-profile flagship_long_github_paper --repository <git-url> --topic "<topic>"` | Codex/Claude; no GPU |
 | [Nanochat agentic empirical paper](docs/flagships/nanochat-agentic-empirical-paper.md) | `maliang init nanochat-agentic-paper --blueprint nanochat-agentic-empirical-paper` | Codex/Claude + reviewed Modal adapter |
 | [Self-play autonomous empirical paper](docs/flagships/self-play-autonomous-empirical-paper.md) | `maliang init self-play-agentic-paper --blueprint self-play-autonomous-empirical-paper` | Codex/Claude + reviewed Modal adapter |
 

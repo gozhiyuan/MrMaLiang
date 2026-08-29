@@ -49,8 +49,8 @@ describe.skipIf(!nodeAtLeast22())("auto_research_agentic dry-run", () => {
       .map(([k, u]: [string, any]) => `${k}:${u.status}`);
     expect(notDone, `unfinished units: ${notDone.join(", ")}`).toEqual([]);
     expect(state.status).toBe("completed");
-    expect(state.units["quality_loop-r1-action_dispatch"]).toMatchObject({ status: "succeeded" });
-    const dispatched = Object.entries(state.units).find(([key]) => key.includes("action_dispatch.revise_sections[revise-fixture]"));
+    expect(state.units["improve-r1-action_dispatch"]).toMatchObject({ status: "succeeded" });
+    const dispatched = Object.entries(state.units).find(([key]) => key.includes("action_dispatch.revise_sections["));
     expect(dispatched?.[1]).toMatchObject({ status: "succeeded" });
     expect(await fs.readFile(path.join(ws, "reports", "action-dispatch.json"), "utf-8")).toContain("revise_sections");
   }, 240_000);

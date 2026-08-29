@@ -135,7 +135,7 @@ describe("research workspace validation", () => {
     const files = validFiles();
     files["longwrite.yaml"] = [
       "version: 1", "project:", "  id: repo-paper", "  artifact_type: research_paper", "  mode: auto_research_agentic",
-      "research:", "  paper_profile: repository_study", "  codebase_discovery:", "    enabled: true", "",
+      "research:", "  paper_profile: flagship_long_github_paper", "  codebase_discovery:", "    enabled: true", "",
     ].join("\n");
     files["codebases/manifest.json"] = JSON.stringify({
       version: 1,

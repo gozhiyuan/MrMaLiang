@@ -16,8 +16,33 @@ The registered profiles are:
 
 | Profile | Organizing artifact | Default scope |
 | --- | --- | --- |
-| `literature_survey` | Scholarly literature | Deep, 24,000 words, 60-page release target. |
-| `repository_study` | A pinned local/Git repository plus scholarly context | Standard, 10,000 words, codebase evidence and an architecture diagram. |
+| `flagship_short_paper` | Scholarly literature | Deep, 8,000 words, 20-page target, 30 cited sources. |
+| `flagship_long_paper` | Scholarly literature | Deep, 24,000 words, 60-page target, 80 cited sources. |
+| `flagship_short_github_paper` | A pinned GitHub/local repository plus scholarly context | Deep, 6,000 words, 15-page target, 18 cited sources, required architecture diagram. |
+| `flagship_long_github_paper` | A pinned GitHub/local repository plus scholarly context | Deep, 14,000 words, 35-page target, 40 cited sources, required architecture diagram. |
+
+The four `flagship_*` entries are scope presets for the same release-grade
+workflow, not separate lightweight modes. Short presets reduce the manuscript,
+corpus, full-text, evidence-packet, and verification budgets together. They
+retain citation validation, evidence ledgers, rendered visual review,
+multi-persona quality review, recovery, and release gates. GitHub presets also
+retain the required source-grounded architecture diagram and require a pinned
+repository (or bounded GitHub discovery).
+
+Figures and tables remain argument-driven rather than quota-driven at every
+scope: a short paper may use fewer artifacts because it makes fewer distinct
+claims, but every selected artifact receives the same source-binding, caption,
+and visual-QA checks.
+
+For the next short GitHub flagship run:
+
+```bash
+maliang init ./my-short-github-paper \
+  --mode auto_research_agentic \
+  --topic "<paper topic>" \
+  --research-paper-profile flagship_short_github_paper \
+  --repository "https://github.com/<owner>/<repo>.git"
+```
 
 ## What a profile owns
 

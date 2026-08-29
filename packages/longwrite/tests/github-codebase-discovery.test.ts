@@ -59,7 +59,7 @@ describe("GitHub codebase discovery", () => {
     await fs.mkdir(path.join(workspace, "codebases"), { recursive: true });
     await fs.writeFile(path.join(workspace, "longwrite.yaml"), [
       "version: 1", "project:", "  id: repo-study", "  artifact_type: research_paper", "  mode: auto_research_agentic",
-      "research:", "  paper_profile: repository_study", "  codebase_discovery:", "    enabled: true",
+      "research:", "  paper_profile: flagship_long_github_paper", "  codebase_discovery:", "    enabled: true",
       "writing: {}", "publication: {}", "figures: {}", "review: {}", "execution: {}", "",
     ].join("\n"), "utf8");
     await fs.writeFile(path.join(workspace, "codebases", "github-candidates.json"), JSON.stringify({
@@ -103,7 +103,7 @@ describe("GitHub codebase discovery", () => {
     await fs.mkdir(path.join(workspace, "codebases"), { recursive: true });
     await fs.writeFile(path.join(workspace, "longwrite.yaml"), [
       "version: 1", "project:", "  id: duplicate-source", "  artifact_type: research_paper", "  mode: auto_research_agentic",
-      "research:", "  paper_profile: repository_study", "  codebases:", "    - id: explicit", "      source: https://github.com/Org/Demo", "      ref: main",
+      "research:", "  paper_profile: flagship_long_github_paper", "  codebases:", "    - id: explicit", "      source: https://github.com/Org/Demo", "      ref: main",
       "  codebase_discovery:", "    enabled: true", "writing: {}", "publication: {}", "figures: {}", "review: {}", "execution: {}", "",
     ].join("\n"), "utf8");
     await fs.writeFile(path.join(workspace, "codebases", "github-candidates.json"), JSON.stringify({

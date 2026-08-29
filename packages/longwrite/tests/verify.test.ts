@@ -35,4 +35,20 @@ describe("citation URL verification", () => {
     expect(written).toContain("sources/citation-verification.jsonl");
     expect(await fs.readFile(path.join(dir, "reports", "source-verification.md"), "utf-8")).toContain("dead: 1");
   });
+
+  it("uses the classified open-access URL when a DOI endpoint is unavailable", async () => {
+    const dir = await workspace();
+    const file = path.join(dir, "sources", "classified_sources.jsonl");
+    const rows = (await fs.readFile(file, "utf8")).trim().split("\n").map(JSON.parse);
+    rows[0].url = "https://example.test/doi-timeout";
+    rows[0].links = { open_access_pdf: "https://example.test/canonical" };
+    await fs.writeFile(file, `${rows.map(JSON.stringify).join("\n")}\n`, "utf8");
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith("/doi-timeout")) throw new Error("timeout");
+      if (url.endsWith("/canonical")) return new Response("", { status: 200 });
+      return new Response("gone", { status: 404 });
+    }) as typeof fetch;
+    const { results } = await verifyCitedSourceUrls(dir, { fetchImpl });
+    expect(results[0]).toMatchObject({ source_id: "live", status: "redirect", final_url: "https://example.test/canonical" });
+  });
 });

@@ -23,6 +23,18 @@ async function readMetrics(dir: string): Promise<Record<string, unknown>> {
   return JSON.parse(await fs.readFile(path.join(dir, "reports", "metrics.json"), "utf-8"));
 }
 
+async function writeRevisionPlan(dir: string, tools: string[]): Promise<void> {
+  await fs.mkdir(path.join(dir, "reviews"), { recursive: true });
+  await fs.writeFile(path.join(dir, "reviews", "revision-action-plan.json"), JSON.stringify({
+    version: 1,
+    findings: tools.map((tool, index) => ({ id: `finding-${index}`, severity: "major", summary: tool })),
+    actions: tools.map((tool, index) => ({
+      id: `action-${index}`, tool, finding_ids: [`finding-${index}`], rationale: tool,
+      acceptance_criteria: [{ metric: tool === "revise_visual_plan" ? "rendered_visual_review" : "review_score", target: tool === "revise_visual_plan" ? 1 : 8 }],
+    })),
+  }), "utf-8");
+}
+
 afterEach(async () => {
   while (tempDirs.length > 0) await fs.rm(tempDirs.pop()!, { recursive: true, force: true });
 });
@@ -34,10 +46,30 @@ describe("research dispatch-metrics", () => {
     expect((await readMetrics(dir)).research_expansion_dispatched).toBe(0);
   });
 
-  it("records 1 when an expansion was dispatched", async () => {
-    const dir = await makeWorkspace({ version: 1, status: "completed", executions: [{ id: "research_expansion" }] });
+  it("records 1 when an expansion succeeded", async () => {
+    const dir = await makeWorkspace({ version: 1, status: "completed", executions: [{ id: "research_expansion", status: "succeeded" }] });
     await runResearchDispatchMetrics(dir);
     expect((await readMetrics(dir)).research_expansion_dispatched).toBe(1);
+  });
+
+  it("records 0 after a continued recoverable expansion failure", async () => {
+    const dir = await makeWorkspace({ version: 1, status: "partial_failure", executions: [{ id: "research_expansion", status: "failed_recoverable" }] });
+    await runResearchDispatchMetrics(dir);
+    expect((await readMetrics(dir)).research_expansion_dispatched).toBe(0);
+  });
+
+  it("skips fresh claim judging for a visual-only revision plan", async () => {
+    const dir = await makeWorkspace({ version: 1, executions: [] });
+    await writeRevisionPlan(dir, ["revise_visual_plan"]);
+    await runResearchDispatchMetrics(dir);
+    expect((await readMetrics(dir)).manuscript_revision_planned).toBe(0);
+  });
+
+  it("requires fresh claim judging when prose revision is selected", async () => {
+    const dir = await makeWorkspace({ version: 1, executions: [] });
+    await writeRevisionPlan(dir, ["revise_sections", "revise_visual_plan"]);
+    await runResearchDispatchMetrics(dir);
+    expect((await readMetrics(dir)).manuscript_revision_planned).toBe(1);
   });
 
   it("preserves existing metrics while merging the gate metric", async () => {
@@ -57,5 +89,6 @@ describe("research dispatch-metrics", () => {
     const malformed = await makeWorkspace({ version: 1, executions: "not-an-array" });
     await runResearchDispatchMetrics(malformed);
     expect((await readMetrics(malformed)).research_expansion_dispatched).toBe(1);
+    expect((await readMetrics(malformed)).manuscript_revision_planned).toBe(1);
   });
 });

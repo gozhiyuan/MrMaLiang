@@ -194,6 +194,10 @@ export function withResearchScriptStages(
     if (String(stage.id) === "visual_review") {
       return {
         ...stage,
+        // A captionless intermediate PDF has no fresh visual input. The
+        // renderer records this as a repairable release failure; skipping the
+        // multimodal worker avoids reviewing stale PNGs and pointless retries.
+        when: "visual_reviewable_pages >= 1",
         validator_commands: [
           ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
           validateVisualReviewCommand(),

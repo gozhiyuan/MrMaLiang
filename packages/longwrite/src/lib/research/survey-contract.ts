@@ -17,6 +17,81 @@ type OutlineSection = {
   keywords?: unknown;
 };
 
+const KEYWORD_STOPWORDS = new Set(["and", "the", "for", "with", "from", "into", "that", "this", "about", "within", "across", "section"]);
+
+function fallbackKeywords(title: string): string[] {
+  const terms = title.toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) ?? [];
+  return [...new Set(terms.filter((term) => !KEYWORD_STOPWORDS.has(term)))].slice(0, 4);
+}
+
+type OutlineIdentityRepair = {
+  repaired: Array<{ from: string; to: string }>;
+  mismatch?: string;
+};
+
+function sectionOrdinal(id: string): string | null {
+  return id.match(/^section-(\d+)(?:-|$)/)?.[1] ?? null;
+}
+
+/**
+ * After drafting starts, outline IDs are the durable join keys for chapters,
+ * evidence allocations, placed artifacts, and LaTeX inputs. A structural
+ * reopen may change titles and organizing logic, but must not casually rename
+ * those keys. Repair the common one-to-one LLM rename (same ordered ordinals)
+ * before downstream stages can spend a full round rebuilding an inconsistent
+ * paper. A cardinality or ordering change is deliberately surfaced as a
+ * contract finding: it needs an explicit chapter-migration operation.
+ */
+async function restoreOutlineChapterIds(workspaceDir: string, raw: { sections?: OutlineSection[] }): Promise<OutlineIdentityRepair> {
+  const chapterDir = path.join(workspaceDir, "chapters");
+  const chapterIds = (await fs.readdir(chapterDir).catch(() => []))
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => path.basename(name, ".md"))
+    .sort();
+  const sections = raw.sections ?? [];
+  if (chapterIds.length === 0 || sections.length === 0) return { repaired: [] };
+  const outlineIds = sections.map((section) => typeof section.id === "string" ? section.id : "");
+  if (outlineIds.length !== chapterIds.length) {
+    return { repaired: [], mismatch: `outline declares ${outlineIds.length} sections but chapters/ has ${chapterIds.length}; a structural reopen must preserve the existing chapter set or use an explicit chapter migration.` };
+  }
+  if (new Set(outlineIds).size !== outlineIds.length || outlineIds.some((id) => !id)) {
+    return { repaired: [], mismatch: "outline section IDs are missing or duplicated while chapters already exist; preserve the existing chapter IDs exactly." };
+  }
+  if (outlineIds.every((id) => chapterIds.includes(id))) return { repaired: [] };
+  const sameOrderedOrdinals = outlineIds.every((id, index) => {
+    const expected = chapterIds[index];
+    return sectionOrdinal(id) !== null && sectionOrdinal(id) === sectionOrdinal(expected);
+  });
+  if (!sameOrderedOrdinals) {
+    return { repaired: [], mismatch: "outline section IDs no longer map one-to-one to the existing ordered chapter IDs; preserve IDs, or perform an explicit chapter migration before rebuild." };
+  }
+  const repaired = outlineIds.flatMap((from, index) => {
+    const to = chapterIds[index];
+    if (from === to) return [];
+    sections[index].id = to;
+    return [{ from, to }];
+  });
+  return { repaired };
+}
+
+async function repairOutlineForExistingChapters(workspaceDir: string): Promise<{ keywords: string[]; ids: Array<{ from: string; to: string }>; mismatch?: string }> {
+  const outlinePath = path.join(workspaceDir, "outline.json");
+  const raw = JSON.parse(await fs.readFile(outlinePath, "utf-8")) as { sections?: OutlineSection[] };
+  const identity = await restoreOutlineChapterIds(workspaceDir, raw);
+  if (!Array.isArray(raw.sections)) return { keywords: [], ids: identity.repaired, mismatch: identity.mismatch };
+  const repaired: string[] = [];
+  raw.sections.forEach((section, index) => {
+    const existing = Array.isArray(section.keywords) ? section.keywords.filter((value): value is string => typeof value === "string" && value.trim().length > 0) : [];
+    if (existing.length > 0 || typeof section.title !== "string") return;
+    const keywords = fallbackKeywords(section.title);
+    if (keywords.length === 0) return;
+    section.keywords = keywords;
+    repaired.push(typeof section.id === "string" ? section.id : `section-${index + 1}`);
+  });
+  if (repaired.length > 0 || identity.repaired.length > 0) await fs.writeFile(outlinePath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+  return { keywords: repaired, ids: identity.repaired, mismatch: identity.mismatch };
+}
+
 const SURVEY_ROLES = new Set([
   "introduction_gap_contributions",
   "multi_axis_taxonomy",
@@ -83,6 +158,7 @@ function relatedWorkMatrix(sources: ClassifiedSource[]): string {
 }
 
 export async function evaluateSurveyContract(workspaceDir: string): Promise<{ report: SurveyContractReport; written: string[] }> {
+  const repairedOutline = await repairOutlineForExistingChapters(workspaceDir);
   const sections = await readOutline(workspaceDir);
   const sourceRaw = await fs.readFile(path.join(workspaceDir, "sources", "classified_sources.jsonl"), "utf-8");
   const sources = parseJsonl<ClassifiedSource>(sourceRaw);
@@ -121,6 +197,11 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
       detail: "Every outline section declares keywords for section-level evidence allocation.",
     },
     {
+      id: "chapter_outline_identity",
+      pass: !repairedOutline.mismatch,
+      detail: repairedOutline.mismatch ?? "Outline section IDs align with the existing chapter identity keys.",
+    },
+    {
       id: "related_work_matrix",
       pass: coreSources.length >= 5,
       detail: `${coreSources.length} A/B-depth sources available for related-work matrix; required 5.`,
@@ -137,6 +218,8 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
       "",
       `Status: ${report.pass ? "pass" : "fail"}`,
       "",
+      ...(repairedOutline.keywords.length > 0 ? [`- [repair] Restored title-derived keywords for: ${repairedOutline.keywords.join(", ")}`] : []),
+      ...(repairedOutline.ids.length > 0 ? [`- [repair] Restored stable chapter IDs: ${repairedOutline.ids.map(({ from, to }) => `${from} → ${to}`).join(", ")}`] : []),
       ...findings.map((finding) => `- [${finding.pass ? "pass" : "fail"}] ${finding.id}: ${finding.detail}`),
       "",
     ].join("\n"), "utf-8"),

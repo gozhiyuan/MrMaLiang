@@ -21,7 +21,7 @@ async function makeWorkspace(depths: string[]): Promise<string> {
     "  mode: auto_research_agentic",
     "research:",
     "  paper_kind: survey",
-    "  paper_profile: literature_survey",
+    "  paper_profile: flagship_long_paper",
     "  taxonomy:",
     "    - memory architectures",
     "    - evaluation and benchmarks",

@@ -1,4 +1,8 @@
-# Full AutoResearch Agentic Flagship Guide
+# Long Survey Flagship Guide
+
+This is the detailed runbook for `flagship_long_paper`, the 24,000-word,
+60-page literature-survey preset. For the short-survey command and the other
+three paper presets, see [Paper Flagship Presets](./paper-flagship-presets.md).
 
 The matching versioned starting point is the
 [long-agentic-survey blueprint](../../examples/flagships/long-agentic-survey/).
@@ -782,6 +786,7 @@ cd ./maliang-workspaces
 maliang init llm-memory-agentic \
   --template paper.survey \
   --topic "Long-horizon memory and planning in LLM agents" \
+  --research-paper-profile flagship_long_paper \
   -- \
   --author "Your Name" \
   --email "you@example.com" \

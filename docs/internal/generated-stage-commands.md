@@ -26,18 +26,22 @@ resulting manifests still invoke the same subcommands.
 | `evidence index` | — | `corpus_recovery_evidence_index`, `evidence_index`, `quality_evidence_index_refresh` |
 | `publication package` | — | `package_submission` |
 | `research assess` | — | `assess`, `final_release_assess_research` |
+| `research assess-final-release-progress` | — | `final_release_progress` |
+| `research backfill-validated-evidence-history` | — | `quality_backfill_validated_evidence_history` |
+| `research citation-repair-packet` | — | `citation_repair_packet` |
+| `research cited-source-upgrade-packet` | — | `cited_source_upgrade_packet` |
 | `research classify` | `--topic` | `classify` |
 | `research codebases` | — | `codebase_prepare` |
-| `research comparison-opportunities` | — | `comparison_opportunities` |
 | `research comparison-registry` | — | `comparison_registry` |
 | `research corpus-gates` | `--advisory` | `corpus_gate_assessment`, `corpus_gates`, `corpus_recovery_assessment`, `quality_corpus_gates` |
-| `research direction-memory` | — | `direction_memory` |
 | `research dispatch-metrics` | — | `quality_dispatch_metrics` |
 | `research enrich` | `--disabled` `--max-sources` | `enrich` |
 | `research expand` | `--action-plan` | `corpus_recovery_expand`, `targeted_research_expansion` |
+| `research final-release-baseline` | — | `final_release_baseline` |
 | `research finalize-evidence-depth` | — | `corpus_recovery_finalize_evidence_depth`, `finalize_evidence_depth`, `quality_finalize_evidence_depth` |
 | `research fulltext` | `--max-sources` `--no-pdf-download` | `corpus_recovery_fulltext`, `fulltext`, `quality_fulltext_refresh` |
 | `research gate-reachability` | — | `gate_reachability` |
+| `research generate-final-release-plan` | — | `final_release_plan` |
 | `research prepare-experiment` | — | `experiment_evidence_prepare` |
 | `research recall` | `--provider` `--query-budget` `--target-candidates` `--topic` | `recall` |
 | `research reconcile-identities` | — | `identity_reconcile` |
@@ -45,7 +49,6 @@ resulting manifests still invoke the same subcommands.
 | `research select-semantic-candidates` | — | `semantic_candidate_select` |
 | `research select-source-evidence-candidates` | — | `corpus_recovery_source_candidate_select`, `quality_source_evidence_candidate_select`, `source_evidence_candidate_select` |
 | `research snowball` | — | `snowball_recall` |
-| `research stall-status` | — | `stall_status` |
 | `research survey-contract` | — | `outline_initial_survey_contract`, `outline_recheck_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
 | `research venue-upgrade` | — | `venue_upgrade` |
 | `research verify` | `--max-sources` `--section` | `final_release_verify_citations`, `verify_citations`, `verify_section_citations` |

@@ -70,7 +70,7 @@ describe("runInit", () => {
       min_cited_within_one_year_ratio: 0.3,
       min_accepted_cited_ratio: 0.3,
       max_cited_arxiv_only_ratio: 0.5,
-      min_citation_depths_per_section: { A: 1, B: 2, C: 2 },
+      min_citation_depths_per_section: { A: 0, B: 2, C: 0 },
       min_cited_ab_sources_per_taxonomy_cell: 2,
     });
     expect(config.figures.quality_gates).toEqual({ min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: true });
@@ -83,6 +83,14 @@ describe("runInit", () => {
       disclosure: { enabled: false, provenance: { enabled: false } },
     });
     expect(config.run_limits.max_recorded_tokens).toBe(10000000);
+    expect(config.execution).toMatchObject({
+      default_model: "gpt-5.6-luna",
+      default_model_reasoning_effort: "medium",
+      stage_overrides: {
+        search_planner: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+        "improve.review": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+      },
+    });
   });
 
   it("suppresses public provenance disclosure for an anonymous flagship workspace", async () => {
@@ -93,25 +101,25 @@ describe("runInit", () => {
     expect(config.publication).toMatchObject({ anonymous: true, presentation: { disclosure: { enabled: false, provenance: { enabled: false } } } });
   });
 
-  it("scaffolds a shorter repository-study paper with a pinned primary codebase", async () => {
+  it("scaffolds the long GitHub flagship with a pinned primary codebase", async () => {
     const root = await makeRoot();
     const target = path.join(root, "repo-study");
     await runInit(target, {
       topic: "Architecture of a long-horizon research system",
-      researchPaperProfile: "repository_study",
+      researchPaperProfile: "flagship_long_github_paper",
       repository: ["https://github.com/example/longexperiment.git"],
     });
     const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf8"));
     const manifest = await fs.readFile(path.join(target, "malaclaw.yaml"), "utf8");
     expect(config.research).toMatchObject({
-      paper_kind: "survey", paper_profile: "repository_study", workflow_profile: "standard",
+      paper_kind: "survey", paper_profile: "flagship_long_github_paper", workflow_profile: "deep",
       codebases: [{ id: "repo-longexperiment", source: "https://github.com/example/longexperiment.git", ref: "HEAD", role: "primary_artifact" }],
-      release_gates: { min_cited_sources: 12, min_citation_depths_per_section: { B: 1, C: 1 } },
+      release_gates: { min_cited_sources: 40, min_citation_depths_per_section: { A: 0, B: 1, C: 0 } },
     });
-    expect(config.writing.target_length_words).toBe(10000);
-    expect(config.publication.min_pages).toBeUndefined();
-    expect(config.publication.presentation).toMatchObject({ citation_style: "numeric", show_production_statistics: false });
-    // A repository study sets no artifact quota either; the architecture
+    expect(config.writing.target_length_words).toBe(14000);
+    expect(config.publication.min_pages).toBe(35);
+    expect(config.publication.presentation).toMatchObject({ citation_style: "author_year", show_production_statistics: false });
+    // A GitHub flagship sets no artifact quota either; the architecture
     // diagram is required by id below because it is a domain requirement of
     // this paper kind, not a count target.
     expect(config.figures.quality_gates).toMatchObject({
@@ -123,17 +131,37 @@ describe("runInit", () => {
     expect(await fs.readFile(path.join(target, ".malaclaw", "fixtures", "chapters", "section-1.md"), "utf8")).toContain("[codebase:repo-longexperiment]");
   });
 
+  it("scaffolds the short GitHub flagship with deep quality stages and scaled budgets", async () => {
+    const root = await makeRoot();
+    const target = path.join(root, "short-github-paper");
+    await runInit(target, {
+      topic: "Architecture of a long-horizon research system",
+      researchPaperProfile: "flagship_short_github_paper",
+      repository: ["https://github.com/example/longexperiment.git"],
+    });
+    const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf8"));
+    expect(config.research).toMatchObject({
+      paper_profile: "flagship_short_github_paper", workflow_profile: "deep",
+      target_candidates: 120, query_budget: 16,
+      fulltext: { max_core_sources: 36 },
+      verification: { max_sources: 36 },
+      release_gates: { min_cited_sources: 18, min_citations_per_page: 1.5 },
+    });
+    expect(config.writing.target_length_words).toBe(6_000);
+    expect(config.publication.min_pages).toBe(15);
+  });
+
   it("does not impose the survey page floor on a literature-driven empirical paper", async () => {
     const root = await makeRoot();
     const target = path.join(root, "empirical");
     await runInit(target, {
       topic: "A controlled self-play intervention",
       researchPaperKind: "empirical",
-      researchPaperProfile: "literature_survey",
+      researchPaperProfile: "flagship_long_paper",
       targetLengthWords: "14000",
     });
     const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf8"));
-    expect(config.research).toMatchObject({ paper_kind: "empirical", paper_profile: "literature_survey" });
+    expect(config.research).toMatchObject({ paper_kind: "empirical", paper_profile: "flagship_long_paper" });
     expect(config.writing.target_length_words).toBe(14_000);
     expect(config.publication.min_pages).toBeUndefined();
   });
@@ -145,7 +173,7 @@ describe("runInit", () => {
     const target = path.join(root, "paper");
     await runInit(target, {
       topic: "Repository architecture",
-      researchPaperProfile: "repository_study",
+      researchPaperProfile: "flagship_long_github_paper",
       repository: [path.relative(process.cwd(), repository)],
     });
     const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf8"));
@@ -156,7 +184,7 @@ describe("runInit", () => {
     const root = await makeRoot();
     await expect(runInit(path.join(root, "repo-study"), {
       topic: "Repository architecture",
-      researchPaperProfile: "repository_study",
+      researchPaperProfile: "flagship_long_github_paper",
     })).rejects.toThrow(/requires at least one --repository or --discover-repositories/);
   });
 
@@ -165,7 +193,7 @@ describe("runInit", () => {
     const target = path.join(root, "discovery-study");
     await runInit(target, {
       topic: "Agent memory repositories",
-      researchPaperProfile: "repository_study",
+      researchPaperProfile: "flagship_long_github_paper",
       discoverRepositories: true,
       repositoryQueryBudget: "3",
       repositoryMaxCandidates: "18",
@@ -186,11 +214,23 @@ describe("runInit", () => {
     expect(manifest).toContain("github_codebase_screen");
   });
 
-  it("rejects discovery controls outside the repository-study profile", async () => {
+  it("rejects discovery controls outside a GitHub paper profile", async () => {
     const root = await makeRoot();
     await expect(runInit(path.join(root, "bad-discovery"), {
       topic: "Agent memory", discoverRepositories: true,
-    })).rejects.toThrow(/requires --research-paper-profile repository_study/i);
+    })).rejects.toThrow(/requires a GitHub paper profile/i);
+  });
+
+  it("accepts bounded GitHub discovery for the short GitHub flagship", async () => {
+    const root = await makeRoot();
+    const target = path.join(root, "short-github-discovery");
+    await runInit(target, {
+      topic: "Agent memory repositories",
+      researchPaperProfile: "flagship_short_github_paper",
+      discoverRepositories: true,
+    });
+    const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf8"));
+    expect(config.research.codebase_discovery.enabled).toBe(true);
   });
 
   it("accepts init-time operational guardrail overrides", async () => {

@@ -17,7 +17,7 @@ MrMaLiang owns this product-specific UI: workspace creation, `longwrite.yaml` ed
 research provider settings, writing style/reference inputs, feedback capture,
 and LongWrite-specific command hints. Research-paper creation is survey-only in
 this component surface: an optional repository input selects the
-`repository_study` evidence profile, pins the Git snapshot, and adds the
+`flagship_long_github_paper` evidence preset, pins the Git snapshot, and adds the
 schema-validated architecture and comparison stages. The creation/editor forms
 also expose bounded GitHub discovery budgets; selected repositories are
 canonicalized and Git-pinned before drafting. It never executes repository

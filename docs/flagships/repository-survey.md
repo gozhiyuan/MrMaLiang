@@ -1,4 +1,8 @@
-# Agentic Repository Survey Flagship
+# Long GitHub Paper Flagship Guide
+
+This is the detailed runbook for `flagship_long_github_paper`, the 14,000-word,
+35-page codebase-grounded preset. For the short-GitHub command and the other
+three paper presets, see [Paper Flagship Presets](./paper-flagship-presets.md).
 
 The matching versioned starting point is the
 [repository-survey blueprint](../../examples/flagships/repository-survey/).
@@ -70,9 +74,13 @@ Popularity and stars are never comparison evidence.
 
 ```bash
 maliang init repo-study \
-  --blueprint repository-survey \
+  --template paper.survey \
+  --research-paper-profile flagship_long_github_paper \
   --repository https://github.com/your-org/your-repository.git \
-  --reference-link https://arxiv.org/abs/2401.01234  # replace with the real paper
+  --topic "An evidence-backed architecture and design survey of the pinned system" \
+  --reference-link https://arxiv.org/abs/2401.01234 \
+  -- \
+  --research-provider multi  # replace the reference URL with the real paper
 
 maliang preflight repo-study --runtime codex
 maliang run repo-study --runtime codex
@@ -197,8 +205,8 @@ and PDF tooling. It does not need a GPU or Modal.
 
 The MrMaLiang dashboard exposes **Repository evidence** in both workspace
 creation and the durable `longwrite.yaml` editor. One Git URL or local Git path
-per line automatically selects `repository_study`; an empty field selects
-`literature_survey`. The dashboard creation path always sets `paper_kind:
+per line selects `flagship_long_github_paper`; an empty field selects
+`flagship_long_paper`. The dashboard creation path always sets `paper_kind:
 survey`, and adding a repository never executes it or starts LongExperiment.
 It also exposes the same bounded GitHub-discovery budgets as `maliang init`.
 

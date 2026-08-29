@@ -59,6 +59,7 @@ type InitOptions = {
   includeArchivedRepositories?: boolean;
   allowUnlicensedRepositories?: boolean;
   referenceLink?: string[];
+  researchPaperProfile?: string;
   experimentAuthoring?: "prescribed" | "agentic";
   name?: string;
   experimentTemplate?: string;
@@ -166,6 +167,23 @@ async function initializeWorkspace(target: string, options: InitOptions): Promis
     hasRepository: Boolean(options.repository?.length || options.discoverRepositories),
     experimentAuthoring: options.experimentAuthoring,
   });
+  const researchPaperProfile = options.researchPaperProfile
+    ?? (researchAxes?.evidenceProfile === "repository" ? "flagship_long_github_paper" : "flagship_long_paper");
+  const paperProfiles = new Set([
+    "flagship_short_paper",
+    "flagship_long_paper",
+    "flagship_short_github_paper",
+    "flagship_long_github_paper",
+  ]);
+  if (options.researchPaperProfile && !paperProfiles.has(options.researchPaperProfile)) {
+    throw new Error(`--research-paper-profile must be one of: ${[...paperProfiles].join(", ")}`);
+  }
+  const profileNeedsRepository = researchPaperProfile.includes("_github_");
+  if (researchAxes && profileNeedsRepository !== (researchAxes.evidenceProfile === "repository")) {
+    throw new Error(profileNeedsRepository
+      ? `${researchPaperProfile} requires --repository or --discover-repositories`
+      : `${researchPaperProfile} cannot be used with --repository or --discover-repositories`);
+  }
   await assertNewWorkspace(workspace);
   if (template.writing && !options.topic) throw new Error(`--topic is required by ${template.id}`);
   if (template.experiment && !template.experiment.flagship && !options.experimentTemplate && !options.hypothesis) throw new Error(`--hypothesis is required by ${template.id}`);
@@ -201,9 +219,9 @@ async function initializeWorkspace(target: string, options: InitOptions): Promis
   }
   if (template.writing) {
     const writingDir = path.join(workspace, "writing");
-    const args = ["init", writingDir, "--mode", template.writing.mode, "--topic", options.topic!];
+    const args = ["init", writingDir, "--id", projectIdFromDir(workspace), "--mode", template.writing.mode, "--topic", options.topic!];
     if (researchAxes) args.push("--research-paper-kind", researchAxes.paperKind);
-    if (researchAxes) args.push("--research-paper-profile", researchAxes.evidenceProfile === "repository" ? "repository_study" : "literature_survey");
+    if (researchAxes) args.push("--research-paper-profile", researchPaperProfile);
     for (const repository of options.repository ?? []) args.push("--repository", repository);
     if (options.discoverRepositories) args.push("--discover-repositories");
     if (options.repositoryQueryBudget) args.push("--repository-query-budget", options.repositoryQueryBudget);
@@ -360,6 +378,7 @@ program.command("init <dir>")
   .option("--include-archived-repositories", "Allow archived GitHub repositories")
   .option("--allow-unlicensed-repositories", "Allow candidates without a detected license")
   .option("--reference-link <url...>", "Original paper or other reference URL(s); repeatable")
+  .option("--research-paper-profile <id>", "Paper flagship preset: flagship_short_paper, flagship_long_paper, flagship_short_github_paper, or flagship_long_github_paper")
   .option("--experiment-authoring <mode>", "Experiment authoring for paper.empirical: agentic or prescribed")
   .option("--name <text>", "Project name")
   .option("--experiment-template <id>", "Optional LongExperiment flagship for an empirical-paper template")

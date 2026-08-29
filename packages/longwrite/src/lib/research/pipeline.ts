@@ -22,6 +22,9 @@ export type PrepareResearchOptions = {
   providerFactory?: (id: ResearchProviderId) => ResearchProvider;
   targetCandidates?: number;
   queryBudget?: number;
+  /** Explicit bounded query list for a recovery operation.  Unlike a search
+   * plan, this is executed verbatim and never prefixed by taxonomy variants. */
+  queries?: string[];
   /** Recovery expansions append newly recalled sources to the durable corpus
    * instead of replacing earlier evidence-backed records. */
   mergeExisting?: boolean;
@@ -115,7 +118,11 @@ export async function recallSources(opts: PrepareResearchOptions): Promise<strin
     throw new Error(`invalid ${SEARCH_PLAN_PATH}:\n${planLoad.findings.join("\n")}`);
   }
   const plan = planLoad.present && planLoad.ok ? planLoad.plan : undefined;
-  const queries = (plan ? plannedQueries(plan) : [opts.topic]).slice(0, opts.queryBudget ?? 50);
+  const queries = (opts.queries && opts.queries.length > 0
+    ? opts.queries
+    : (plan ? plannedQueries(plan) : [opts.topic]))
+    .slice(0, opts.queryBudget ?? 50);
+  if (queries.length === 0) throw new Error("research recall requires at least one query");
   const countPerQuery = Math.max(1, Math.ceil(targetCandidates / queries.length));
 
   let raw: Array<RawSource & { provenance?: { query: string; provider: string; retrieved_at: string } }> = [];

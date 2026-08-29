@@ -65,30 +65,40 @@ async function verifyUrl(
   if (!source.url || !/^https?:\/\//i.test(source.url)) {
     return { ...base, status: "unknown", detail: "source has no HTTP(S) URL" };
   }
-  const request = async (method: "HEAD" | "GET") => fetchImpl(source.url, {
+  // DOI resolvers and scholarly CDNs occasionally time out while a known
+  // canonical/open-access URL for the same classified record remains
+  // reachable. Verify that evidence-preserving fallback before reporting an
+  // operationally live citation as unknown.
+  const urls = [...new Set([source.url, source.links?.open_access_pdf]
+    .filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url)))];
+  const request = async (url: string, method: "HEAD" | "GET") => fetchImpl(url, {
     method,
     redirect: "follow",
     signal: AbortSignal.timeout(timeoutMs),
     ...(method === "GET" ? { headers: { range: "bytes=0-0" } } : {}),
   });
-  try {
-    let response = await request("HEAD");
-    // Common scholarly hosts deny HEAD but serve GET; a one-byte range keeps
-    // verification from downloading a paper body.
-    if ([403, 405, 501].includes(response.status)) response = await request("GET");
-    const final_url = response.url || source.url;
-    if (response.ok) {
-      return {
-        ...base,
-        status: final_url !== source.url ? "redirect" : "live",
-        http_status: response.status,
-        ...(final_url !== source.url ? { final_url } : {}),
-      };
+  let lastFailure: CitationUrlVerification | undefined;
+  for (const url of urls) {
+    try {
+      let response = await request(url, "HEAD");
+      // Common scholarly hosts deny HEAD but serve GET; a one-byte range keeps
+      // verification from downloading a paper body.
+      if ([403, 405, 501].includes(response.status)) response = await request(url, "GET");
+      const final_url = response.url || url;
+      if (response.ok) {
+        return {
+          ...base,
+          status: final_url !== source.url ? "redirect" : "live",
+          http_status: response.status,
+          ...(final_url !== source.url ? { final_url } : {}),
+        };
+      }
+      lastFailure = { ...base, status: "dead", http_status: response.status, ...(final_url !== source.url ? { final_url } : {}) };
+    } catch (error) {
+      lastFailure = { ...base, status: "unknown", detail: error instanceof Error ? error.message : String(error) };
     }
-    return { ...base, status: "dead", http_status: response.status, ...(final_url !== source.url ? { final_url } : {}) };
-  } catch (error) {
-    return { ...base, status: "unknown", detail: error instanceof Error ? error.message : String(error) };
   }
+  return lastFailure ?? { ...base, status: "unknown", detail: "no usable citation URL" };
 }
 
 export async function verifyCitedSourceUrls(

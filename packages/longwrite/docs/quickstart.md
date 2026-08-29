@@ -8,8 +8,9 @@ flagship with bounded LLM planning and deterministic provenance, rendering, and
 release gates. The dry-run rehearsal below uses its normal workflow with the
 offline `seed` provider; it does not use a separate legacy pipeline.
 
-Read the [Full AutoResearch Agentic Flagship Guide](../../../docs/flagships/long-agentic-survey.md)
-or the [Repository Study Paper Flagship Guide](../../../docs/flagships/repository-survey.md)
+Read the [Paper Flagship Presets](../../../docs/flagships/paper-flagship-presets.md),
+the [Long Survey Flagship Guide](../../../docs/flagships/long-agentic-survey.md),
+or the [Long GitHub Paper Flagship Guide](../../../docs/flagships/repository-survey.md)
 before spending model quota on the demo; it explains the action-plan,
 operator-clarification, and recovery behavior.
 

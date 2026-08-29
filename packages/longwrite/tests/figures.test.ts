@@ -322,7 +322,8 @@ describe("research figures and tables", () => {
     expect(latex.match(/\\node\[draw=blue!/g)).toHaveLength(nodes.length);
     expect(latex).toContain("text width=3.15cm");
     expect(latex).not.toContain("text width=2cm");
-    expect(latex.indexOf("\\draw[-{Latex")).toBeLessThan(latex.indexOf("\\node[draw=blue!"));
+    // TikZ resolves named node anchors only after the nodes are declared.
+    expect(latex.indexOf("\\draw[-{Latex")).toBeGreaterThan(latex.indexOf("\\node[draw=blue!"));
   });
 
   it("fails when a manifest artifact is not embedded at its declared placement", async () => {

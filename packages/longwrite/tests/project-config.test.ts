@@ -13,7 +13,7 @@ describe("LongWriteProjectConfig", () => {
     });
     expect(config.research.provider).toBe("seed");
     expect(config.research.paper_kind).toBe("survey");
-    expect(config.research.paper_profile).toBe("literature_survey");
+    expect(config.research.paper_profile).toBe("flagship_long_paper");
     expect(config.project.authors).toEqual([]);
     expect(config.writing).toEqual({
       reference_links: [],
@@ -32,8 +32,8 @@ describe("LongWriteProjectConfig", () => {
     expect(() => parseProjectConfig({
       version: 1,
       project: { id: "repo-paper", artifact_type: "research_paper", mode: "auto_research_agentic" },
-      research: { paper_profile: "repository_study" },
-    })).toThrow(/repository_study requires at least one codebase/i);
+      research: { paper_profile: "flagship_long_github_paper" },
+    })).toThrow(/flagship_long_github_paper requires at least one codebase/i);
   });
 
   it("rejects a disclosure that would be silently suppressed for anonymous submission", () => {

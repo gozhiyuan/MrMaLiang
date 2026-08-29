@@ -6,14 +6,16 @@ and generated MalaClaw stage commands are implementation details.
 
 ## Public flagship runbooks
 
-| Runbook | Template | Mode axes | Start only after |
-| --- | --- | --- | --- |
-| [Long agentic survey](./long-agentic-survey.md) | `paper.survey` | survey · literature · none | The [blueprint](../../examples/flagships/long-agentic-survey/) seed/dry-run rehearsal passes. |
-| [Repository survey](./repository-survey.md) | `paper.survey` + repository | survey · repository · none | The [blueprint](../../examples/flagships/repository-survey/) repository and revision are chosen. |
-| [Nanochat agentic empirical paper](./nanochat-agentic-empirical-paper.md) | `paper.empirical` + repository | empirical · repository · run · agentic | Dedicated worker, design/code approvals, local smoke, and compute review pass. |
-| [Self-play autonomous empirical paper](./self-play-autonomous-empirical-paper.md) | `paper.empirical` | empirical · literature · run · agentic | Dedicated worker, model/benchmark access, design/code approvals, local smoke, and compute review pass. |
+| Runbook | Preset | Start only after |
+| --- | --- | --- |
+| [Short survey](./paper-flagship-presets.md#short-survey) | `flagship_short_paper` | Topic and scope are set. |
+| [Long survey](./long-agentic-survey.md) | `flagship_long_paper` | The [blueprint](../../examples/flagships/long-agentic-survey/) seed/dry-run rehearsal passes. |
+| [Short GitHub paper](./paper-flagship-presets.md#short-github-paper) | `flagship_short_github_paper` | Topic, scope, and repository are set. |
+| [Long GitHub paper](./repository-survey.md) | `flagship_long_github_paper` | The [blueprint](../../examples/flagships/repository-survey/) repository and revision are chosen. |
+| [Nanochat agentic empirical paper](./nanochat-agentic-empirical-paper.md) | empirical | Dedicated worker, design/code approvals, local smoke, and compute review pass. |
+| [Self-play autonomous empirical paper](./self-play-autonomous-empirical-paper.md) | empirical | Dedicated worker, model/benchmark access, design/code approvals, local smoke, and compute review pass. |
 
-Start with the survey, then the repository survey, then the Nanochat pilot. The
+Start with the short survey, then the long survey or a GitHub paper, then the Nanochat pilot. The
 survey workflows are validated writing flagships. The two empirical workflows
 are executable release candidates: their agentic graphs, approval gates,
 statistics, handoff, and configurations are tested, but this repository does not

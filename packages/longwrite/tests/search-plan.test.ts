@@ -68,6 +68,19 @@ describe("plan-driven recall", () => {
     expect(report).toContain("NeurIPS");
   });
 
+  it("executes an explicit recovery batch verbatim instead of consuming taxonomy queries", async () => {
+    const ws = await makeWorkspace();
+    await fs.mkdir(path.join(ws, "sources"), { recursive: true });
+    await fs.writeFile(path.join(ws, "sources", "search-plan.json"), JSON.stringify(validPlan), "utf-8");
+    await recallSources({
+      workspaceDir: ws, topic: validPlan.topic, provider: "seed", count: 2,
+      queries: ["targeted evidence gap query"], queryBudget: 1,
+    });
+    const raw = (await fs.readFile(path.join(ws, "sources", "raw_results.jsonl"), "utf-8"))
+      .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    expect(new Set(raw.map((source) => source.provenance.query))).toEqual(new Set(["targeted evidence gap query"]));
+  });
+
   it("fails loudly on an invalid plan instead of degrading to topic-only", async () => {
     const ws = await makeWorkspace();
     await fs.mkdir(path.join(ws, "sources"), { recursive: true });

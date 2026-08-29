@@ -6,6 +6,7 @@ import { parseJsonl } from "./jsonl.js";
 import type { ClassifiedSource } from "./types.js";
 import type { EmbeddingClient } from "./embeddings.js";
 import { sourceMatchesTaxonomy } from "./taxonomy.js";
+import { loadProjectConfig } from "../project-config.js";
 
 /** Lazy-load node:sqlite so merely IMPORTING this module never crashes on
  *  Node < 22. Only stages that actually build/query the FTS index pay the
@@ -258,7 +259,7 @@ export async function searchEvidence(workspaceDir: string, query: string, limit 
   }
 }
 
-type OutlineSection = { id: string; title?: string; keywords?: string[] };
+type OutlineSection = { id: string; title?: string; keywords?: string[]; sourceIds: string[] };
 
 async function outlineSections(workspaceDir: string): Promise<OutlineSection[]> {
   const raw = JSON.parse(await fs.readFile(path.join(workspaceDir, "outline.json"), "utf-8")) as { sections?: unknown };
@@ -269,10 +270,22 @@ async function outlineSections(workspaceDir: string): Promise<OutlineSection[]> 
       id: typeof value.id === "string" ? value.id : "",
       title: typeof value.title === "string" ? value.title : undefined,
       keywords: Array.isArray(value.keywords) ? value.keywords.filter((term): term is string => typeof term === "string") : [],
+      // An evidence-aware outline can carry a deliberately allocated source
+      // set (for example a survey matrix's row provenance).  Allocation used
+      // to ignore it, letting lexical retrieval replace those sources with
+      // superficially similar papers and making the writer unable to satisfy
+      // its own source contract.
+      sourceIds: Array.isArray(value.source_ids) ? value.source_ids.filter((id): id is string => typeof id === "string") : [],
     }))
     .filter((section) => section.id.length > 0);
   if (sections.length === 0) throw new Error("outline.json sections must contain string ids");
   return sections;
+}
+
+function isAcceptedSource(source: ClassifiedSource): boolean {
+  const status = source.identity?.publication_status?.toLowerCase() ?? "";
+  if (/(accepted|published|inproceedings|journal|proceedings)/.test(status)) return true;
+  return Boolean(source.identifiers?.doi) && !/(arxiv|preprint|unknown)/i.test(source.venue);
 }
 
 export async function allocateSectionEvidence(workspaceDir: string, taxonomy: string[] = [], opts: { embeddingClient?: EmbeddingClient } = {}): Promise<{
@@ -280,9 +293,13 @@ export async function allocateSectionEvidence(workspaceDir: string, taxonomy: st
   packets: string[];
   coveragePath: string;
 }> {
-  const [sections, sources] = await Promise.all([
+  const [sections, sources, config] = await Promise.all([
     outlineSections(workspaceDir),
     readJsonl<ClassifiedSource>(workspaceDir, "sources/classified_sources.jsonl"),
+    // The evidence module is also used by lightweight/manual workspaces.
+    // Missing project config disables this optional release-aware preference;
+    // it must not prevent ordinary attribution allocation.
+    loadProjectConfig(workspaceDir).catch(() => null),
   ]);
   // FTS is useful for focused selection, but an outline's display title can
   // be far from the wording used in a source. Keep a local chunk catalogue so
@@ -300,22 +317,56 @@ export async function allocateSectionEvidence(workspaceDir: string, taxonomy: st
     ? primary
     : sources.filter((source) => source.citation_depth === "C");
 
-  for (const section of sections) {
+  // A published-source release ratio is a manuscript-wide capacity contract,
+  // not a request to repeatedly allocate the same few accepted papers. Spread
+  // a bounded, distinct accepted workset over the packets so later chapter
+  // revision has exact local markers it can actually weave. This remains a
+  // preference over the outline's explicit source IDs and never fabricates
+  // evidence: every selected source still needs an indexed chunk below.
+  const acceptedTarget = Math.min(
+    core.filter(isAcceptedSource).length,
+    Math.ceil((config?.research.release_gates.min_cited_sources ?? 0) * (config?.research.release_gates.min_accepted_cited_ratio ?? 0)),
+  );
+  const acceptedCore = core.filter(isAcceptedSource).sort((a, b) => a.id.localeCompare(b.id));
+  const acceptedPerSection = acceptedTarget > 0 ? Math.ceil(acceptedTarget / sections.length) : 0;
+
+  for (const [sectionIndex, section] of sections.entries()) {
     const query = [section.title ?? section.id, ...(section.keywords ?? [])].join(" ");
     const retrieved = await searchEvidence(workspaceDir, query, 24, opts).catch(() => []);
     const chunkSourceIds = retrieved.map((chunk) => chunk.source_id);
     const fallbackSourceIds = core
       .filter((source) => `${source.title} ${source.abstract} ${source.topics.join(" ")}`.toLowerCase().includes(query.toLowerCase()))
       .map((source) => source.id);
-    const sourceIds = [...new Set([...chunkSourceIds, ...fallbackSourceIds, ...core.map((source) => source.id)])].slice(0, 12);
+    const acceptedStart = sectionIndex * acceptedPerSection;
+    const allocatedAcceptedIds = acceptedCore.slice(acceptedStart, acceptedStart + acceptedPerSection).map((source) => source.id);
+    const sourceIds = [...new Set([
+      ...section.sourceIds,
+      ...allocatedAcceptedIds,
+      ...chunkSourceIds,
+      ...fallbackSourceIds,
+      ...core.map((source) => source.id),
+    ])].slice(0, 12);
     const seen = new Set<string>();
-    const chunks = [...retrieved, ...allChunks.filter((chunk) => sourceIds.includes(chunk.source_id))]
+    const availableChunks = [...retrieved, ...allChunks.filter((chunk) => sourceIds.includes(chunk.source_id))]
       .filter((chunk) => {
         if (seen.has(chunk.id)) return false;
         seen.add(chunk.id);
         return true;
-      })
-      .slice(0, 24);
+      });
+    // Retain at least one exact locator for every selected source before
+    // filling the packet with additional context. Flat chunk ordering could
+    // otherwise spend all 24 slots on the first long document and leave a
+    // declared source id impossible to cite with the evidence ledger.
+    const chunksBySource = new Map<string, EvidenceChunk[]>();
+    for (const chunk of availableChunks) {
+      const entries = chunksBySource.get(chunk.source_id) ?? [];
+      entries.push(chunk);
+      chunksBySource.set(chunk.source_id, entries);
+    }
+    const chunks = [
+      ...sourceIds.flatMap((id) => chunksBySource.get(id)?.slice(0, 1) ?? []),
+      ...sourceIds.flatMap((id) => chunksBySource.get(id)?.slice(1) ?? []),
+    ].slice(0, 24);
     const packet: EvidencePacket = {
       version: 1,
       section_id: section.id,
@@ -415,6 +466,25 @@ export async function validateEvidenceLedger(
     if (!entry.locator && !(opts.allowMetadataOnly && entry.status === "metadata_linked")) {
       findings.push(`${entry.chapter_path}: [source:${entry.source_id}] has no evidence locator`);
     }
+  }
+  // A non-empty ledger elsewhere must not mask a chapter that lost every
+  // marker during a targeted rewrite. Read filenames rather than trusting the
+  // ledger alone because the ledger intentionally has no row for such a
+  // chapter.
+  try {
+    const chapterNames = (await fs.readdir(path.join(workspaceDir, "chapters")))
+      .filter((name) => name.endsWith(".md"));
+    const chaptersWithMarkers = new Set(ledger.map((entry) => entry.chapter_path));
+    for (const name of chapterNames) {
+      const chapterPath = path.join("chapters", name);
+      const content = await fs.readFile(path.join(workspaceDir, chapterPath), "utf-8");
+      if (content.trim().length > 0 && !chaptersWithMarkers.has(chapterPath)) {
+        findings.push(`${chapterPath} has no evidence-backed [source:<id>:<locator>] markers`);
+      }
+    }
+  } catch {
+    // The existing empty-ledger finding remains the useful diagnostic before
+    // chapters have been drafted.
   }
   if (ledger.length === 0) findings.push("citation ledger has no entries; drafted chapters need attributable [source:<id>] markers");
   return { pass: findings.length === 0, findings };

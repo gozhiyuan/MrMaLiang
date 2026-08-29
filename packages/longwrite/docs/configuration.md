@@ -183,15 +183,24 @@ configuration unless the workspace supplies an override. Use
 
 ```yaml
 execution:
+  default_model: gpt-5.6-luna
+  default_model_reasoning_effort: medium
   stage_overrides:
     outline:
-      model: gpt-5.6-sol
+      model: gpt-5.6-terra
+      model_reasoning_effort: high
     quality_loop.review:
       model: gpt-5.6-terra
     quality_loop.revise:
       runtime: claude-code
       model: <model accepted by your Claude Code account>
 ```
+
+`default_model` and `default_model_reasoning_effort` are compiled into the
+workflow and passed directly to new Codex workers; they do not depend on the
+mutable user-level Codex configuration. A stage can override either or both.
+For Codex, the reasoning effort becomes `codex exec -c
+model_reasoning_effort=...`.
 
 The key is the generated stage path. Top-level units use their id, while a
 loop child uses `quality_loop.<child-id>` and a foreach step uses
@@ -410,17 +419,22 @@ Keep this separate from `paper_kind`:
 ```yaml
 research:
   paper_kind: survey               # survey | empirical
-  paper_profile: literature_survey # literature_survey | repository_study
+  paper_profile: flagship_short_paper
 ```
 
-`literature_survey` is the 24,000-word, 60-page flagship default. Use
-`repository_study` when a pinned GitHub/local repository is the central
-artifact. The profile requires a codebase input (or enabled GitHub discovery),
-defaults to a focused 10,000-word scaffold with no 60-page gate, preserves a
-modest scholarly background, and requires a source-grounded system architecture
-diagram. Read the [Repository Study Paper Flagship Guide](../../../docs/flagships/repository-survey.md)
+The explicit flagship presets are `flagship_short_paper` (8,000 words / 20
+pages), `flagship_long_paper` (24,000 / 60),
+`flagship_short_github_paper` (6,000 / 15), and
+`flagship_long_github_paper` (14,000 / 35). The GitHub presets require a
+pinned GitHub/local repository (or enabled GitHub discovery) and a
+source-grounded system architecture diagram. All four retain deep workflow
+quality and release gates; the short variants only scale the bounded evidence
+and manuscript scope.
+
+These are the only research-paper profile IDs. Read the
+[Repository Study Paper Flagship Guide](../../../docs/flagships/repository-survey.md)
 for the complete command and configuration. See [Paper Profiles](./paper-profiles.md)
-for the profile registry boundary and extension rules.
+for the full preset table and extension rules.
 
 ### Research gates: configurable targets and fixed evidence rules
 
@@ -434,18 +448,19 @@ and each evaluation writes a report explaining the current pass/fail result.
 | Evidence depth | `research.semantic_screen` budgets and claim counts (`max_candidates`, `max_evidence_sources`, `min_supported_claims_for_a`, `min_supported_claims_for_b`) | A source remains C-level contextual material rather than becoming A/B-depth evidence. | `reports/semantic-screen-repair.md`, `reports/source-evidence-repair.md`, `reports/evidence-depth-finalization.md` |
 | Final release / packaging | `research.release_gates`, `figures.quality_gates`, `writing.target_length_words`, and `publication` limits | A manuscript may exist, but final validation and submission packaging fail closed until the issue is repaired. | `reports/release-gates.json` and `reports/longwrite-validation.md` |
 
-For the flagship `literature_survey` profile, the default corpus gate is
+For the flagship `flagship_long_paper` profile, the default corpus gate is
 `min_core_sources: 20`. A core source means an A- or B-depth source: it must
 have passed semantic screening, have retrieved local full text, and have a
 validated packet of exact supporting excerpts. It does **not** mean merely a
 retrieved or metadata-ranked paper. This is the threshold that stopped the RSI
 run before drafting.
 
-The numbers differ by paper profile: `repository_study` defaults to six core
-sources, while creative/non-research LongWrite modes do not use scholarly
-corpus gates. Thus this is a shared rule for agentic research-paper workflows,
-not a universal rule for every LongWrite artifact. Profiles establish sensible
-initial values; the generated workspace owns the final values.
+The numbers differ by paper profile: `flagship_short_github_paper` defaults to
+eight core sources, while creative/non-research LongWrite modes do not use
+scholarly corpus gates. Thus this is a shared rule for agentic research-paper
+workflows, not a universal rule for every LongWrite artifact. Profiles
+establish sensible initial values; the generated workspace owns the final
+values.
 
 Some rules are deliberately not tunable quality shortcuts: an A/B source must
 be backed by locally retrieved full text and exact excerpts, agents cannot
@@ -527,7 +542,7 @@ scientific-quality score. The generated artifacts are
 `codebases/github-candidates.json`, `codebases/github-selection.json`, and
 `reports/github-codebase-selection-repair.md`.
 
-For a `repository_study` with no explicit `research.codebases` entry, discovery
+For a GitHub flagship preset with no explicit `research.codebases` entry, discovery
 must select at least one candidate. If none is suitable, the selection-repair
 report stops the run with the safe recovery choices: add a pinned explicit
 repository or change the paper profile. The workflow never proceeds with an
@@ -723,6 +738,61 @@ without expansion, the existing semantic screen and source packets are
 preserved; the refresh stages are idempotent validation/index work, not a new
 creative research decision.
 
+Review-driven expansion is intentionally smaller than the initial corpus
+build. The query adapter preserves the selected action's rationale, measurable
+acceptance criteria, deficient section scopes, taxonomy, and venue priorities.
+It checkpoints each completed batch under a stable hash of that concrete
+deficit and emits one provider-result line per live provider. Reopening the
+same recovery therefore continues with its next batch, while a materially
+changed deficit receives an independent query history. Legacy global
+checkpoints are retained for provenance but cannot suppress a new deficit.
+An external timeout remains diagnosable and does not require re-fetching
+completed queries:
+
+```yaml
+research:
+  expansion:
+    max_queries_per_run: 6       # 1–20 targeted query variants
+    target_candidates: 120       # bounded candidates across that batch
+    provider_timeout_seconds: 20 # individual live-provider deadline
+```
+
+This is an operational reliability policy, not a publication-quality gate.
+When deterministic corpus gates already pass, a low citation count is routed
+to manuscript revision first only when the allocated evidence packets can meet
+the configured cited-source and per-section depth targets. If a workspace is
+configured for (for example) 90 cited sources but its packets expose fewer,
+the bounded expansion action is retained automatically; the target is never
+embedded in workflow code.
+
+Auto Research v2 uses one quality-control phase after the initial manuscript
+assessment. Configure its maximum targeted improvement rounds per workspace;
+exhaustion stays a visible failed release rather than allowing packaging to
+proceed with known gate failures. There is no second cloned release-recovery
+loop.
+
+Final-release recovery preserves the failed gate's exact observable target.
+For example, a `cited_sources: 25/30` failure produces a
+`revise_sections` criterion of `cited_sources >= 30`, not a generic depth
+criterion. Before that action runs, LongWrite writes a bounded list of uncited,
+packet-backed candidates with exact locators and chapter assignments. Concrete
+scorecard weaknesses are retained in the same plan and split by output
+ownership: prose/evidence findings go to `revise_sections`, while table,
+figure, caption, and rendered-layout findings go to `revise_visual_plan`.
+The next independent review and deterministic validator still decide whether
+the work passed; completing an unrelated weaker criterion is not progress.
+
+```yaml
+research:
+  quality_control:
+    max_improvement_rounds: 3  # 1–8; default 3
+```
+
+Every `revise_sections` action rebuilds and strictly validates the citation
+ledger immediately. A marker without a current evidence-packet locator, or a
+non-empty chapter that lost all markers, receives one corrective retry before
+the workflow continues to unrelated visual or manuscript gates.
+
 ### Agentic pre-draft outline review
 
 The live agentic workflow can run a separate bounded outline-quality loop
@@ -761,6 +831,7 @@ later `reopen_outline` action.
 | `research.provider` | `seed`, `arxiv`, `semantic_scholar`, `dblp`, `crossref`, `openalex`, `multi` | Research provider for research modes. `multi` fuses live providers and is the full-mode default. OpenAlex basic Works search is keyless but `OPENALEX_API_KEY` is recommended for a deep run's larger daily allowance. |
 | `research.topic` | string | User topic from `--topic`. |
 | `research.semantic_screen` | object | Agentic live-provider bridge between metadata LQS and deep reading: bounded abstract-screening candidates, source-evidence budget, and A/B supported-claim minima. Stable V2 ignores it; `seed` skips it. |
+| `research.expansion` | object | Checkpointed live-provider recall policy for review-driven evidence gaps: `max_queries_per_run`, `target_candidates`, and `provider_timeout_seconds`. It does not change release-gate requirements. |
 | `research.outline_review` | object | Bounded live-agentic outline loop. It reviews/revises from source evidence, computes script-owned readiness, and uses `approval_mode: auto` or `human` for initial/reopened outlines. |
 | `writing.target_length_words` | positive integer | Target manuscript length used by long-form generators. |
 | `publication.min_pages` | positive integer | Optional release gate: the compiled PDF must contain at least this many pages. It requires `pdfinfo` and a real PDF build. |

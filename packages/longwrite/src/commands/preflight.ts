@@ -35,10 +35,11 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
   const checks: Check[] = [];
   const draftGroup = findStage(workflowStages, "draft_sections");
   const draft = Array.isArray(draftGroup?.steps) ? draftGroup.steps.find((step) => step && typeof step === "object" && (step as { id?: unknown }).id === "draft") as Record<string, unknown> | undefined : undefined;
-  const loop = findStage(workflowStages, "quality_loop");
+  const loop = findStage(workflowStages, "improve");
   const loopStages = Array.isArray(loop?.stages) ? loop.stages as Array<Record<string, unknown>> : [];
   checks.push({ id: "direct_llm_drafting", pass: config.research.writing_strategy !== "llm_sections" || draft?.runtime !== "script", finding: config.research.writing_strategy === "llm_sections" && draft?.runtime === "script" ? "llm_sections is configured but draft_sections.draft is still script-owned" : "drafting strategy matches the generated manifest" });
-  checks.push({ id: "review_topology", pass: Boolean(findStage(workflowStages, "baseline_review")) && loopStages.at(-1)?.id === "review", finding: Boolean(findStage(workflowStages, "baseline_review")) && loopStages.at(-1)?.id === "review" ? "baseline review and post-rebuild review are present" : "manifest must have baseline_review and end quality_loop with review" });
+  const hasReviewTopology = Boolean(findStage(workflowStages, "baseline_review")) && loopStages.some((stage) => stage.id === "review");
+  checks.push({ id: "review_topology", pass: hasReviewTopology, finding: hasReviewTopology ? "baseline review and targeted improvement review are present" : "manifest must have baseline_review and an improve.review unit" });
   checks.push({ id: "article_front_matter", pass: Boolean(findStage(workflowStages, "abstract")), finding: findStage(workflowStages, "abstract") ? "LLM abstract stage is present" : "abstract stage is missing" });
   checks.push({ id: "draft_concurrency", pass: typeof draftGroup?.max_parallel === "number" && draftGroup.max_parallel <= 2, finding: typeof draftGroup?.max_parallel === "number" && draftGroup.max_parallel <= 2 ? `draft max_parallel=${draftGroup.max_parallel}, compatible with Codex/Claude Code local caps` : "draft_sections.max_parallel must be at most 2 for the supported harness runtimes" });
   checks.push({ id: "token_guardrail", pass: typeof config.run_limits?.max_recorded_tokens === "number", finding: typeof config.run_limits?.max_recorded_tokens === "number" ? `recorded-token guardrail: ${config.run_limits.max_recorded_tokens}` : "set run_limits.max_recorded_tokens before a costly run" });

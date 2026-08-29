@@ -41,7 +41,13 @@ const TableSpec = z.object({
   placement: Placement,
   headers: z.array(z.string().min(1).max(48)).min(2).max(6),
   rows: z.array(z.object({
-    cells: z.array(z.string().min(1).max(180)).min(2).max(6),
+    // Most table prose stays compact, but a traceability aid may need to show
+    // complete, durable source identifiers.  Those identifiers are naturally
+    // longer than a reader-facing comparison cell; rejecting them would make
+    // the evidence contract impossible to render. The TeX longtable renderer
+    // uses bounded paragraph columns so these values stay within the table
+    // layout rather than becoming a raw-document escape hatch.
+    cells: z.array(z.string().min(1).max(1_200)).min(2).max(6),
     source_ids: z.array(z.string().min(1)).min(1).max(8),
   }).strict()).min(1).max(30),
 }).strict();
@@ -58,6 +64,22 @@ const TimelineSpec = z.object({
   source_ids: z.array(z.string().min(1)).min(3).max(16),
 }).strict();
 
+const DiagramLayout = z.object({
+  /** `grid` is rendered by LongWrite's deterministic publication renderer;
+   * it never delegates geometry to Mermaid. `flow` permits a renderer-owned
+   * directional layout when exact rows/columns are not an acceptance rule. */
+  kind: z.enum(["grid", "flow"]),
+  columns: z.number().int().min(1).max(3).optional(),
+  direction: z.enum(["left_to_right", "top_to_bottom"]).optional(),
+}).strict().superRefine((layout, ctx) => {
+  if (layout.kind === "grid" && layout.columns === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["columns"], message: "grid layout requires columns" });
+  }
+  if (layout.kind === "flow" && layout.columns !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["columns"], message: "flow layout cannot set columns" });
+  }
+});
+
 /** A source-grounded explanatory diagram. The agent chooses its subject and
  * relationship (taxonomy, feedback loop, causal map, process, etc.); the
  * renderer owns the bounded diagram grammar and publication layout. */
@@ -68,6 +90,7 @@ const DiagramSpec = z.object({
   insight: z.string().min(24).max(800),
   placement: Placement,
   source_ids: z.array(z.string().min(1)).min(1).max(12),
+  layout: DiagramLayout.optional(),
   nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(48) }).strict()).min(3).max(10),
   edges: z.array(z.object({ from: z.string().min(1).max(40), to: z.string().min(1).max(40), label: z.string().max(36).optional() }).strict()).max(12),
 }).strict();
@@ -86,6 +109,7 @@ const PlacementPlan = z.object({
      * rather than borrowing a sentence the renderer wrote. */
     insight: z.string().min(24).max(800).optional(),
     placement: Placement,
+    layout: DiagramLayout.optional(),
     // The deterministic fallback renderer uses a bounded publication grid.
     // Short labels are a layout contract, not merely a stylistic preference.
     nodes: z.array(z.object({ id: z.string().min(1).max(40), label: z.string().min(1).max(48) }).strict()).min(3).max(10),
@@ -425,7 +449,23 @@ function benchmarkMetadataRows(sources: ClassifiedSource[]): string[][] {
     ]);
 }
 
-function longTableLatex(headers: string[], rows: string[][], caption: string, id: string): string {
+function traceabilityKeyLatex(rows: Array<{ source_ids: string[] }>, id: string): string {
+  // A traceability key is deliberately part of the same generated artifact as
+  // the comparison matrix: it is unnumbered, immediately follows the matrix,
+  // and derives identifiers from the validated row source_ids rather than LLM
+  // prose. This keeps an audit aid available without creating a second table.
+  const body = rows.map((row, index) => `Row ${index + 1} & ${latexCell(row.source_ids.join("; "))} \\\\`);
+  return [
+    "{\\small\\setlength{\\tabcolsep}{2pt}",
+    "\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.14\\linewidth}>{\\raggedright\\arraybackslash}p{0.80\\linewidth}@{}}",
+    `\\multicolumn{2}{@{}l}{\\small\\itshape Full source-ID traceability key (continuation of Table~\\ref{tab:${id}})}\\\\`,
+    "\\toprule", "\\textbf{Matrix row} & \\textbf{Complete source IDs} " + String.fromCharCode(92, 92), "\\midrule",
+    ...body,
+    "\\bottomrule", "\\end{longtable}", "}", "",
+  ].join("\n");
+}
+
+function longTableLatex(headers: string[], rows: string[][], caption: string, id: string, traceabilityRows?: Array<{ source_ids: string[] }>): string {
   // `p{...}` widths exclude the inter-column padding.  Keep it small inside
   // the local group so a six-column publication table fits the text block
   // without the overfull boxes caused by the default 6pt tabcolsep.
@@ -442,7 +482,13 @@ function longTableLatex(headers: string[], rows: string[][], caption: string, id
     "\\toprule", `${header} \\\\`, "\\midrule", "\\endhead",
     ...rows.map((row) => `${row.map((cell) => latexCell(String(cell))).join(" & ")} \\\\`),
     "\\bottomrule", "\\end{longtable}", "}", "",
+    ...(traceabilityRows ? [traceabilityKeyLatex(traceabilityRows, id)] : []),
   ].join("\n");
+}
+
+function requestsFullIdTraceability(spec: TableSpecContract): boolean {
+  const request = `${spec.insight} ${spec.placement.discussion}`.toLowerCase();
+  return /(?:full[- ]?(?:source[- ]?)?ids?|complete source ids?).{0,120}traceability|traceability.{0,120}(?:full[- ]?(?:source[- ]?)?ids?|complete source ids?)/.test(request);
 }
 
 type ConceptMap = NonNullable<z.infer<typeof PlacementPlan>["concept_map"]>;
@@ -468,7 +514,9 @@ function conceptMapSvg(map: ConceptMap): string {
   const margin = 40;
   const gapX = 30;
   const gapY = 42;
-  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
+  const columns = map.layout?.kind === "grid" && map.layout.columns
+    ? map.layout.columns
+    : Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
   const rows = Math.ceil(map.nodes.length / columns);
   const boxWidth = Math.floor((width - margin * 2 - gapX * (columns - 1)) / columns);
   const boxHeight = 88;
@@ -499,7 +547,9 @@ function conceptMapLatex(map: ConceptMap): string {
   // A bounded three-column grid preserves readable node widths even when an
   // LLM proposes a dense map. The old rank layout compressed seven nodes into
   // 2cm boxes and placed arrow labels directly over them.
-  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
+  const columns = map.layout?.kind === "grid" && map.layout.columns
+    ? map.layout.columns
+    : Math.min(3, Math.max(1, Math.ceil(Math.sqrt(map.nodes.length))));
   const positions = new Map(map.nodes.map((node, index) => [node.id, {
     column: index % columns,
     row: Math.floor(index / columns),
@@ -524,10 +574,19 @@ function conceptMapLatex(map: ConceptMap): string {
     return [`\\draw[-{Latex[length=2mm]}, thick, draw=blue!65] (${from}.north) to[out=90,in=-90,looseness=1.05]${label} (${to}.south);`];
   });
   return [
+    // A publication diagram is a reader-facing figure, not an inline icon.
+    // Scale the bounded deterministic canvas to the available text width; its
+    // aspect ratio remains fixed and the schema caps labels/node density.
+    "\\resizebox{\\linewidth}{!}{%",
     "\\begin{tikzpicture}[node distance=3mm, baseline]",
-    ...edgeLines,
+    // TikZ paths may reference only nodes that have already been declared.
+    // Emitting edges first happened to stay hidden while Mermaid replaced the
+    // publication asset, but deterministic grid rendering correctly exposes
+    // it as `No shape named conceptnode1 is known`.
     ...nodeLines,
+    ...edgeLines,
     "\\end{tikzpicture}",
+    "}%",
     "",
   ].join("\n");
 }
@@ -542,7 +601,8 @@ function conceptMapMermaid(map: ConceptMap): string {
     if (!map.nodes.some((node) => node.id === edge.from) || !map.nodes.some((node) => node.id === edge.to)) return [];
     return [`  ${edge.from} -->${edge.label ? `|${mermaidLabel(edge.label)}|` : ""} ${edge.to}`];
   });
-  return ["flowchart LR", ...nodeLines, ...edgeLines, ""].join("\n");
+  const direction = map.layout?.direction === "top_to_bottom" ? "TB" : "LR";
+  return [`flowchart ${direction}`, ...nodeLines, ...edgeLines, ""].join("\n");
 }
 
 function conceptMapPdfLatex(asset = "concept-map.pdf"): string {
@@ -860,6 +920,22 @@ export async function sanitizePlacementPlanFile(workspaceDir: string): Promise<v
         if (Array.isArray(record.edges)) record.edges.forEach((edge, edgeIndex) => clampField(edge, "label", 36, `diagrams[${index}].edges[${edgeIndex}]`));
       });
     }
+    // `kind` is a machine-safe identifier, but the planner naturally writes
+    // reader-facing phrases such as "mechanism and evidence comparison".
+    // Canonicalize whitespace-only deviations before strict validation while
+    // leaving punctuation or other malformed identifiers fail-closed.
+    if (Array.isArray(plan.table_specs)) {
+      plan.table_specs.forEach((spec, index) => {
+        if (!spec || typeof spec !== "object") return;
+        const record = spec as Record<string, unknown>;
+        if (typeof record.kind !== "string") return;
+        const normalized = record.kind.trim().replace(/\s+/g, "-");
+        if (normalized !== record.kind && /^[A-Za-z][A-Za-z0-9_-]{1,60}$/.test(normalized)) {
+          record.kind = normalized;
+          clamps.push(`table_specs[${index}].kind (whitespace normalized)`);
+        }
+      });
+    }
   }
   const result = PlacementPlan.safeParse(parsed);
   if (!result.success) {
@@ -906,7 +982,7 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   const conceptMap = await conceptMapForWorkspace(workspaceDir);
   const plannedDiagrams = declaredDiagrams.map((spec) => ({
     id: spec.id,
-    map: { title: spec.title, caption: spec.caption, placement: spec.placement, nodes: spec.nodes, edges: spec.edges } as ConceptMap,
+    map: { title: spec.title, caption: spec.caption, placement: spec.placement, layout: spec.layout, nodes: spec.nodes, edges: spec.edges } as ConceptMap,
     insight: spec.insight,
     sourceIds: spec.source_ids,
   }));
@@ -1024,7 +1100,7 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
       return [
         [`data/${spec.id}.csv`, csv([spec.headers, ...rows])] as [string, string],
         [`tables/${spec.id}.md`, markdownTable(spec.headers, rows)] as [string, string],
-        [`paper/tables/${spec.id}.tex`, longTableLatex(spec.headers, rows, spec.caption, spec.id)] as [string, string],
+        [`paper/tables/${spec.id}.tex`, longTableLatex(spec.headers, rows, spec.caption, spec.id, requestsFullIdTraceability(spec) ? spec.rows : undefined)] as [string, string],
       ];
     }),
     ["figures/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`],
@@ -1041,7 +1117,10 @@ export async function buildFigureWorkspace(workspaceDir: string): Promise<string
   // contract above remains the no-local-tool fallback.
   const mermaidDiagrams = [
     ...(conceptMap ? [{ id: "concept-map" }] : []),
-    ...plannedDiagrams.map(({ id }) => ({ id })),
+    // Declarative diagrams use the deterministic grid renderer. Mermaid is a
+    // useful legacy flow renderer, but it may collapse an explicitly reviewed
+    // 2x2 or 3-column geometry into a single rank and silently violate the
+    // visual action's acceptance contract.
   ];
   for (const { id } of mermaidDiagrams) {
     if (!(await renderMermaidFile(workspaceDir, `figures/${id}.mmd`, `figures/${id}-untrimmed.pdf`)

@@ -73,7 +73,7 @@ program
   .option("--topic <topic>", "Writing topic")
   .option("--research-provider <id>", "Research provider: seed, arxiv, semantic_scholar, dblp, crossref, openalex, or multi (agentic default: multi)")
   .option("--research-paper-kind <kind>", "Research quality rubric: survey or empirical (default: survey)")
-  .option("--research-paper-profile <id>", `Research argument: ${PAPER_PROFILE_IDS.join(" or ")} (default: literature_survey)`)
+  .option("--research-paper-profile <id>", `Flagship paper preset: ${PAPER_PROFILE_IDS.join(" or ")} (default: flagship_long_paper)`)
   .option("--repository <source...>", "Pinned GitHub/Git URL or local Git path; required by codebase-centered profiles and repeatable")
   .option("--discover-repositories", "Search GitHub for bounded, LLM-selected supplementary software evidence")
   .option("--repository-query-budget <n>", "Maximum GitHub search queries (1-20; default: 10)")
@@ -512,6 +512,14 @@ evidence
   });
 
 evidence
+  .command("validate-ledger <workspace>")
+  .description("Rebuild and strictly validate chapter citation evidence locators")
+  .action(async (workspace) => {
+    const { runEvidenceValidateLedger } = await import("./commands/evidence.js");
+    await runEvidenceValidateLedger(workspace);
+  });
+
+evidence
   .command("audit <workspace>")
   .description("Summarize citation-evidence defects for the next review/revision pass")
   .action(async (workspace) => {
@@ -754,6 +762,46 @@ research
   .action(async (workspace) => {
     const { runResearchRepairFinalReleasePlan } = await import("./commands/research.js");
     await runResearchRepairFinalReleasePlan(workspace);
+  });
+
+research
+  .command("generate-final-release-plan <workspace>")
+  .description("Generate a bounded deterministic remediation plan from the current failed final-release gates")
+  .action(async (workspace) => {
+    const { runResearchGenerateFinalReleasePlan } = await import("./commands/research.js");
+    await runResearchGenerateFinalReleasePlan(workspace);
+  });
+
+research
+  .command("citation-repair-packet <workspace>")
+  .description("Materialize exact chapter/source citation repairs from the current ledger")
+  .action(async (workspace) => {
+    const { runResearchCitationRepairPacket } = await import("./commands/research.js");
+    await runResearchCitationRepairPacket(workspace);
+  });
+
+research
+  .command("cited-source-upgrade-packet <workspace>")
+  .description("Materialize exact accepted-source citation upgrades needed for the release ratio")
+  .action(async (workspace) => {
+    const { runResearchCitedSourceUpgradePacket } = await import("./commands/research.js");
+    await runResearchCitedSourceUpgradePacket(workspace);
+  });
+
+research
+  .command("final-release-baseline <workspace>")
+  .description("Snapshot deterministic release metrics before one recovery round")
+  .action(async (workspace) => {
+    const { runResearchFinalReleaseBaseline } = await import("./commands/research.js");
+    await runResearchFinalReleaseBaseline(workspace);
+  });
+
+research
+  .command("assess-final-release-progress <workspace>")
+  .description("Fail a recovery round that made no deterministic release progress")
+  .action(async (workspace) => {
+    const { runResearchAssessFinalReleaseProgress } = await import("./commands/research.js");
+    await runResearchAssessFinalReleaseProgress(workspace);
   });
 
 research

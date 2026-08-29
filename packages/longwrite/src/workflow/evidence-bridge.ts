@@ -250,6 +250,15 @@ export function buildEvidenceRefreshStages(ctx: AgenticContext): StageRecord[] {
       validator_commands: [longwriteCommand(["research", "repair-source-evidence", "."])], retry: { max_attempts: 2 },
     }),
     scriptStage({
+      id: "quality_backfill_validated_evidence_history",
+      title: "Retain validated evidence from earlier successful recovery rounds",
+      owner: "source-curator",
+      inputs: ["evidence/validated-source-evidence.json"],
+      optional_inputs: [".malaclaw/flow/checkpoints/**/evidence/source-packets.json", ".malaclaw/flow/checkpoints/**/sources/semantic-screening.json"],
+      outputs: ["evidence/validated-source-evidence.json", "reports/validated-evidence-history-backfill.md"], validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand(["research", "backfill-validated-evidence-history", "."]),
+    }),
+    scriptStage({
       id: "quality_finalize_evidence_depth",
       title: "Finalize refreshed citation depth from source evidence",
       owner: "analyst", inputs: ["sources/metadata-classified_sources.jsonl", "sources/semantic-screening.json", "evidence/source-packets.json", "evidence/validated-source-evidence.json"],

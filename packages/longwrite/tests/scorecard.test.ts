@@ -194,7 +194,7 @@ describe("compiler scorecard injection", () => {
       researchProvider: "seed",
     }) as { workflow: { stages: Array<Record<string, unknown>> } };
     const baseline = manifest.workflow.stages.find((s) => s.id === "baseline_review")!;
-    const loop = manifest.workflow.stages.find((s) => s.id === "quality_loop") as
+    const loop = manifest.workflow.stages.find((s) => s.id === "improve") as
       | { stages?: Array<Record<string, unknown>> }
       | undefined;
     for (const stage of [baseline, loop?.stages?.find((s) => s.id === "review")!]) {

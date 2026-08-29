@@ -26,7 +26,7 @@ const COMPILED_GATE_METRICS = [
   "research_expansion_dispatched",
   "corpus_gate_pass",
   "outline_readiness",
-  "review_score",
+  "review_score_raw_median",
   "final_release_gate_pass",
 ] as const;
 
@@ -34,6 +34,7 @@ const COMPILED_GATE_METRICS = [
  *  into a condition. Frozen by their producing source file. */
 const RUNTIME_METRICS: Array<{ metric: string; producedBy: string }> = [
   { metric: "claim_support_rate", producedBy: "src/lib/ops/claim-gate.ts" },
+  { metric: "review_score", producedBy: "src/lib/ops/scorecard.ts" },
 ];
 
 /** Experiment-side metrics, frozen against the LongExperiment goldens. */
@@ -109,6 +110,7 @@ describe("frozen gate metrics", () => {
         "proposal_readiness",
         "research_expansion_dispatched",
         "review_score",
+        "review_score_raw_median",
       ]);
   });
 });

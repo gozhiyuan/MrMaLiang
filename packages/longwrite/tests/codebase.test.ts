@@ -86,7 +86,7 @@ describe("pinned codebase evidence", () => {
     await fs.mkdir(workspace, { recursive: true });
     const writeConfig = async (sources: string[]) => fs.writeFile(path.join(workspace, "longwrite.yaml"), [
       "version: 1", "project:", "  id: multi", "  artifact_type: research_paper", "  mode: auto_research_agentic",
-      "research:", "  paper_profile: repository_study", "  codebases:",
+      "research:", "  paper_profile: flagship_long_github_paper", "  codebases:",
       ...sources.flatMap((source, index) => [ `    - id: repo-${index + 1}`, `      source: ${source}`, "      ref: HEAD", `      role: ${index === 0 ? "primary_artifact" : "supplementary_artifact"}` ]),
       "writing: {}", "publication: {}", "figures: {}", "review: {}", "execution: {}", "",
     ].join("\n"), "utf8");

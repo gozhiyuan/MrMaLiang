@@ -1,14 +1,15 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { prepareResearchWorkspace } from "../lib/research/pipeline.js";
 import { assessResearchWorkspace, writeResearchAssessment } from "../lib/ops/research-quality.js";
-import type { ResearchProviderId } from "../lib/research/providers.js";
+import { providerById, type ResearchProviderId } from "../lib/research/providers.js";
 import { loadProjectConfig } from "../lib/project-config.js";
 import { buildEvidenceIndex, allocateSectionEvidence } from "../lib/research/evidence.js";
 import { openAICompatibleEmbeddings } from "../lib/research/embeddings.js";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import { snowballWorkspace } from "../lib/research/snowball.js";
-import { AgenticActionPlan } from "../lib/ops/action-plan.js";
+import { AgenticActionPlan, enrichFinalReleaseActionPlan, evidenceCapacity } from "../lib/ops/action-plan.js";
 import { prepareCodebases } from "../lib/research/codebase.js";
 import { discoverGithubCodebases, repairGithubCodebaseSelection } from "../lib/research/github-codebase-discovery.js";
 import { importLongExperiment, prepareExperimentEvidence } from "../lib/research/experiment.js";
@@ -256,7 +257,22 @@ const RemediationPlan = z.object({
 
 type ExpansionPlan = z.infer<typeof RemediationPlan>;
 
-async function readExpansionPlan(resolved: string, actionPlan?: string): Promise<ExpansionPlan> {
+export type ExpansionAction = ExpansionPlan["actions"][number] & {
+  source_action_id?: string;
+  rationale?: string;
+  acceptance_criteria?: Array<{
+    metric: string;
+    target: number;
+    scope?: string;
+  }>;
+};
+
+type ExpansionRequest = {
+  version: 1;
+  actions: ExpansionAction[];
+};
+
+async function readExpansionPlan(resolved: string, actionPlan?: string): Promise<ExpansionRequest> {
   const rel = actionPlan?.trim();
   if (!rel) {
     try {
@@ -281,6 +297,9 @@ async function readExpansionPlan(resolved: string, actionPlan?: string): Promise
       .filter((action) => action.tool === "targeted_research_expansion")
       .map((action) => ({
         id: "research_expansion",
+        source_action_id: action.id,
+        rationale: action.rationale,
+        acceptance_criteria: action.acceptance_criteria,
         weaknesses: action.finding_ids.map((id) => {
           const finding = findings.get(id);
           if (!finding) throw new Error(`research expansion action ${action.id} references unknown finding ${id}`);
@@ -290,17 +309,81 @@ async function readExpansionPlan(resolved: string, actionPlan?: string): Promise
   };
 }
 
-function expansionQueries(topic: string, actions: z.infer<typeof RemediationPlan>["actions"], limit: number): string[] {
-  const terms = actions.flatMap((action) => action.weaknesses.flatMap((weakness) => `${weakness.category} ${weakness.detail}`
-    .toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) ?? []))
+const EXPANSION_STOP_WORDS = new Set([
+  "accepted", "action", "also", "and", "are", "backed", "before", "but", "cannot", "citation", "citations", "cited",
+  "close", "concrete", "configured", "coverage", "critical", "current", "deterministic", "evidence", "expose", "exposes",
+  "failed", "failing", "final", "finding", "from", "gap", "gate", "gates", "into", "its", "literature", "major", "meet",
+  "minimum", "missing", "needs", "only", "packet", "packet-backed", "packets", "prose", "ratio", "release", "reports",
+  "required", "requires", "retrieve", "revising", "review", "section", "source", "sources", "target", "that", "the", "their",
+  "this", "those", "validation", "with", "work",
+]);
+
+function boundedTerms(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z][a-z0-9-]{2,}/g) ?? [])
+    .flatMap((term) => term.split("-").filter(Boolean))
+    .filter((term) => /^[a-z]/.test(term))
+    .filter((term) => !EXPANSION_STOP_WORDS.has(term));
+}
+
+/** Build a durable identity for one concrete evidence deficit. Reopening the
+ * same recovery continues its next bounded query batch; a changed deficit,
+ * section scope, or acceptance target receives an independent checkpoint. */
+export function expansionIntentKey(topic: string, actions: ExpansionAction[]): string {
+  const normalized = actions.map((action) => ({
+    id: action.source_action_id ?? action.id,
+    rationale: action.rationale ?? "",
+    weaknesses: action.weaknesses,
+    acceptance_criteria: action.acceptance_criteria ?? [],
+  }));
+  return createHash("sha256").update(JSON.stringify({ topic, actions: normalized })).digest("hex").slice(0, 20);
+}
+
+/** Translate an LLM-selected deficit into bounded scholarly-search queries.
+ * Intellectual diagnosis stays with the planner; this adapter retains that
+ * diagnosis and adds mechanical qualifiers implied by measurable criteria. */
+export function buildExpansionQueries(
+  topic: string,
+  actions: ExpansionAction[],
+  taxonomy: string[],
+  venuePriorities: string[],
+  limit: number,
+): string[] {
+  const criteria = actions.flatMap((action) => action.acceptance_criteria ?? []);
+  const acceptedRequired = criteria.some((criterion) => criterion.metric === "accepted_cited_ratio" && criterion.target > 0);
+  const citedSourcesRequired = criteria.some((criterion) => criterion.metric === "cited_sources" && criterion.target > 0);
+  const queries: string[] = [];
+
+  for (const criterion of criteria) {
+    if (criterion.metric === "accepted_cited_ratio") {
+      queries.push(`${topic} peer reviewed conference journal proceedings`);
+    } else if (criterion.metric === "cited_sources") {
+      queries.push(`${topic} systematic survey benchmark empirical evaluation`);
+    } else if (criterion.metric === "citation_depth_per_section") {
+      queries.push(`${topic} ${criterion.scope ?? "mechanism evaluation"}`);
+    } else if (criterion.scope) {
+      queries.push(`${topic} ${criterion.scope}`);
+    }
+  }
+
+  const contextTerms = actions.flatMap((action) => [
+    ...boundedTerms(action.rationale ?? ""),
+    ...action.weaknesses.flatMap((weakness) => boundedTerms(weakness.detail)),
+    ...(action.acceptance_criteria ?? []).flatMap((criterion) => boundedTerms(criterion.scope ?? "")),
+  ])
     .filter((term, index, all) => all.indexOf(term) === index)
-    .filter((term) => !["citation", "coverage", "source", "sources", "missing", "review", "section"].includes(term));
-  const queries = [topic];
-  for (let index = 0; index < terms.length; index += 3) {
-    const suffix = terms.slice(index, index + 3).join(" ");
+    .slice(0, 32);
+  for (let index = 0; index < contextTerms.length; index += 4) {
+    const suffix = contextTerms.slice(index, index + 4).join(" ");
     if (suffix) queries.push(`${topic} ${suffix}`);
   }
-  return [...new Set(queries)].slice(0, limit);
+
+  const publicationQualifier = acceptedRequired ? " peer reviewed" : "";
+  for (const cell of taxonomy) queries.push(`${topic} ${cell}${publicationQualifier}`);
+  if (acceptedRequired) {
+    for (const venue of venuePriorities.slice(0, 6)) queries.push(`${topic} ${venue} proceedings`);
+  }
+  if (citedSourcesRequired && queries.length === 0) queries.push(`${topic} survey`);
+  return [...new Set(queries.map((query) => query.replace(/\s+/g, " ").trim()))].slice(0, limit);
 }
 
 /** Preserve the original taxonomy query groups during targeted recovery.
@@ -328,6 +411,64 @@ export function buildExpansionSearchPlan(
     source_types: previous?.source_types.length ? previous.source_types : ["paper", "survey", "benchmark"],
     rationale: "Targeted expansion preserves the original taxonomy coverage program and adds remediation queries.",
   };
+}
+
+type ExpansionCheckpoint = {
+  version: 2;
+  intents: Record<string, {
+    action_ids: string[];
+    completed_queries: string[];
+    updated_at: string;
+  }>;
+  migrated_legacy_queries?: string[];
+  updated_at: string;
+};
+
+const EXPANSION_CHECKPOINT_PATH = "reports/research-expansion-checkpoint.json";
+
+async function loadExpansionCheckpoint(workspaceDir: string): Promise<ExpansionCheckpoint> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(workspaceDir, EXPANSION_CHECKPOINT_PATH), "utf-8")) as {
+      version?: unknown;
+      intents?: unknown;
+      completed_queries?: unknown;
+      updated_at?: unknown;
+    };
+    if (parsed.version === 2 && parsed.intents && typeof parsed.intents === "object" && !Array.isArray(parsed.intents)) {
+      const intents: ExpansionCheckpoint["intents"] = {};
+      for (const [key, raw] of Object.entries(parsed.intents as Record<string, unknown>)) {
+        if (!raw || typeof raw !== "object") continue;
+        const entry = raw as { action_ids?: unknown; completed_queries?: unknown; updated_at?: unknown };
+        if (!Array.isArray(entry.completed_queries) || !entry.completed_queries.every((value) => typeof value === "string")) continue;
+        intents[key] = {
+          action_ids: Array.isArray(entry.action_ids) ? entry.action_ids.filter((value): value is string => typeof value === "string") : [],
+          completed_queries: [...new Set(entry.completed_queries)],
+          updated_at: typeof entry.updated_at === "string" ? entry.updated_at : new Date(0).toISOString(),
+        };
+      }
+      return { version: 2, intents, updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : new Date(0).toISOString() };
+    }
+    if (parsed.version === 1 && Array.isArray(parsed.completed_queries) && parsed.completed_queries.every((value) => typeof value === "string")) {
+      // V1 was global and therefore could suppress unrelated future deficits.
+      // Preserve it for provenance, but do not attach it to a new intent.
+      return {
+        version: 2,
+        intents: {},
+        migrated_legacy_queries: [...new Set(parsed.completed_queries)],
+        updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : new Date(0).toISOString(),
+      };
+    }
+  } catch {
+    // A missing checkpoint starts a new bounded expansion; a malformed one is
+    // not trusted and therefore cannot silently suppress retrieval work.
+  }
+  return { version: 2, intents: {}, updated_at: new Date(0).toISOString() };
+}
+
+async function writeExpansionCheckpoint(workspaceDir: string, checkpoint: ExpansionCheckpoint): Promise<void> {
+  const target = path.join(workspaceDir, EXPANSION_CHECKPOINT_PATH);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify(checkpoint, null, 2)}\n`, "utf-8");
 }
 
 /** Apply the research-expansion remediation action as a bounded, idempotent
@@ -360,24 +501,71 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
     console.log("Seed provider: retained deterministic evidence packets.");
     return;
   }
-  const queryVariants = expansionQueries(topic, actions, config.research.query_budget);
   const previousLoad = await loadSearchPlan(resolved);
   const previousPlan = previousLoad.present && previousLoad.ok ? previousLoad.plan : undefined;
-  const expansionPlan = buildExpansionSearchPlan(topic, queryVariants, config.research.taxonomy, previousPlan);
+  const queryVariants = buildExpansionQueries(topic, actions, config.research.taxonomy, previousPlan?.venue_priorities ?? [], config.research.query_budget);
+  const checkpoint = await loadExpansionCheckpoint(resolved);
+  const intentKey = expansionIntentKey(topic, actions);
+  const intent = checkpoint.intents[intentKey] ?? {
+    action_ids: actions.map((action) => action.source_action_id ?? action.id),
+    completed_queries: [],
+    updated_at: new Date(0).toISOString(),
+  };
+  // The checkpoint is deliberately cumulative across recovery rounds.  Report
+  // progress relative to this request, though: otherwise a prior round's
+  // completed queries can yield misleading counters such as "36/24".
+  const completedThisRequest = queryVariants.filter((query) => intent.completed_queries.includes(query));
+  const pendingQueries = queryVariants.filter((query) => !intent.completed_queries.includes(query));
+  const batch = pendingQueries.slice(0, config.research.expansion.max_queries_per_run);
+  // Execute only fresh targeted queries. The previous implementation wrote
+  // the entire historical plan then recalled up to the global 50-query budget,
+  // turning a small remediation request into a full corpus rebuild.
+  const expansionPlan = buildExpansionSearchPlan(topic, batch, config.research.taxonomy, previousPlan);
+  expansionPlan.query_variants = batch;
   await fs.mkdir(path.join(resolved, "sources"), { recursive: true });
   await fs.writeFile(path.join(resolved, "sources", "search-plan.json"), `${JSON.stringify(expansionPlan, null, 2)}\n`, "utf-8");
+  if (batch.length === 0) {
+    await fs.writeFile(reportPath, [
+      "# Research Expansion", "", "All currently targeted query variants are already checkpointed.",
+      "Use the existing validated corpus for manuscript repair; a new expansion requires a genuinely new evidence gap.", "",
+      `- Checkpoint: ${EXPANSION_CHECKPOINT_PATH}`,
+      `- Deficit intent: ${intentKey}`,
+      `- Completed queries for this deficit: ${intent.completed_queries.length}`,
+    ].join("\n"), "utf-8");
+    console.log("Research expansion is already checkpointed; no provider calls made.");
+    return;
+  }
   const pipeline = await import("../lib/research/pipeline.js");
   const enrichment = await import("../lib/research/enrich.js");
   const fulltext = await import("../lib/research/fulltext.js");
   const written: string[] = [];
+  console.log(`[research-expansion] batch ${completedThisRequest.length + 1}-${completedThisRequest.length + batch.length} of ${queryVariants.length}; ${batch.length} query variant(s), target ${config.research.expansion.target_candidates} candidates.`);
   written.push(...await pipeline.recallSources({
     workspaceDir: resolved,
     topic,
     provider: config.research.provider as ResearchProviderId,
-    targetCandidates: config.research.target_candidates,
-    queryBudget: config.research.query_budget,
+    targetCandidates: config.research.expansion.target_candidates,
+    queryBudget: batch.length,
+    // Recovery batches must execute the just-derived deficit queries, not the
+    // taxonomy variants that are intentionally retained in search-plan.json
+    // for provenance and future normal recall.
+    queries: batch,
     mergeExisting: true,
+    providerFactory: (id) => providerById(id, {
+      timeoutMs: config.research.expansion.provider_timeout_seconds * 1_000,
+      onProgress: ({ provider, outcome, sources, error }) => {
+        console.log(`[research-expansion] provider=${provider} outcome=${outcome}${sources === undefined ? "" : ` sources=${sources}`}${error ? ` error=${error}` : ""}`);
+      },
+    }),
   }));
+  intent.completed_queries = [...new Set([...intent.completed_queries, ...batch])];
+  intent.updated_at = new Date().toISOString();
+  checkpoint.intents[intentKey] = intent;
+  checkpoint.updated_at = new Date().toISOString();
+  await writeExpansionCheckpoint(resolved, checkpoint);
+  const completedAfterThisRequest = queryVariants.filter((query) => intent.completed_queries.includes(query)).length;
+  const cumulativeQueries = Object.values(checkpoint.intents).reduce((sum, entry) => sum + entry.completed_queries.length, 0);
+  console.log(`[research-expansion] checkpoint saved: ${completedAfterThisRequest}/${queryVariants.length} query variant(s) for deficit ${intentKey}; ${cumulativeQueries} cumulative across intents.`);
   written.push(...(await enrichment.enrichSourceMetadata(resolved, {
     maxSources: 20,
     enabled: true,
@@ -395,13 +583,13 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
   }
   if (config.research.semantic_screen.enabled) {
     await fs.writeFile(reportPath, [
-      "# Research Expansion", "", `Expanded topic: ${topic}`, `Queries: ${queryVariants.length}`, "",
+      "# Research Expansion", "", `Expanded topic: ${topic}`, `Deficit intent: ${intentKey}`, `Queries this batch: ${batch.length}`, `Targeted queries checkpointed for this deficit: ${completedAfterThisRequest}/${queryVariants.length}`, `Cumulative targeted queries checkpointed: ${cumulativeQueries}`, `Provider timeout: ${config.research.expansion.provider_timeout_seconds}s`, "",
       "## Triggered Actions", "", ...actions.map((action) => `- ${action.id}: ${action.weaknesses.length} finding(s)`), "",
       "## Next Evidence Refresh", "",
       "- Refreshed bounded semantic-screen candidates. The enclosing quality loop will re-screen abstracts, ingest approved full text, validate source packets, finalize A/B depth, re-run corpus gates, and reallocate section evidence before its next review.", "",
-      "## Refreshed Artifacts", "", ...[...new Set(written)].map((file) => `- ${file}`), "",
+      "## Refreshed Artifacts", "", ...[...new Set([...written, EXPANSION_CHECKPOINT_PATH])].map((file) => `- ${file}`), "",
     ].join("\n"), "utf-8");
-    console.log(`Expanded research corpus with ${queryVariants.length} targeted query variant(s); semantic evidence refresh queued in the quality loop.`);
+    console.log(`Expanded research corpus with ${batch.length} targeted query variant(s); semantic evidence refresh queued in the quality loop.`);
     return;
   }
   written.push(...(await fulltext.ingestFulltext(resolved, fetch, undefined, {
@@ -513,9 +701,10 @@ export async function runResearchCorpusGates(workspaceDir: string, opts: { advis
   }
 }
 
-/** Translate the research action-dispatch record into the numeric gate metric
- * `research_expansion_dispatched` so the compiled workflow can skip the LLM
- * evidence-refresh stages when no targeted_research_expansion actually ran.
+/** Translate the split action plans and research dispatch record into numeric
+ * gate metrics so the compiled workflow can skip work whose inputs did not
+ * change this round. `research_expansion_dispatched` controls corpus refresh;
+ * `manuscript_revision_planned` controls fresh claim judging.
  * Without the gate those stages are asked to "preserve" an unchanged declared
  * output, which the runtime freshness check rejects as stale — wasting a full
  * model turn per round before it self-heals by rewriting identical content.
@@ -528,9 +717,23 @@ export async function runResearchDispatchMetrics(workspaceDir: string): Promise<
   let dispatched = 1;
   try {
     const record = JSON.parse(await fs.readFile(path.join(resolved, "reports", "action-dispatch-research.json"), "utf-8")) as { executions?: unknown };
-    if (Array.isArray(record.executions)) dispatched = record.executions.length > 0 ? 1 : 0;
+    if (Array.isArray(record.executions)) {
+      dispatched = record.executions.some((entry) => entry && typeof entry === "object" && (entry as { status?: unknown }).status === "succeeded") ? 1 : 0;
+    }
   } catch {
     // Missing or unparseable dispatch record: fail open (see doc comment).
+  }
+  let manuscriptRevisionPlanned = 1;
+  try {
+    const revisionPlan = JSON.parse(await fs.readFile(path.join(resolved, "reviews", "revision-action-plan.json"), "utf-8")) as {
+      actions?: unknown;
+    };
+    if (Array.isArray(revisionPlan.actions)) {
+      manuscriptRevisionPlanned = revisionPlan.actions.some((entry) =>
+        entry && typeof entry === "object" && (entry as { tool?: unknown }).tool === "revise_sections") ? 1 : 0;
+    }
+  } catch {
+    // Fail open: an unavailable split plan must not suppress claim review.
   }
   const metricsPath = path.join(resolved, "reports", "metrics.json");
   let metrics: Record<string, unknown> = {};
@@ -541,9 +744,11 @@ export async function runResearchDispatchMetrics(workspaceDir: string): Promise<
     // A malformed prior metrics snapshot must not block the fresh gate metric.
   }
   metrics.research_expansion_dispatched = dispatched;
+  metrics.manuscript_revision_planned = manuscriptRevisionPlanned;
   await fs.mkdir(path.dirname(metricsPath), { recursive: true });
   await fs.writeFile(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf-8");
   console.log(`research_expansion_dispatched = ${dispatched}`);
+  console.log(`manuscript_revision_planned = ${manuscriptRevisionPlanned}`);
 }
 
 /** Validate the narrow pre-outline recovery plan.  It may select exactly one
@@ -605,10 +810,11 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
   const target = path.join(resolved, "reviews", "action-plan.json");
   const reportPath = path.join(resolved, "reports", "final-release-plan-repair.md");
   try {
+    await enrichFinalReleaseActionPlan(resolved);
     const plan = AgenticActionPlan.parse(JSON.parse(await fs.readFile(target, "utf-8")));
     const validation = JSON.parse(await fs.readFile(path.join(resolved, "reports", "longwrite-validation.json"), "utf-8")) as {
       pass?: boolean;
-      checks?: Array<{ id?: string; pass?: boolean }>;
+      checks?: Array<{ id?: string; pass?: boolean; findings?: unknown }>;
     };
     const failedIds = new Set((validation.checks ?? [])
       .filter((check) => check.pass === false)
@@ -632,6 +838,61 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
     }
     const missing = [...failedIds].filter((id) => !addressed.has(id));
     if (missing.length > 0) throw new Error(`final-release plan does not address failed checks: ${missing.join(", ")}`);
+    // An outline is a planning artifact and an evidence expansion only makes
+    // new material available.  Neither changes the rendered manuscript on
+    // its own.  Require a prose revision to explicitly own failures whose
+    // deterministic remedy is woven, evidence-backed manuscript content.
+    // Without this, a plausible-looking plan can spend a recovery round on
+    // retrieval or an outline refresh and then re-run the exact same paper.
+    const proseOwned = new Set(plan.actions
+      .filter((action) => action.tool === "revise_sections")
+      .flatMap((action) => action.finding_ids));
+    const visuallyOwnedReviewTarget = failedIds.has("rendered_visual_review") && plan.actions.some((action) =>
+      action.tool === "revise_visual_plan" && action.finding_ids.includes("review_target")
+      && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
+    const proseRequired = [...failedIds].filter((id) =>
+      ["claim_support", "review_target", "taxonomy_direct_evidence", "cited_literature_release_gates"].includes(id)
+      && !(id === "review_target" && visuallyOwnedReviewTarget),
+    );
+    const proseMissing = proseRequired.filter((id) => !proseOwned.has(id));
+    if (proseMissing.length > 0) {
+      throw new Error(`final-release plan must assign revise_sections to: ${proseMissing.join(", ")}`);
+    }
+    const proseAction = plan.actions.find((action) => action.tool === "revise_sections");
+    if (proseAction) {
+      const citedText = (validation.checks?.find((check) => check.id === "cited_literature_release_gates")?.findings as unknown[] | undefined)
+        ?.filter((finding): finding is string => typeof finding === "string").join(" ") ?? "";
+      const hasCriterion = (metric: AgenticActionPlan["actions"][number]["acceptance_criteria"][number]["metric"], target: number) =>
+        proseAction.acceptance_criteria.some((criterion) => criterion.metric === metric && criterion.target >= target);
+      if (/cited sources .*below configured minimum|accepted cited-source ratio .*below configured/i.test(citedText)) {
+        const config = await loadProjectConfig(resolved);
+        if (/cited sources .*below configured minimum/i.test(citedText)
+          && !hasCriterion("cited_sources", config.research.release_gates.min_cited_sources)) {
+          throw new Error(`final-release prose repair requires cited_sources >= ${config.research.release_gates.min_cited_sources}`);
+        }
+        if (/accepted cited-source ratio .*below configured/i.test(citedText)
+          && !hasCriterion("accepted_cited_ratio", config.research.release_gates.min_accepted_cited_ratio)) {
+          throw new Error(`final-release prose repair requires accepted_cited_ratio >= ${config.research.release_gates.min_accepted_cited_ratio}`);
+        }
+      }
+      if (failedIds.has("review_target") && !hasCriterion("review_score", 8)) {
+        throw new Error("final-release prose repair requires review_score >= 8");
+      }
+    }
+    // A clarification is a genuine human-decision escape hatch, not a way to
+    // acknowledge a deterministic, repairable release failure while doing no
+    // repair.  If the plan can name a normal bounded action, it must do so;
+    // in particular table/figure rendering failures always require the
+    // durable visual-plan action, never a waiver or a clarification-only
+    // round.
+    const executable = plan.actions.filter((action) => action.tool !== "request_operator_clarification");
+    if (executable.length === 0) {
+      throw new Error("final-release plan cannot use request_operator_clarification as its only corrective action");
+    }
+    const visualRequired = failedIds.has("rendered_visual_review");
+    if (visualRequired && !plan.actions.some((action) => action.tool === "revise_visual_plan" && action.finding_ids.includes("rendered_visual_review"))) {
+      throw new Error("final-release plan must assign revise_visual_plan to rendered_visual_review");
+    }
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, [
       "# Final-release plan validation", "", "- Status: pass",
@@ -646,6 +907,190 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
       "- Required repair: use only the currently failed IDs in reports/longwrite-validation.json, select allowlisted corrective actions, and cover every failed release check without lowering a gate.", "",
     ].join("\n"), "utf-8");
     throw new Error("reviews/action-plan.json: invalid final-release recovery plan; see reports/final-release-plan-repair.md");
+  }
+}
+
+/** Produce the bounded, mechanical part of a final-release recovery plan.
+ *
+ * The release validator already identifies the failed gate IDs and the
+ * dispatcher owns the only safe repair tools. Asking a model to restate that
+ * mapping made the final recovery loop depend on a second whole-paper read;
+ * on large manuscripts that decision can time out repeatedly without doing
+ * any repair. This generator deliberately makes no quality judgement. It
+ * records every failed gate and routes it to the minimal executable repair;
+ * the subsequent independent reviews and release validator still decide
+ * whether the repair actually worked. */
+export async function runResearchGenerateFinalReleasePlan(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const config = await loadProjectConfig(resolved);
+  const validationPath = path.join(resolved, "reports", "longwrite-validation.json");
+  const validation = JSON.parse(await fs.readFile(validationPath, "utf-8")) as {
+    pass?: unknown;
+    checks?: Array<{ id?: unknown; pass?: unknown; detail?: unknown; finding?: unknown; findings?: unknown }>;
+  };
+  const failed = (validation.checks ?? []).filter((check): check is { id: string; pass?: unknown; detail?: unknown; finding?: unknown; findings?: unknown } =>
+    check.pass === false && typeof check.id === "string",
+  );
+  const failedIds = failed.map((check) => check.id);
+  type ReviewWeakness = { category: string; detail: string; severity: "critical" | "major" | "minor" };
+  type ReviewScorecard = { personas?: Array<{ id?: unknown; weaknesses?: Array<{ category?: unknown; detail?: unknown; severity?: unknown }> }> };
+  let scorecard: ReviewScorecard = {};
+  try {
+    scorecard = JSON.parse(await fs.readFile(path.join(resolved, "reviews", "scorecard.json"), "utf-8")) as ReviewScorecard;
+  } catch {
+    // A missing scorecard cannot hide deterministic gate findings; it merely
+    // means there are no additional reviewer-specific repairs to route.
+  }
+  const weaknessMap = new Map<string, ReviewWeakness>();
+  for (const persona of scorecard.personas ?? []) {
+    for (const weakness of persona.weaknesses ?? []) {
+      if (typeof weakness.category !== "string" || typeof weakness.detail !== "string") continue;
+      const severity: ReviewWeakness["severity"] = weakness.severity === "critical" || weakness.severity === "minor" ? weakness.severity : "major";
+      weaknessMap.set(`${weakness.category}\u0000${weakness.detail}`, { category: weakness.category, detail: weakness.detail, severity });
+    }
+  }
+  const severityRank: Record<ReviewWeakness["severity"], number> = { critical: 0, major: 1, minor: 2 };
+  const reviewWeaknesses = [...weaknessMap.values()]
+    .sort((left, right) => severityRank[left.severity] - severityRank[right.severity]);
+  const visualPattern = /\b(figures?|tables?|visual(?:ization)?|diagrams?|charts?|captions?|layout|typograph(?:y|ic)|render(?:ed|ing)?|page break|bibliograph(?:y|ic))\b/i;
+  const visualWeaknesses = reviewWeaknesses.filter((weakness) => visualPattern.test(`${weakness.category} ${weakness.detail}`));
+  const proseWeaknesses = reviewWeaknesses.filter((weakness) => !visualPattern.test(`${weakness.category} ${weakness.detail}`));
+  const blockingProseWeaknesses = proseWeaknesses.filter((weakness) => weakness.severity !== "minor");
+  const blockingVisualWeaknesses = visualWeaknesses.filter((weakness) => weakness.severity !== "minor");
+  const reviewDetail = reviewWeaknesses.slice(0, 16)
+    .map((weakness) => `[${weakness.severity}] ${weakness.category}: ${weakness.detail}`)
+    .join("; ");
+  const findings = failed.map((check) => ({
+    id: check.id,
+    severity: "critical" as const,
+    summary: check.id === "review_target" && reviewDetail
+      ? `${Array.isArray(check.findings) ? check.findings.filter((finding): finding is string => typeof finding === "string").join("; ") : "Review target failed"}. Concrete reviewer findings: ${reviewDetail}`.slice(0, 7_500)
+      : Array.isArray(check.findings) && check.findings.every((finding) => typeof finding === "string") && check.findings.length > 0
+      ? check.findings.join("; ").slice(0, 7_500)
+      : typeof check.detail === "string" ? check.detail.slice(0, 7_500)
+      : typeof check.finding === "string" ? check.finding.slice(0, 7_500)
+        : `Deterministic final-release validation reports ${check.id} as failing.`,
+  }));
+  const actions: AgenticActionPlan["actions"] = [];
+  const visual: string[] = failedIds.filter((id) => id === "rendered_visual_review");
+  if (failedIds.includes("review_target") && visualWeaknesses.length > 0) visual.push("review_target");
+  // A low aggregate review score can be caused entirely by a blocking visual
+  // defect. In that case, routing review_target to both prose and visual tools
+  // rewrites already-supported chapters without any prose acceptance delta.
+  // Let the visual action own review_target when all nonvisual feedback is
+  // minor and the rendered visual gate is independently failing.
+  const visualOnlyReviewTarget = failedIds.includes("rendered_visual_review")
+    && blockingVisualWeaknesses.length > 0 && blockingProseWeaknesses.length === 0;
+  const prose = failedIds.filter((id) => id !== "rendered_visual_review" && !(id === "review_target" && visualOnlyReviewTarget));
+  if (prose.length > 0) {
+    const citedFinding = failed.find((check) => check.id === "cited_literature_release_gates");
+    const citedText = Array.isArray(citedFinding?.findings)
+      ? citedFinding.findings.filter((finding): finding is string => typeof finding === "string").join(" ")
+      : "";
+    const acceptance: AgenticActionPlan["actions"][number]["acceptance_criteria"] = [];
+    if (/cited sources .*below configured minimum/i.test(citedText)) {
+      acceptance.push({ metric: "cited_sources", target: config.research.release_gates.min_cited_sources, scope: "distinct sources cited in chapters/*.md" });
+    }
+    if (/accepted cited-source ratio .*below configured/i.test(citedText)) {
+      acceptance.push({ metric: "accepted_cited_ratio", target: config.research.release_gates.min_accepted_cited_ratio, scope: "distinct sources cited in chapters/*.md" });
+    }
+    if (/citation density .*below|citations? per page .*below/i.test(citedText)) {
+      acceptance.push({ metric: "citations_per_page", target: config.research.release_gates.min_citations_per_page, scope: "rendered manuscript" });
+    }
+    if (/within[_ -]?1yr|within one year/i.test(citedText)) {
+      acceptance.push({ metric: "cited_within_one_year_ratio", target: config.research.release_gates.min_cited_within_one_year_ratio, scope: "distinct sources cited in chapters/*.md" });
+    }
+    if (failedIds.includes("claim_support")) acceptance.push({ metric: "claim_support", target: 0.9, scope: "fresh independently double-reviewed claim sample" });
+    if (failedIds.includes("review_target")) acceptance.push({ metric: "review_score", target: 8, scope: "fresh independent multi-persona review" });
+    if (acceptance.length === 0) acceptance.push({ metric: "citation_depth_per_section", target: 1, scope: "sections named by the current release assessment" });
+    const proseDetail = proseWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
+    actions.push({
+      id: "required-final-release-prose-repair",
+      tool: "revise_sections",
+      finding_ids: prose,
+      rationale: `Apply the exact deterministic release targets to evidence-backed manuscript prose. Narrow or remove unsupported claims and weave only packet-backed, verified sources; do not lower any release target.${proseDetail ? ` Concrete prose findings: ${proseDetail}` : ""}`.slice(0, 8_000),
+      acceptance_criteria: acceptance.slice(0, 5),
+    });
+  }
+  if (visual.length > 0) {
+    const visualDetail = visualWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
+    actions.push({
+      id: "required-final-release-visual-repair",
+      tool: "revise_visual_plan",
+      finding_ids: [...new Set(visual)],
+      rationale: `Repair the named figure/table content, placement, captions, and legibility defects, then require a fresh rendered-PDF review. The visual gate cannot be waived.${visualDetail ? ` Concrete visual findings: ${visualDetail}` : ""}`.slice(0, 8_000),
+      acceptance_criteria: [
+        { metric: "rendered_visual_review", target: 1, scope: "fresh rendered PDF review" },
+        ...(visual.includes("review_target") ? [{ metric: "review_score" as const, target: 8, scope: "fresh independent multi-persona review after visual repair" }] : []),
+      ],
+    });
+  }
+  // When the deterministic packet inventory cannot support the configured
+  // accepted-source floor, add bounded retrieval before the prose editor runs.
+  // Capacity is intentionally checked here rather than guessed from a review.
+  if (failedIds.includes("cited_literature_release_gates")) {
+    const capacity = await evidenceCapacity(resolved, config.research.release_gates.min_accepted_cited_ratio);
+    if (capacity.requiresExpansion) {
+      actions.unshift({
+        id: "expand-final-release-evidence-capacity",
+        tool: "targeted_research_expansion",
+        finding_ids: ["cited_literature_release_gates"],
+        rationale: `The current packet-backed evidence cannot meet the configured release capacity: ${capacity.reasons.join("; ")}. Retrieve only sources that close this concrete gap before revising prose.`,
+        acceptance_criteria: [
+          { metric: "cited_sources", target: config.research.release_gates.min_cited_sources },
+          ...(config.research.release_gates.min_accepted_cited_ratio > 0
+            ? [{ metric: "accepted_cited_ratio" as const, target: config.research.release_gates.min_accepted_cited_ratio }]
+            : []),
+        ],
+      });
+    }
+  }
+  const plan = AgenticActionPlan.parse({ version: 1, findings, actions });
+  const target = path.join(resolved, "reviews", "action-plan.json");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
+  await runResearchRepairFinalReleasePlan(resolved);
+  console.log(`Generated deterministic final-release plan for ${failedIds.length} failed gate(s).`);
+}
+
+/** Produce the exact chapter/source repair scope that a prose revision must
+ * close. Keeping this deterministic prevents a broad final-validator log from
+ * being translated into an arbitrary, low-impact rewrite. */
+export async function runResearchCitationRepairPacket(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { items, written } = await import("../lib/research/recovery-repair.js").then((mod) => mod.writeCitationRepairPacket(resolved));
+  console.log(`Citation repair packet: ${items} chapter/source work item(s).`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+export async function runResearchCitedSourceUpgradePacket(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { items, written } = await import("../lib/research/recovery-repair.js").then((mod) => mod.writeCitedSourceUpgradePacket(resolved));
+  console.log(`Accepted-source citation upgrade packet: ${items} chapter/source work item(s).`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Snapshot release metrics before a bounded recovery round. */
+export async function runResearchFinalReleaseBaseline(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const written = await import("../lib/research/recovery-repair.js").then((mod) => mod.writeFinalReleaseBaseline(resolved));
+  console.log(`Final-release baseline written: ${written}`);
+}
+
+/** Record whether a completed remediation made deterministic progress.
+ *
+ * This is advisory telemetry, not a workflow failure: a loop engine may
+ * continue after a failed child, which would turn an intended "stop" signal
+ * into an accidental extra recovery round.  The release validator remains the
+ * sole publication blocker. */
+export async function runResearchAssessFinalReleaseProgress(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const result = await import("../lib/research/recovery-repair.js").then((mod) => mod.assessFinalReleaseProgress(resolved));
+  console.log(`Final-release recovery progress: ${result.improvements.length} improvement(s).`);
+  for (const improvement of result.improvements) console.log(`  + ${improvement}`);
+  console.log(`  + ${result.reportPath}`);
+  if (!result.pass) {
+    console.warn("No failed release gate or tracked recovery metric improved; recorded for the next bounded recovery decision.");
   }
 }
 

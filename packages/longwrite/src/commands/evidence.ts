@@ -1,5 +1,5 @@
 import path from "node:path";
-import { allocateSectionEvidence, auditCitationEvidence, buildEvidenceIndex, consolidateCitationLedger, searchEvidence } from "../lib/research/evidence.js";
+import { allocateSectionEvidence, auditCitationEvidence, buildEvidenceIndex, consolidateCitationLedger, searchEvidence, validateEvidenceLedger } from "../lib/research/evidence.js";
 import { loadProjectConfig } from "../lib/project-config.js";
 import { openAICompatibleEmbeddings } from "../lib/research/embeddings.js";
 
@@ -44,6 +44,25 @@ export async function runEvidenceConsolidate(workspaceDir: string): Promise<void
   const result = await consolidateCitationLedger(path.resolve(workspaceDir));
   console.log(`Consolidated ${result.entries} citation ledger entries.`);
   console.log(`  + ${result.path}`);
+}
+
+/** Rebuild the ledger from the current chapters before validating it. This is
+ * deliberately narrower than full release validation: an editor can repair
+ * marker provenance without being retried for unrelated source-count, review,
+ * or rendered-visual release gates. */
+export async function runEvidenceValidateLedger(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const config = await loadProjectConfig(resolved);
+  const result = await consolidateCitationLedger(resolved);
+  const validation = await validateEvidenceLedger(resolved, {
+    allowMetadataOnly: config.research.provider === "seed",
+  });
+  console.log(`Validated ${result.entries} citation ledger entries from current chapters.`);
+  console.log(`  + ${result.path}`);
+  if (!validation.pass) {
+    for (const finding of validation.findings) console.error(`  ! ${finding}`);
+    process.exitCode = 1;
+  }
 }
 
 export async function runEvidenceAudit(workspaceDir: string): Promise<void> {

@@ -10,6 +10,7 @@ export {
   compileModeToManifest,
   manifestToYaml,
   type CompileOptions,
+  type CompileExecutionDefaults,
   type CompileResearchPolicy,
   type CompileRunLimits,
   type CompileStageOverride,

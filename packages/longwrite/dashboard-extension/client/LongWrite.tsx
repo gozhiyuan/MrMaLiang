@@ -59,6 +59,7 @@ type LongWriteResponse = {
     units: Record<string, { status: string }>;
     pendingApprovals: Array<{ id: string; stageId: string; stepId?: string; itemId?: string; artifacts?: string[] }>;
   } | null;
+  tokenLimitPaused: boolean;
   usage: { totalTokens: number; costUsd: number; unitsWithUsage: number } | null;
   logs: Array<{ name: string; content: string; truncated: boolean }>;
   evidence: {
@@ -106,7 +107,7 @@ type ProjectConfig = {
     provider?: string;
     topic?: string;
     paper_kind?: "survey" | "empirical";
-    paper_profile?: "literature_survey" | "repository_study";
+    paper_profile?: "flagship_short_paper" | "flagship_long_paper" | "flagship_short_github_paper" | "flagship_long_github_paper";
     codebases?: Array<{ id: string; source: string; ref?: string; title?: string; role?: "primary_artifact" | "supplementary_artifact" }>;
     codebase_discovery?: { enabled?: boolean; provider?: "github"; query_budget?: number; max_candidates?: number; max_readme_fetches?: number; max_selected?: number; require_license?: boolean; include_archived?: boolean; languages?: string[] };
     target_candidates?: number;
@@ -532,6 +533,7 @@ export function LongWrite() {
   });
 
   const [yamlToolsResult, setYamlToolsResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [tokenLimitInput, setTokenLimitInput] = useState("");
   const yamlTools = useMutation({
     mutationFn: async (action: "sync" | "validate") => {
       if (action === "sync") {
@@ -553,6 +555,20 @@ export function LongWrite() {
       postJson<{ ok: boolean; path: string; synced?: string[] }>("/api/longwrite/config", { dir, config }),
     onSuccess: () => {
       setOperationMessage("Saved longwrite.yaml and synced derived files.");
+      queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
+    },
+    onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
+  });
+
+  const increaseRunLimit = useMutation({
+    mutationFn: (maxRecordedTokens: number) =>
+      postJson<{ ok: boolean; maxRecordedTokens: number; recordedTokens?: number; operation: LongWriteResponse["operation"] }>(
+        "/api/longwrite/run-limits/increase-and-run",
+        { dir, maxRecordedTokens, confirmed: true },
+      ),
+    onSuccess: (result) => {
+      setTokenLimitInput("");
+      setOperationMessage(`Raised the recorded-token limit to ${result.maxRecordedTokens.toLocaleString()} and resumed the preserved flow.`);
       queryClient.invalidateQueries({ queryKey: ["longwrite", dir] });
     },
     onError: (err) => setOperationMessage(err instanceof Error ? err.message : String(err)),
@@ -663,6 +679,13 @@ export function LongWrite() {
   // this final fallback, an unset manifest runtime displayed as "codex" but
   // submitted `undefined`, allowing MalaClaw to use its dry-run default.
   const selectedRuntime = runtimeOverride.trim() || data?.workflow.runtime || "codex";
+  const currentRecordedTokenLimit = typeof data?.workflow.runLimits?.max_recorded_tokens === "number"
+    ? data.workflow.runLimits.max_recorded_tokens
+    : undefined;
+  const suggestedRecordedTokenLimit = currentRecordedTokenLimit === undefined
+    ? undefined
+    : Math.ceil(Math.max(currentRecordedTokenLimit * 1.25, (data?.usage?.totalTokens ?? 0) * 1.2) / 1_000_000) * 1_000_000;
+  const tokenLimitPaused = data?.tokenLimitPaused === true && currentRecordedTokenLimit !== undefined;
   // A CLI/supervisor-started flow is not represented by this dashboard's
   // in-memory operation flag. Derive the disabled state from durable flow
   // state as well, so the Run buttons never invite a concurrent launch.
@@ -925,7 +948,7 @@ export function LongWrite() {
                 <div>{smallLabel("profile")} {data.project.runtimeProfile ?? "default"}</div>
                 <div>{smallLabel("topic")} {data.research.topic ?? "not set"}</div>
                 <div>{smallLabel("provider")} {data.research.provider ?? "not set"}</div>
-                <div>{smallLabel("paper evidence")} {data.research.paperProfile ?? "literature_survey"}</div>
+                <div>{smallLabel("paper evidence")} {data.research.paperProfile ?? "flagship_long_paper"}</div>
                 <div>{smallLabel("repositories")} {data.research.codebases.length || "none"}</div>
                 {data.research.codebases.map((codebase) => (
                   <div key={codebase.id} style={{ paddingLeft: 8, fontSize: 12, overflowWrap: "anywhere" }}>
@@ -969,6 +992,39 @@ export function LongWrite() {
                 <div>{smallLabel("batch approvals")} {data.review.batchApprovals ? "yes" : "no"}</div>
                 <div>{smallLabel("model tiers")} {Object.keys(data.workflow.modelTiers).join(", ") || "none defined by this profile"}</div>
               </div>
+              {tokenLimitPaused && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #30363d", color: "#f0b429" }}>
+                  <div style={{ fontWeight: 600 }}>Recorded-token guardrail reached</div>
+                  <div style={{ color: "#8b949e", fontSize: 12, marginTop: 4 }}>
+                    {data.usage?.totalTokens.toLocaleString() ?? "Unknown"} recorded of {currentRecordedTokenLimit.toLocaleString()}. Enter a higher cap to save it to longwrite.yaml, sync, and continue without resetting completed units.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    <input
+                      aria-label="New maximum recorded tokens"
+                      type="number"
+                      min={currentRecordedTokenLimit + 1}
+                      step={1_000_000}
+                      value={tokenLimitInput}
+                      placeholder={suggestedRecordedTokenLimit?.toString() ?? "e.g. 18000000"}
+                      onChange={(event) => setTokenLimitInput(event.target.value)}
+                      style={{ ...inputStyle, width: 180, marginTop: 0 }}
+                    />
+                    <button
+                      type="button"
+                      disabled={increaseRunLimit.isPending || !Number.isSafeInteger(Number(tokenLimitInput)) || Number(tokenLimitInput) <= currentRecordedTokenLimit}
+                      onClick={() => {
+                        const next = Number(tokenLimitInput);
+                        if (window.confirm(`Raise the recorded-token limit from ${currentRecordedTokenLimit.toLocaleString()} to ${next.toLocaleString()} and continue this flow?`)) {
+                          increaseRunLimit.mutate(next);
+                        }
+                      }}
+                      style={{ ...secondaryButtonStyle, background: "#1f6feb", cursor: increaseRunLimit.isPending ? "wait" : "pointer" }}
+                    >
+                      Increase + continue
+                    </button>
+                  </div>
+                </div>
+              )}
             </Section>
 
             <Section title="Flow">
@@ -1686,7 +1742,7 @@ export function LongWrite() {
                         research: {
                           ...c.research,
                           paper_kind: c.research?.paper_kind ?? "survey",
-                          paper_profile: codebases.length > 0 || c.research?.codebase_discovery?.enabled ? "repository_study" : "literature_survey",
+                          paper_profile: codebases.length > 0 || c.research?.codebase_discovery?.enabled ? "flagship_long_github_paper" : "flagship_long_paper",
                           codebases,
                         },
                       };
@@ -1707,7 +1763,7 @@ export function LongWrite() {
                         research: {
                           ...c.research,
                           paper_kind: c.research?.paper_kind ?? "survey",
-                          paper_profile: e.target.checked ? "repository_study" : ((c.research?.codebases?.length ?? 0) > 0 ? "repository_study" : "literature_survey"),
+                          paper_profile: e.target.checked ? "flagship_long_github_paper" : ((c.research?.codebases?.length ?? 0) > 0 ? "flagship_long_github_paper" : "flagship_long_paper"),
                           codebase_discovery: {
                             provider: "github", query_budget: 10, max_candidates: 40, max_readme_fetches: 12,
                             max_selected: 8, require_license: true, include_archived: false, languages: [],

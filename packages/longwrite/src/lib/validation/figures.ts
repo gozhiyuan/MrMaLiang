@@ -182,7 +182,12 @@ async function checkManuscriptReferences(workspaceDir: string, manifest?: Figure
       : false;
     if (!section.includes(`\\label{${kind}:${item.id}}`) && !longtableLabel) findings.push(`figure_references: ${item.id} is not labeled in ${rel}`);
     if (!section.includes(`\\input{${item.latex_path.replace(/^paper\//, "")}}`)) findings.push(`figure_references: ${item.id} does not embed ${item.latex_path} in ${rel}`);
-    if (!section.includes(`${kind === "fig" ? "Figure" : "Table"}~\\ref{${kind}:${item.id}}`)) findings.push(`figure_references: ${item.id} has no in-text reference in ${rel}`);
+    // Embedded artifacts have a caption and stable label. Do not require a
+    // separate prose ``Figure/Table N:'' lead-in: floats can legally move to
+    // the next page, turning that mechanically required line into a detached
+    // pseudo-caption. Natural in-text references remain welcome when the
+    // author needs them, but placement and caption validation are the
+    // publishability contract here.
   };
   for (const figure of manifest.figures) await embedded("fig", figure);
   for (const table of manifest.tables) await embedded("tab", table);

@@ -27,8 +27,7 @@ describe("compileModeToManifest", () => {
     expect(manifest.project.attached_agents).toContain("research-lead");
     expect((manifest.workflow as Record<string, unknown>).mode).toBe("auto_research_agentic");
     expect((manifest.workflow as Record<string, unknown>).artifact_type).toBe("research_paper");
-    expect(((manifest.workflow as { stages: Array<{ id: string }> }).stages).map((s) => s.id))
-      .toEqual(mode.workflow.stages.map((s: unknown) => (s as { id: string }).id));
+    expect(((manifest.workflow as { ir_version?: number }).ir_version)).toBe(2);
     expect((manifest.project as { description: string }).description).toContain("Long-horizon agent memory");
     const stages = (manifest.workflow as { stages: Array<{ id: string; runtime?: string; command?: { cmd: string; args: string[] } }> }).stages;
     // The three research stages run SEPARATE idempotent subcommands — not
@@ -50,41 +49,53 @@ describe("compileModeToManifest", () => {
     expect(draft?.steps.find((s) => s.id === "draft")?.runtime).toBe("script");
     expect(draft?.steps.find((s) => s.id === "draft")?.command?.args).toEqual(expect.arrayContaining(["draft", "section", "."]));
 
-    const qualityLoop = stages.find((s) => s.id === "quality_loop") as
+    const qualityLoop = stages.find((s) => s.id === "improve") as
       | { type?: string; max_rounds?: number; stop_when?: string; stop_on_stagnation?: unknown; on_exhaustion?: string; stages?: Array<Record<string, unknown>> }
       | undefined;
     expect(qualityLoop?.type).toBe("loop");
-    // The agentic mode defaults to the deep profile (5 bounded rounds).
-    expect(qualityLoop?.max_rounds).toBe(5);
-    expect(qualityLoop?.stop_when).toBe("review_score >= 8.0");
+    expect((manifest.workflow as { phase_catalog: Array<Record<string, unknown>> }).phase_catalog).toEqual([
+      expect.objectContaining({ id: "specify", title: "Specify" }),
+      expect.objectContaining({ id: "research", title: "Research" }),
+      expect.objectContaining({ id: "synthesize", title: "Synthesize" }),
+      expect.objectContaining({ id: "write", title: "Write" }),
+      expect.objectContaining({ id: "improve", title: "Improve" }),
+      expect.objectContaining({ id: "release", title: "Release" }),
+    ]);
+    expect((qualityLoop as { phase?: string })?.phase).toBe("improve");
+    expect(qualityLoop?.stages?.every((stage) => stage.phase === "improve")).toBe(true);
+    // One targeted quality-control phase replaces the former five-round
+    // manuscript loop plus separate release-recovery loop.
+    expect(qualityLoop?.max_rounds).toBe(3);
+    expect(qualityLoop?.stop_when).toBe("review_score_raw_median >= 8");
     expect(qualityLoop?.stop_on_stagnation).toBeUndefined();
-    expect(qualityLoop?.on_exhaustion).toBe("succeed");
+    expect(qualityLoop?.on_exhaustion).toBe("fail");
 
     // The fixed router/revise children are replaced by the validated
     // plan -> allowlisted dispatch chain. Contract repair runs as validator
     // feedback within the LLM attempt, rather than as a terminal child stage.
-    expect(childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "route")).toBeUndefined();
-    const actionPlan = childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "action_plan") as
-      | { validator_commands?: Array<{ args: string[] }> }
+    expect(childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "route")).toBeUndefined();
+    const actionPlan = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "final_release_plan") as
+      | { runtime?: string; command?: { args: string[] } }
       | undefined;
-    expect(actionPlan?.validator_commands?.[0]?.args).toEqual(expect.arrayContaining(["review", "repair-action-plan", "."]));
+    expect(actionPlan?.runtime).toBe("script");
+    expect(actionPlan?.command?.args).toEqual(expect.arrayContaining(["research", "generate-final-release-plan", "."]));
 
     // The static expand_research child is replaced by the allowlisted
     // research dispatch, which materializes a targeted expansion on demand.
-    expect(childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "expand_research")).toBeUndefined();
-    const researchDispatch = childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "research_action_dispatch") as
+    expect(childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "expand_research")).toBeUndefined();
+    const researchDispatch = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "research_action_dispatch") as
       | { type?: string; allowed_actions?: string[] }
       | undefined;
     expect(researchDispatch?.type).toBe("action_dispatch");
     expect(researchDispatch?.allowed_actions).toEqual(["targeted_research_expansion"]);
 
-    const claimScore = childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "claim_score") as
+    const claimScore = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "claim_score") as
       | { runtime?: string; command?: { args: string[] } }
       | undefined;
     expect(claimScore?.runtime).toBe("script");
     expect(claimScore?.command?.args).toEqual(expect.arrayContaining(["review", "claims", "."]));
 
-    const build = childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "rebuild") as
+    const build = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "rebuild") as
       | { runtime?: string; command?: { cmd: string; args: string[] }; validator_commands?: Array<{ cmd: string; args: string[] }> }
       | undefined;
     expect(build?.runtime).toBe("script");
@@ -100,7 +111,7 @@ describe("compileModeToManifest", () => {
     expect(initialBuild?.command?.args).toEqual(expect.arrayContaining(["build", "research", "."]));
     expect(initialBuild?.validator_commands).toHaveLength(2);
 
-    const consolidate = childStage(stages as unknown as Array<Record<string, unknown>>, "quality_loop", "consolidate_citations") as
+    const consolidate = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "consolidate_citations") as
       | { runtime?: string; command?: { args: string[] } }
       | undefined;
     expect(consolidate?.runtime).toBe("script");
@@ -120,7 +131,10 @@ describe("compileModeToManifest", () => {
     expect(finalValidate?.command?.args).toEqual(expect.arrayContaining(["validate", "research", "."]));
 
     const roundTrip = parseYaml(manifestToYaml(manifest));
-    expect(roundTrip.workflow.stages).toHaveLength(mode.workflow.stages.length);
+    expect(roundTrip.workflow.stages).toHaveLength(mode.workflow.stages.length + 1);
+    expect(new Set(roundTrip.workflow.stages.map((stage: { phase?: string }) => stage.phase))).toEqual(
+      new Set(["specify", "research", "synthesize", "write", "improve", "release"]),
+    );
   });
 
   it("gates the LLM evidence-refresh stages on a dispatched expansion", async () => {
@@ -137,36 +151,30 @@ describe("compileModeToManifest", () => {
     const stages = (manifest.workflow as { stages: Array<Record<string, unknown>> }).stages;
 
     // A deterministic script step emits the gate metric right after dispatch.
-    const dispatchMetrics = childStage(stages, "quality_loop", "quality_dispatch_metrics") as
+    const dispatchMetrics = childStage(stages, "improve", "quality_dispatch_metrics") as
       | { runtime?: string; command?: { args: string[] }; outputs?: string[] }
       | undefined;
     expect(dispatchMetrics?.runtime).toBe("script");
     expect(dispatchMetrics?.command?.args).toEqual(expect.arrayContaining(["research", "dispatch-metrics", "."]));
     expect(dispatchMetrics?.outputs).toContain("reports/metrics.json");
 
+    for (const id of ["claim_judge", "claim_score"]) {
+      expect(childStage(stages, "improve", id)?.when).toBe("manuscript_revision_planned >= 1");
+    }
+
     // Every refresh stage is skipped unless an expansion was actually dispatched,
     // so the no-op "preserve" contradiction that produced stale_attempt_output is
     // gone. The two model stages must carry the gate and drop the preserve prompt.
     for (const id of ["quality_semantic_screen", "quality_source_evidence_extract"]) {
-      const stage = childStage(stages, "quality_loop", id) as
+      const stage = childStage(stages, "improve", id) as
         | { when?: string; instructions?: string[] }
         | undefined;
       expect(stage?.when).toBe("research_expansion_dispatched >= 1");
       expect((stage?.instructions ?? []).join(" ")).not.toContain("preserve");
     }
 
-    // The same refresh stages are replayed in the final-release recovery loop.
-    // recoveryWhen must NOT clobber their dispatch gate, or a no-op recovery
-    // round would reintroduce the stale_attempt_output failure.
-    const recovery = stages.find((s) => s.id === "final_release_recovery_loop") as
-      | { stages?: Array<Record<string, unknown>> }
-      | undefined;
-    const recoveryStages = recovery?.stages ?? [];
-    expect(recoveryStages.find((s) => s.id === "quality_dispatch_metrics")).toBeDefined();
-    for (const id of ["quality_semantic_screen", "quality_source_evidence_extract"]) {
-      const stage = recoveryStages.find((s) => s.id === id) as { when?: string } | undefined;
-      expect(stage?.when).toBe("research_expansion_dispatched >= 1");
-    }
+    expect(stages.find((s) => s.id === "quality_loop")).toBeUndefined();
+    expect(stages.find((s) => s.id === "final_release_recovery_loop")).toBeUndefined();
   });
 
   it("does not inject research script commands without a topic", async () => {
@@ -207,8 +215,8 @@ describe("compileModeToManifest", () => {
     }
     expect(fast.stages.find((stage) => stage.id === "structure_audit")).toMatchObject({ enabled: false, skippable: true });
     expect(deep.stages.find((stage) => stage.id === "snowball_recall")?.enabled).not.toBe(false);
-    const deepLoop = deep.stages.find((stage) => stage.id === "quality_loop") as { max_rounds?: number };
-    expect(deepLoop.max_rounds).toBe(5);
+    const deepLoop = deep.stages.find((stage) => stage.id === "improve") as { max_rounds?: number };
+    expect(deepLoop.max_rounds).toBe(3);
   });
 
   it("compiles full auto_research_agentic with mandatory breadth and provenance gates", async () => {
@@ -249,7 +257,7 @@ describe("compileModeToManifest", () => {
     expect(workflow.stages.find((stage) => stage.id === "survey_contract")?.command).toMatchObject({
       args: expect.arrayContaining(["research", "survey-contract", "."]),
     });
-    const qualityLoop = workflow.stages.find((stage) => stage.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
+    const qualityLoop = workflow.stages.find((stage) => stage.id === "improve") as { stages: Array<Record<string, unknown>> };
     expect(qualityLoop.stages.find((stage) => stage.id === "claim_judgment_repair")).toBeUndefined();
     expect(qualityLoop.stages.find((stage) => stage.id === "claim_judge")?.validator_commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ args: expect.arrayContaining(["review", "repair-claims", "."]) }),
@@ -258,17 +266,28 @@ describe("compileModeToManifest", () => {
       | { command?: { args: string[] } }
       | undefined;
     expect(releaseAssessment?.command?.args).toEqual(expect.arrayContaining(["validate", "research", ".", "--advisory"]));
-    const releaseRecovery = workflow.stages.find((stage) => stage.id === "final_release_recovery_loop") as
-      | { type?: string; max_rounds?: number; stop_when?: string; stages?: Array<Record<string, unknown>> }
+    const releaseRecovery = workflow.stages.find((stage) => stage.id === "improve") as
+      | { type?: string; max_rounds?: number; stop_when?: string; on_exhaustion?: string; stages?: Array<Record<string, unknown>> }
       | undefined;
-    expect(releaseRecovery).toMatchObject({ type: "loop", max_rounds: 2, stop_when: "final_release_gate_pass >= 1" });
+    expect(releaseRecovery).toMatchObject({ type: "loop", max_rounds: 3, stop_when: "final_release_gate_pass >= 1", on_exhaustion: "fail" });
     const releasePlan = releaseRecovery?.stages?.find((stage) => stage.id === "final_release_plan") as
       | { when?: string; validator_commands?: Array<{ args: string[] }> }
       | undefined;
     expect(releasePlan?.when).toBe("final_release_gate_pass < 1");
-    expect(releasePlan?.validator_commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ args: expect.arrayContaining(["research", "repair-final-release-plan", "."]) }),
-    ]));
+    expect(releasePlan?.command).toEqual(expect.objectContaining({
+      args: expect.arrayContaining(["research", "generate-final-release-plan", "."]),
+    }));
+    const releaseVisual = releaseRecovery?.stages?.find((stage) => stage.id === "visual_review") as { when?: string } | undefined;
+    expect(releaseVisual?.when).toBe("visual_reviewable_pages >= 1");
+    expect(releaseRecovery?.stages?.find((stage) => stage.id === "final_release_baseline")?.command).toMatchObject({
+      args: expect.arrayContaining(["research", "final-release-baseline", "."]),
+    });
+    expect(releaseRecovery?.stages?.find((stage) => stage.id === "citation_repair_packet")?.command).toMatchObject({
+      args: expect.arrayContaining(["research", "citation-repair-packet", "."]),
+    });
+    expect(releaseRecovery?.stages?.find((stage) => stage.id === "final_release_progress")?.command).toMatchObject({
+      args: expect.arrayContaining(["research", "assess-final-release-progress", "."]),
+    });
   });
 
   it("adds a pinned codebase-evidence stage only when repositories are configured", async () => {
@@ -298,9 +317,7 @@ describe("compileModeToManifest", () => {
     expect(outline?.optional_inputs).toEqual(expect.arrayContaining(["codebases/manifest.json", "evidence/codebase-context.md", "evidence/codebase-analysis.json"]));
     const baseline = workflow.stages.find((item) => item.id === "baseline_review");
     expect(baseline?.optional_inputs).toEqual(expect.arrayContaining(["evidence/codebase-analysis.json"]));
-    const qualityLoop = workflow.stages.find((item) => item.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
-    expect(qualityLoop.stages.find((item) => item.id === "artifact_plan")?.optional_inputs)
-      .toEqual(expect.arrayContaining(["evidence/codebase-analysis.json"]));
+    const qualityLoop = workflow.stages.find((item) => item.id === "improve") as { stages: Array<Record<string, unknown>> };
     expect(qualityLoop.stages.find((item) => item.id === "review")?.instructions)
       .toEqual(expect.arrayContaining([expect.stringContaining("architecture, entrypoint, interface") ]));
     const toolCatalog = (workflow as { tool_catalog?: Array<Record<string, unknown>> }).tool_catalog ?? [];
@@ -313,7 +330,7 @@ describe("compileModeToManifest", () => {
     const manifest = compileModeToManifest(mode, {
       projectId: "repo-study", topic: "System architecture", researchProvider: "multi",
       researchPolicy: {
-        targetCandidates: 80, queryBudget: 12, taxonomy: [], paperProfile: "repository_study",
+        targetCandidates: 80, queryBudget: 12, taxonomy: [], paperProfile: "flagship_long_github_paper",
         codebases: [{ id: "repo-system", source: "https://github.com/example/system.git", ref: "HEAD", role: "primary_artifact" }],
         fulltextMaxSources: 20, allowPdfDownload: true, verificationMaxSources: 30, writingStrategy: "llm_sections",
       },
@@ -352,7 +369,7 @@ describe("compileModeToManifest", () => {
     const manifest = compileModeToManifest(mode, {
       projectId: "repo-discovery", topic: "Repository architecture", researchProvider: "multi",
       researchPolicy: {
-        targetCandidates: 80, queryBudget: 12, taxonomy: [], paperProfile: "repository_study", fulltextMaxSources: 20,
+        targetCandidates: 80, queryBudget: 12, taxonomy: [], paperProfile: "flagship_long_github_paper", fulltextMaxSources: 20,
         allowPdfDownload: true, verificationMaxSources: 30, writingStrategy: "llm_sections",
         codebaseDiscovery: { enabled: true, queryBudget: 4, maxCandidates: 20, maxReadmeFetches: 8, maxSelected: 4, requireLicense: true, includeArchived: false, languages: [] },
       },
@@ -427,15 +444,14 @@ describe("compileModeToManifest", () => {
     ]));
     const initialDraft = workflow.stages.find((stage) => stage.id === "draft_sections") as { steps: Array<Record<string, unknown>> };
     expect(initialDraft.steps.find((step) => step.id === "draft")?.inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
-    const loop = workflow.stages.find((stage) => stage.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
-    // The opportunity report runs before the planner so the planner reads it.
-    expect(loop.stages.slice(0, 7).map((stage) => stage.id)).toEqual(["stall_status", "direction_memory", "comparison_opportunities", "artifact_plan", "action_plan", "action_plan_split", "research_action_dispatch"]);
-    expect(loop.stages.slice(7, 16).map((stage) => stage.id)).toEqual([
+    const loop = workflow.stages.find((stage) => stage.id === "improve") as { stages: Array<Record<string, unknown>> };
+    expect(loop.stages.slice(0, 4).map((stage) => stage.id)).toEqual(["final_release_baseline", "final_release_plan", "action_plan_split", "research_action_dispatch"]);
+    expect(loop.stages.slice(4, 14).map((stage) => stage.id)).toEqual([
       "quality_dispatch_metrics", "quality_semantic_screen", "quality_fulltext_refresh",
       "quality_evidence_index_refresh", "quality_source_evidence_candidate_select", "quality_source_evidence_extract",
-      "quality_finalize_evidence_depth", "quality_corpus_gates", "quality_allocate_evidence",
+      "quality_backfill_validated_evidence_history", "quality_finalize_evidence_depth", "quality_corpus_gates", "quality_allocate_evidence",
     ]);
-    expect(loop.stages.slice(16, 21).map((stage) => stage.id)).toEqual([
+    expect(loop.stages.slice(14, 19).map((stage) => stage.id)).toEqual([
       "outline_action_dispatch",
       "quality_outline_survey_contract", "quality_outline_structure_audit",
       "quality_outline_reopen_validate", "quality_reallocate_outline_evidence",
@@ -449,20 +465,12 @@ describe("compileModeToManifest", () => {
     expect(loop.stages.find((stage) => stage.id === "quality_source_evidence_extract")?.outputs).toEqual(expect.arrayContaining([
       "evidence/validated-source-evidence.json",
     ]));
-    expect(loop.stages.find((stage) => stage.id === "artifact_plan_repair")).toBeUndefined();
-    expect(loop.stages.find((stage) => stage.id === "artifact_plan")?.validator_commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ args: expect.arrayContaining(["review", "repair-artifact-plan", "."]) }),
-    ]));
-    expect(loop.stages.find((stage) => stage.id === "artifact_plan")?.instructions).toEqual(expect.arrayContaining([
-      expect.stringContaining("timeline, architecture_diagram"),
-    ]));
-    expect(loop.stages.find((stage) => stage.id === "action_plan")?.instructions).toEqual(expect.arrayContaining([
-      expect.stringContaining("may co-occur with targeted_research_expansion"),
-    ]));
-    expect(loop.stages.find((stage) => stage.id === "action_plan_repair")).toBeUndefined();
-    expect(loop.stages.find((stage) => stage.id === "action_plan")?.validator_commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ args: expect.arrayContaining(["review", "repair-action-plan", "."]) }),
-    ]));
+    expect(loop.stages.find((stage) => stage.id === "quality_backfill_validated_evidence_history")?.command).toMatchObject({
+      args: expect.arrayContaining(["research", "backfill-validated-evidence-history", "."]),
+    });
+    expect(loop.stages.find((stage) => stage.id === "final_release_plan")?.command).toMatchObject({
+      args: expect.arrayContaining(["research", "generate-final-release-plan", "."]),
+    });
     expect(loop.stages.find((stage) => stage.id === "route")).toBeUndefined();
     expect(loop.stages.find((stage) => stage.id === "expand_research")).toBeUndefined();
     expect(loop.stages.find((stage) => stage.id === "revise")).toBeUndefined();
@@ -478,7 +486,8 @@ describe("compileModeToManifest", () => {
     });
     const expansion = workflow.tool_catalog?.find((action) => action.id === "targeted_research_expansion");
     expect(expansion?.command).toMatchObject({ args: expect.arrayContaining(["research", "expand", ".", "--action-plan", "reviews/action-plan.json"]) });
-    expect(expansion?.inputs).toEqual(expect.arrayContaining(["reviews/action-plan.json", "reviews/artifact-plan.json"]));
+    expect(expansion?.inputs).toEqual(expect.arrayContaining(["reviews/action-plan.json"]));
+    expect(expansion?.optional_inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
     const reopen = workflow.tool_catalog?.find((action) => action.id === "reopen_outline");
     expect(reopen?.outputs).toEqual(["outline.md", "outline.json", "feedback/outline-revision.md"]);
     expect(reopen?.requires_human_approval).toBe(false);
@@ -486,7 +495,15 @@ describe("compileModeToManifest", () => {
       args: expect.arrayContaining(["review", "validate-outline-reopen", "."]),
     });
     const revise = workflow.tool_catalog?.find((action) => action.id === "revise_sections");
-    expect(revise?.inputs).toEqual(expect.arrayContaining(["reviews/action-plan.json", "reviews/artifact-plan.json"]));
+    expect(revise?.inputs).toEqual(expect.arrayContaining(["reviews/action-plan.json"]));
+    expect(revise?.optional_inputs).toEqual(expect.arrayContaining(["reviews/artifact-plan.json"]));
+    expect(revise?.instructions).toEqual(expect.arrayContaining([
+      expect.stringContaining("Source markers are executable evidence links"),
+    ]));
+    expect(revise?.validator_commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ args: expect.arrayContaining(["evidence", "validate-ledger", "."]) }),
+    ]));
+    expect(revise?.retry).toMatchObject({ max_attempts: 2 });
     expect(workflow.tool_catalog?.find((action) => action.id === "revise_visual_plan")?.outputs).toEqual(["figures/placement-plan.json"]);
     expect(workflow.tool_catalog?.find((action) => action.id === "request_operator_clarification")).toMatchObject({
       requires_operator_response: true,
@@ -535,15 +552,13 @@ describe("compileModeToManifest", () => {
     expect(workflow.stages.find((s) => s.id === "recall")?.runtime).toBe("script");
     expect(workflow.stages.find((s) => s.id === "recall")?.model_tier).toBeUndefined();
 
-    const loop = workflow.stages.find((s) => s.id === "quality_loop") as { stages: Array<Record<string, unknown>> };
+    const loop = workflow.stages.find((s) => s.id === "improve") as { stages: Array<Record<string, unknown>> };
     expect(loop.stages.find((s) => s.id === "review")?.model_tier).toBe("reviewer");
-    // Static revise/route children are replaced by the agentic dispatch chain;
-    // its contract repair stays attached to the LLM plan as validator feedback.
+    // Static revise/route children are replaced by deterministic release
+    // planning and allowlisted targeted dispatch.
     expect(loop.stages.find((s) => s.id === "revise")).toBeUndefined();
     expect(loop.stages.find((s) => s.id === "route")).toBeUndefined();
-    expect(loop.stages.find((s) => s.id === "action_plan")?.validator_commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ args: expect.arrayContaining(["review", "repair-action-plan", "."]) }),
-    ]));
+    expect(loop.stages.find((s) => s.id === "final_release_plan")).toMatchObject({ runtime: "script" });
   });
 
   it("applies executor/reviewer tiers to longform foreach steps", async () => {
@@ -578,16 +593,20 @@ describe("compileModeToManifest", () => {
       projectId: "survey",
       topic: "Long-horizon agent memory",
       runtimeProfile,
+      executionDefaults: { model: "gpt-5.6-luna", model_reasoning_effort: "medium" },
       stageOverrides: {
-        outline: { model_tier: "reviewer", requires_human_approval: true },
+        outline: { model: "gpt-5.6-terra", model_reasoning_effort: "high", model_tier: "reviewer", requires_human_approval: true },
         draft_sections: { max_parallel: 3 },
       },
     });
     const stages = (manifest.workflow as { stages: Array<Record<string, unknown>> }).stages;
     expect(stages.find((stage) => stage.id === "outline")).toMatchObject({
-      model_tier: "reviewer", requires_human_approval: true,
+      model: "gpt-5.6-terra", model_reasoning_effort: "high", model_tier: "reviewer", requires_human_approval: true,
     });
     expect(stages.find((stage) => stage.id === "draft_sections")).toMatchObject({ max_parallel: 3 });
+    expect((manifest.workflow as { runtime_policy: Record<string, unknown> }).runtime_policy).toMatchObject({
+      model: "gpt-5.6-luna", model_reasoning_effort: "medium",
+    });
   });
 
   it("rejects unsafe or unknown durable stage overrides", async () => {

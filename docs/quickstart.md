@@ -63,8 +63,9 @@ repository.
 Use the dedicated runbook for the chosen template before creating a real run:
 
 - [Flagship runbook hub](./flagships/README.md)
-- [Long agentic survey](./flagships/long-agentic-survey.md)
-- [Repository survey](./flagships/repository-survey.md)
+- [Paper flagship presets](./flagships/paper-flagship-presets.md)
+- [Long survey](./flagships/long-agentic-survey.md)
+- [Long GitHub paper](./flagships/repository-survey.md)
 - [Nanochat agentic empirical paper](./flagships/nanochat-agentic-empirical-paper.md)
 - [Self-play autonomous empirical paper](./flagships/self-play-autonomous-empirical-paper.md)
 

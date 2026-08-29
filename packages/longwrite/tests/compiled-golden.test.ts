@@ -90,7 +90,7 @@ const SCENARIOS: Scenario[] = [
       projectName: "Fast Survey",
       topic: "Long-horizon agent memory",
       researchProvider: "seed",
-      researchPolicy: fromProfile("fast", { paperProfile: "literature_survey" }),
+      researchPolicy: fromProfile("fast", { paperProfile: "flagship_long_paper" }),
     },
   },
   {
@@ -103,7 +103,7 @@ const SCENARIOS: Scenario[] = [
       topic: "Agent orchestration frameworks",
       researchProvider: "seed",
       researchPolicy: fromProfile("standard", {
-        paperProfile: "repository_study",
+        paperProfile: "flagship_long_github_paper",
         codebases: [
           { id: "crewai", source: "https://github.com/crewAIInc/crewAI", ref: "b3aaaab", role: "primary_artifact" },
           { id: "autogen", source: "https://github.com/microsoft/autogen", ref: "HEAD", role: "supplementary_artifact" },
@@ -121,7 +121,7 @@ const SCENARIOS: Scenario[] = [
       topic: "Long-horizon agent memory",
       researchProvider: "seed",
       researchPolicy: fromProfile("deep", {
-        paperProfile: "literature_survey",
+        paperProfile: "flagship_long_paper",
         semanticScreenEnabled: true,
         outlineReviewEnabled: true,
         outlineReviewMaxRounds: 3,
@@ -143,7 +143,7 @@ const SCENARIOS: Scenario[] = [
       topic: "Long-horizon agent memory",
       researchProvider: "openalex",
       researchPolicy: fromProfile("deep", {
-        paperProfile: "literature_survey",
+        paperProfile: "flagship_long_paper",
         semanticScreenEnabled: true,
         outlineReviewEnabled: true,
         outlineReviewMaxRounds: 3,
@@ -161,7 +161,7 @@ const SCENARIOS: Scenario[] = [
       topic: "Hierarchical decomposition and action horizon",
       researchProvider: "seed",
       researchPolicy: fromProfile("standard", {
-        paperProfile: "literature_survey",
+        paperProfile: "flagship_long_paper",
         experiment: { enabled: true },
       }),
     },
@@ -176,7 +176,7 @@ const SCENARIOS: Scenario[] = [
       topic: "Hierarchical decomposition and action horizon",
       researchProvider: "seed",
       researchPolicy: fromProfile("standard", {
-        paperProfile: "literature_survey",
+        paperProfile: "flagship_long_paper",
         experiment: {
           enabled: true,
           manifestPath: "../experiment/results/experiment-manifest.json",

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 type LongWriteDashboardHost = {
@@ -48,6 +49,7 @@ type ProjectConfig = YamlRecord & {
   research?: YamlRecord;
   writing?: YamlRecord;
   review?: YamlRecord;
+  run_limits?: YamlRecord;
   execution?: YamlRecord;
 };
 
@@ -210,9 +212,12 @@ export type ResearchProjection = {
     projectTargetWords?: number;
     pdf: { status: "compiled" | "not_built"; warningCount: number };
   };
-  release: { gates: Array<{ id: string; status: "passed" | "failed" | "unknown"; detail?: string }>; ready: boolean };
+  release: { gates: Array<{ id: string; status: "passed" | "failed" | "pending" | "unknown"; detail?: string }>; ready: boolean };
   score: { review?: number; claimSupport?: number };
 };
+
+type ReleaseGateStatus = "passed" | "failed" | "pending" | "unknown";
+type ReleaseGateRecord = { id: string; pass: boolean; findings: string[] };
 
 function countBy(values: unknown, key: string): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -224,14 +229,70 @@ function countBy(values: unknown, key: string): Record<string, number> {
   return counts;
 }
 
-/** Gate status is read, never inferred: an absent report is "unknown", which is
- * deliberately not the same as "passed". */
-function gateStatus(record: YamlRecord | null, key: string): "passed" | "failed" | "unknown" {
-  if (!record) return "unknown";
-  const value = record[key] ?? asRecord(record.gates)[key];
-  if (value === true || value === "pass" || value === "passed") return "passed";
-  if (value === false || value === "fail" || value === "failed") return "failed";
-  return "unknown";
+/** The research validator writes its gates as an array, not as a keyed object.
+ * Normalize that contract once at the server boundary so the dashboard never
+ * reports a completed check as unknown merely because its JSON shape changed. */
+function releaseGateRecords(record: YamlRecord | null): Map<string, ReleaseGateRecord> {
+  const records = new Map<string, ReleaseGateRecord>();
+  if (!record || !Array.isArray(record.gates)) return records;
+  for (const value of record.gates) {
+    const gate = asRecord(value);
+    const id = asString(gate.id);
+    if (!id) continue;
+    const pass = gate.pass;
+    if (typeof pass !== "boolean") continue;
+    const findings = Array.isArray(gate.findings)
+      ? gate.findings.flatMap((finding) => typeof finding === "string" ? [finding] : [])
+      : [];
+    records.set(id, { id, pass, findings });
+  }
+  return records;
+}
+
+function summarizeGateFindings(checks: ReleaseGateRecord[]): string | undefined {
+  const findings = checks.flatMap((check) => check.findings.map((finding) => `${check.id}: ${finding}`));
+  if (findings.length === 0) return undefined;
+  const shown = findings.slice(0, 2).join(" ");
+  return findings.length > 2 ? `${findings.length} findings. ${shown} (+${findings.length - 2} more)` : shown;
+}
+
+/** A curated UI gate can be backed by more than one deterministic validator
+ * check. It passes only when every required check passed; an unmeasured check
+ * remains visibly pending rather than being silently treated as a pass. */
+function projectedGateStatus(records: Map<string, ReleaseGateRecord>, ids: string[], reportExists: boolean): {
+  status: ReleaseGateStatus;
+  detail?: string;
+} {
+  if (!reportExists) return { status: "unknown", detail: "Final release report has not been produced." };
+  const checks = ids.map((id) => records.get(id));
+  if (checks.some((check) => check === undefined)) {
+    const missing = ids.filter((id) => !records.has(id));
+    return { status: "pending", detail: `Awaiting: ${missing.join(", ")}` };
+  }
+  const complete = checks as ReleaseGateRecord[];
+  const failed = complete.filter((check) => !check.pass);
+  if (failed.length > 0) {
+    return {
+      status: "failed",
+      detail: summarizeGateFindings(failed) ?? `Failed: ${failed.map((check) => check.id).join(", ")}`,
+    };
+  }
+  return {
+    status: "passed",
+    detail: summarizeGateFindings(complete),
+  };
+}
+
+async function submissionPackageGateStatus(workspaceDir: string, config: YamlRecord | null): Promise<{ status: ReleaseGateStatus; detail?: string }> {
+  const target = asString(asRecord(config?.publication).target) ?? "arxiv";
+  const manifest = await readJsonIfExists(path.join(workspaceDir, "build", "submission", target, "longwrite-submission-manifest.json"));
+  if (!manifest) return { status: "pending", detail: "Packaging has not run." };
+  if (manifest.release_ready === true) return { status: "passed", detail: `Submission bundle prepared for ${target}.` };
+  if (manifest.release_ready === false) {
+    const reason = asString(manifest.reason) ?? "Packaging was declined because release gates did not pass.";
+    return { status: "failed", detail: reason };
+  }
+  return { status: "unknown", detail: "Submission manifest is missing release_ready." };
 }
 
 export async function buildResearchProjection(workspaceDir: string): Promise<ResearchProjection> {
@@ -309,7 +370,20 @@ export async function buildResearchProjection(workspaceDir: string): Promise<Res
   const warningCount = latexBuildReport?.match(/^\s*- warning:/gmi)?.length ?? 0;
   const configuredTargetWords = Number(asRecord(config?.writing).target_length_words) || undefined;
   const draftTargetWords = chapters.reduce((total, chapter) => total + (chapter.targetWords ?? 0), 0) || undefined;
-  const gateIds = ["corpus_gate_pass", "citation_verification", "evidence_audit", "claim_support", "figures", "latex", "visual_qa", "page_targets", "experiment_verification", "submission_package"];
+  const releaseRecords = releaseGateRecords(releaseGates);
+  const gateDefinitions: Array<{ id: string; reportIds?: string[] }> = [
+    { id: "corpus_gate_pass" },
+    { id: "citation_verification", reportIds: ["citation_verification"] },
+    { id: "evidence_audit", reportIds: ["evidence_coverage", "citation_evidence_ledger"] },
+    { id: "claim_support", reportIds: ["claim_support"] },
+    { id: "figures", reportIds: ["publication_figures"] },
+    { id: "latex", reportIds: ["publication_latex"] },
+    { id: "visual_qa", reportIds: ["rendered_visual_review"] },
+    { id: "page_targets", reportIds: ["target_length"] },
+    { id: "experiment_verification", reportIds: ["empirical_experiment"] },
+    { id: "submission_package" },
+  ];
+  const submissionPackage = await submissionPackageGateStatus(workspaceDir, config);
 
   return {
     phase,
@@ -328,10 +402,12 @@ export async function buildResearchProjection(workspaceDir: string): Promise<Res
       pdf: { status: pdfBuilt ? "compiled" : "not_built", warningCount },
     },
     release: {
-      gates: gateIds.map((id) => id === "corpus_gate_pass"
-        ? { id, status: corpusPassed ? "passed" as const : "failed" as const, detail: asString(corpusDetail?.detail) }
-        : { id, status: gateStatus(releaseGates, id) }),
-      ready: gateStatus(releaseGates, "final_release_gate_pass") === "passed",
+      gates: gateDefinitions.map(({ id, reportIds }) => {
+        if (id === "corpus_gate_pass") return { id, status: corpusPassed ? "passed" as const : "failed" as const, detail: asString(corpusDetail?.detail) };
+        if (id === "submission_package") return { id, ...submissionPackage };
+        return { id, ...projectedGateStatus(releaseRecords, reportIds ?? [], releaseGates !== null) };
+      }),
+      ready: releaseGates?.pass === true,
     },
     score: {
       review: metrics?.review_score === undefined ? undefined : Number(metrics.review_score),
@@ -782,7 +858,14 @@ async function recentLogs(host: LongWriteDashboardHost, workspaceDir: string): P
 }
 
 function longwriteBin(): string {
-  return process.env.MALACLAW_LONGWRITE_BIN ?? process.env.LONGWRITE_BIN ?? "longwrite";
+  // The dashboard is launched by `maliang writing dashboard`; LongWrite is
+  // commonly not installed as a global executable. Resolve the packaged CLI
+  // from this compiled extension so config edits work in a source checkout as
+  // well as in a published package. Environment overrides remain available
+  // for operators who intentionally use another LongWrite build.
+  return process.env.MALACLAW_LONGWRITE_BIN
+    ?? process.env.LONGWRITE_BIN
+    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../dist/cli.js");
 }
 
 function maliangBin(): string {
@@ -850,6 +933,25 @@ function runStatus(workspaceDir: string): RunRecord | null {
   return runRegistry.get(workspaceDir) ?? null;
 }
 
+/** `paused_blocker` also represents quota, permission, and provider failures.
+ * Expose the limit control only when the durable event says this particular
+ * pause was caused by the recorded-token guardrail. */
+async function isRecordedTokenLimitPause(workspaceDir: string, flow: YamlRecord): Promise<boolean> {
+  if (asString(flow.status) !== "paused_blocker") return false;
+  const raw = await readTextIfExists(path.join(workspaceDir, ".malaclaw", "flow", "events.jsonl"));
+  if (!raw) return false;
+  for (const line of raw.split("\n").reverse()) {
+    try {
+      const event = asRecord(JSON.parse(line));
+      if (asString(event.type) !== "run_limit_reached") continue;
+      return /max_recorded_tokens/.test(asString(event.reason) ?? "");
+    } catch {
+      // Ignore a partial trailing line while the scheduler is appending it.
+    }
+  }
+  return false;
+}
+
 export function dashboardRunInvocation(workspaceDir: string, parentWorkspace: string | null, opts: { runtime?: string; reset?: boolean }): {
   command: "maliang" | "longwrite";
   args: string[];
@@ -866,6 +968,35 @@ export function dashboardRunInvocation(workspaceDir: string, parentWorkspace: st
     command: "longwrite",
     args: ["run", workspaceDir, ...(opts.runtime ? ["--runtime", opts.runtime] : []), ...(opts.reset ? ["--reset"] : [])],
     cwd: workspaceDir,
+  };
+}
+
+/** Raise, never lower, the durable recorded-token guardrail. The dashboard
+ * uses this only after a `paused_blocker` state, so an accidental form submit
+ * cannot silently remove the operator's spend boundary. */
+export function increaseRecordedTokenLimit(
+  config: ProjectConfig,
+  maxRecordedTokens: number,
+  recordedTokens?: number,
+): ProjectConfig {
+  if (!Number.isSafeInteger(maxRecordedTokens) || maxRecordedTokens < 1) {
+    throw new Error("maxRecordedTokens must be a positive integer");
+  }
+  const currentLimits = asRecord(config.run_limits);
+  const previousLimit = asNumber(currentLimits.max_recorded_tokens);
+  if (previousLimit !== undefined && maxRecordedTokens <= previousLimit) {
+    throw new Error(`new token limit must be greater than the current ${previousLimit.toLocaleString("en-US")} limit`);
+  }
+  if (recordedTokens !== undefined && maxRecordedTokens <= recordedTokens) {
+    throw new Error(`new token limit must exceed the ${recordedTokens.toLocaleString("en-US")} tokens already recorded`);
+  }
+  return {
+    ...config,
+    run_limits: {
+      ...currentLimits,
+      max_recorded_tokens: maxRecordedTokens,
+      on_limit: "pause",
+    },
   };
 }
 
@@ -961,6 +1092,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
       usage = null;
       logs = [];
     }
+    const flowRecord = asRecord(flow);
 
     return {
       dir: workspaceDir,
@@ -1025,6 +1157,7 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
         stages,
       },
       flow,
+      tokenLimitPaused: await isRecordedTokenLimitPause(workspaceDir, flowRecord),
       usage,
       logs,
       evidence: await evidenceSummary(workspaceDir),
@@ -1271,6 +1404,46 @@ export function createLongWriteDashboardRoutes(host: LongWriteDashboardHost) {
       await fs.writeFile(target, stringifyYaml(config), "utf-8");
       const result = await runLongWrite(["sync", workspaceDir], workspaceDir);
       return { ok: true, path: "longwrite.yaml", synced: ["project_brief.md", "malaclaw.yaml"], ...result };
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // A paused token guardrail is an explicit operator decision point. This
+  // endpoint makes the smallest possible durable change, regenerates the
+  // manifest, and launches the preserved flow without a reset.
+  app.post("/api/longwrite/run-limits/increase-and-run", async (req, reply) => {
+    const body = (req.body ?? {}) as { dir?: string; maxRecordedTokens?: unknown; confirmed?: boolean };
+    const { workspaceDir, parentWorkspace } = await resolveWritingWorkspace(body.dir);
+    if (body.confirmed !== true) {
+      return reply.status(400).send({ error: "Increasing a run limit and continuing requires confirmed: true" });
+    }
+    if (typeof body.maxRecordedTokens !== "number" || !Number.isSafeInteger(body.maxRecordedTokens) || body.maxRecordedTokens < 1) {
+      return reply.status(400).send({ error: "maxRecordedTokens must be a positive integer" });
+    }
+    try {
+      const flow = asRecord(await host.loadFlowState(workspaceDir));
+      if (!(await isRecordedTokenLimitPause(workspaceDir, flow))) {
+        return reply.status(409).send({ error: "The token-limit continuation control is available only after max_recorded_tokens paused this flow" });
+      }
+      const telemetry = asRecord(flow.telemetry);
+      const recordedTokens = asNumber(telemetry.recordedTokens);
+      const configPath = path.join(workspaceDir, "longwrite.yaml");
+      const current = await readYamlIfExists(configPath);
+      if (!current) return reply.status(404).send({ error: "longwrite.yaml not found" });
+      const next = increaseRecordedTokenLimit(current, body.maxRecordedTokens, recordedTokens);
+      await validateProjectConfig(next);
+      await fs.writeFile(configPath, stringifyYaml(next), "utf-8");
+      await runLongWrite(["sync", workspaceDir], workspaceDir);
+      const operation = await spawnLongWriteRun(workspaceDir, parentWorkspace, {});
+      return {
+        ok: true,
+        path: "longwrite.yaml",
+        maxRecordedTokens: body.maxRecordedTokens,
+        recordedTokens,
+        synced: ["project_brief.md", "malaclaw.yaml"],
+        operation,
+      };
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

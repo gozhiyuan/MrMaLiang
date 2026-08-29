@@ -69,6 +69,32 @@ const SourceEvidenceClaim = z.object({
   limitations: z.array(z.string().min(4).max(500)).max(8).default([]),
 }).strict();
 
+/** Exact-string provenance is necessary but not sufficient for claim evidence:
+ * provider landing pages often contain only a title, author list, DOI, and a
+ * "View PDF" link. Those strings are real excerpts but cannot entail a
+ * substantive manuscript claim. Keep this deterministic boundary narrow and
+ * auditable; semantic entailment remains the claim judge's responsibility. */
+export function isClaimBearingEvidenceExcerpt(excerpt: string, sourceTitle = ""): boolean {
+  const compact = excerpt.replace(/\s+/g, " ").trim();
+  if (compact.split(" ").length < 4) return false;
+  const metadataSignals = [
+    /\bsubmitted on\b/i, /\btitle\s*:/i, /\bauthors?\s*:/i,
+    /\bview (?:a )?pdf\b/i, /\bjournal homepage\b/i, /\bissn\b/i,
+  ].filter((pattern) => pattern.test(compact)).length;
+  if (metadataSignals >= 2 || /\bsubmitted on\b.*\bview (?:a )?pdf\b/i.test(compact)) return false;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+  const normalizedTitle = normalize(sourceTitle);
+  const normalizedExcerpt = normalize(compact);
+  if (normalizedTitle && normalizedExcerpt.startsWith(normalizedTitle)) {
+    const remainder = normalizedExcerpt.slice(normalizedTitle.length).trim().split(" ").filter(Boolean);
+    // A title followed only by a short author list is bibliographic metadata,
+    // not a source claim. Real abstract prose easily exceeds this boundary or
+    // includes sentence punctuation after the title block.
+    if (remainder.length <= 24 && !/[.!?]/.test(compact)) return false;
+  }
+  return true;
+}
+
 const SourceEvidencePacket = z.object({
   source_id: z.string().min(1),
   recommended_depth: z.enum(["A", "B", "C"]),
@@ -80,6 +106,46 @@ export const SourceEvidencePackets = z.object({
   packets: z.array(SourceEvidencePacket).max(100),
 }).strict();
 export type SourceEvidencePackets = z.infer<typeof SourceEvidencePackets>;
+
+/**
+ * Agents commonly express a paragraph/page locator as a small object and a
+ * single limitation as a string. Both retain the same information but do not
+ * match the durable packet schema. Normalize only these lossless variants
+ * before exact-excerpt validation; unsupported claims and malformed packets
+ * still fail closed below.
+ */
+function normalizeSourceEvidencePacketShape(value: unknown): { value: unknown; normalized: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { value, normalized: false };
+  const root = value as Record<string, unknown>;
+  if (!Array.isArray(root.packets)) return { value, normalized: false };
+  let normalized = false;
+  const packets = root.packets.map((packet) => {
+    if (!packet || typeof packet !== "object" || Array.isArray(packet)) return packet;
+    const packetRecord = packet as Record<string, unknown>;
+    if (!Array.isArray(packetRecord.claims)) return packet;
+    const claims = packetRecord.claims.map((claim) => {
+      if (!claim || typeof claim !== "object" || Array.isArray(claim)) return claim;
+      const claimRecord = claim as Record<string, unknown>;
+      const next = { ...claimRecord };
+      if (next.locator && typeof next.locator === "object" && !Array.isArray(next.locator)) {
+        const parts = Object.entries(next.locator as Record<string, unknown>)
+          .filter(([, entry]) => typeof entry === "string" || typeof entry === "number")
+          .map(([key, entry]) => `${key}: ${entry}`);
+        if (parts.length > 0) {
+          next.locator = parts.join("; ");
+          normalized = true;
+        }
+      }
+      if (typeof next.limitations === "string") {
+        next.limitations = [next.limitations];
+        normalized = true;
+      }
+      return next;
+    });
+    return { ...packetRecord, claims };
+  });
+  return { value: normalized ? { ...root, packets } : value, normalized };
+}
 
 const ValidatedSourceEvidenceHistory = z.object({
   version: z.literal(1),
@@ -99,11 +165,12 @@ async function loadValidatedEvidenceHistory(workspaceDir: string): Promise<Valid
   }
 }
 
-/** Restore a cumulative evidence record for workspaces created before the
- * history artifact existed. A MalaClaw checkpoint is written only after its
- * unit succeeds, so completed source-evidence extraction checkpoints are a
- * safe provenance source. The closest preceding semantic-screen checkpoint in
- * the same recovery round supplies the paired judgment. */
+/** Restore cumulative validated evidence from completed workflow units. A
+ * MalaClaw checkpoint exists only after its unit succeeds, so it is a safe
+ * provenance source. This deliberately recognizes every agentic recovery
+ * namespace (initial corpus recovery, manuscript-quality loops, and final
+ * release recovery): an incremental expansion must never discard previously
+ * validated evidence merely because its current batch is small. */
 export async function backfillValidatedEvidenceHistory(workspaceDir: string): Promise<{ recovered: number; total: number; reportPath: string }> {
   const root = path.join(workspaceDir, ".malaclaw", "flow", "checkpoints");
   const reportPath = "reports/validated-evidence-history-backfill.md";
@@ -114,16 +181,27 @@ export async function backfillValidatedEvidenceHistory(workspaceDir: string): Pr
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("No flow checkpoints are available to backfill validated evidence history.");
     throw error;
   }
-  const packetFiles = names.filter((name) => name.endsWith("-corpus_recovery_source_evidence_extract/evidence/source-packets.json")).sort();
-  const screenFiles = names.filter((name) => name.endsWith("-corpus_recovery_semantic_screen/sources/semantic-screening.json")).sort();
-  const roundOf = (name: string) => name.match(/-corpus_evidence_recovery_loop-r(\d+)-corpus_recovery_/)?.[1];
+  const packetSuffixes = ["quality_source_evidence_extract", "corpus_recovery_source_evidence_extract"];
+  const screenSuffixes = ["quality_semantic_screen", "corpus_recovery_semantic_screen"];
+  const stageScope = (name: string, suffixes: string[]): string | undefined => {
+    for (const suffix of suffixes) {
+      const marker = `-${suffix}/`;
+      const index = name.indexOf(marker);
+      if (index >= 0) return name.slice(24, index);
+    }
+    return undefined;
+  };
+  const packetFiles = names.filter((name) => name.endsWith("/evidence/source-packets.json") && Boolean(stageScope(name, packetSuffixes))).sort();
+  const screenFiles = names.filter((name) => name.endsWith("/sources/semantic-screening.json") && Boolean(stageScope(name, screenSuffixes))).sort();
   const checkpointTime = (name: string) => name.slice(0, 24);
   const history = await loadValidatedEvidenceHistory(workspaceDir);
   const merged = new Map(history.entries.map((entry) => [entry.packet.source_id, entry]));
   let recovered = 0;
   for (const packetFile of packetFiles) {
-    const round = roundOf(packetFile);
-    const screenFile = screenFiles.filter((candidate) => roundOf(candidate) === round && checkpointTime(candidate) <= checkpointTime(packetFile)).at(-1);
+    const scope = stageScope(packetFile, packetSuffixes);
+    const screenFile = screenFiles
+      .filter((candidate) => stageScope(candidate, screenSuffixes) === scope && checkpointTime(candidate) <= checkpointTime(packetFile))
+      .at(-1);
     if (!screenFile) continue;
     const [packets, screen] = await Promise.all([
       fs.readFile(path.join(root, packetFile), "utf-8").then((value) => SourceEvidencePackets.parse(JSON.parse(value))),
@@ -148,7 +226,7 @@ export async function backfillValidatedEvidenceHistory(workspaceDir: string): Pr
     `- Completed extraction checkpoints inspected: ${packetFiles.length}`,
     `- Packet records recovered: ${recovered}`,
     `- Cumulative validated packets: ${artifact.entries.length}`,
-    "- Provenance: completed MalaClaw source-evidence extraction checkpoints paired with the preceding semantic screen in the same recovery round.", "",
+    "- Provenance: completed source-evidence extraction checkpoints paired with the preceding semantic screen in the same workflow recovery scope.", "",
   ].join("\n"), "utf-8");
   return { recovered, total: artifact.entries.length, reportPath };
 }
@@ -338,18 +416,24 @@ export async function repairSourceEvidencePackets(workspaceDir: string): Promise
   const target = path.join(workspaceDir, SOURCE_EVIDENCE_PATH);
   const reportPath = path.join(workspaceDir, "reports", "source-evidence-repair.md");
   const raw = await fs.readFile(target, "utf-8");
-  const { content, normalized } = unwrapFence(raw);
+  const { content, normalized: fenceNormalized } = unwrapFence(raw);
+  let normalized = fenceNormalized;
   try {
+    const parsed = normalizeSourceEvidencePacketShape(JSON.parse(content));
+    normalized ||= parsed.normalized;
     const [packets, candidatesRaw, config] = await Promise.all([
-      Promise.resolve(SourceEvidencePackets.parse(JSON.parse(content))),
-      fs.readFile(path.join(workspaceDir, SOURCE_EVIDENCE_CANDIDATES_PATH), "utf-8").then((value) => JSON.parse(value) as { candidates?: Array<{ id?: string; fulltext_path?: string }> }),
+      Promise.resolve(SourceEvidencePackets.parse(parsed.value)),
+      fs.readFile(path.join(workspaceDir, SOURCE_EVIDENCE_CANDIDATES_PATH), "utf-8").then((value) => JSON.parse(value) as { candidates?: Array<{ id?: string; title?: string; fulltext_path?: string }> }),
       loadProjectConfig(workspaceDir),
     ]);
-    const candidates = new Map((candidatesRaw.candidates ?? []).flatMap((candidate) => candidate.id && candidate.fulltext_path ? [[candidate.id, candidate.fulltext_path] as const] : []));
+    const candidates = new Map((candidatesRaw.candidates ?? []).flatMap((candidate) => candidate.id && candidate.fulltext_path
+      ? [[candidate.id, { path: candidate.fulltext_path, title: candidate.title ?? "" }] as const]
+      : []));
     const seen = new Set<string>();
     for (const packet of packets.packets) {
-      const rel = candidates.get(packet.source_id);
-      if (!rel) throw new Error(`packet names source without approved ingested full text: ${packet.source_id}`);
+      const candidate = candidates.get(packet.source_id);
+      if (!candidate) throw new Error(`packet names source without approved ingested full text: ${packet.source_id}`);
+      const rel = candidate.path;
       if (seen.has(packet.source_id)) throw new Error(`duplicate evidence packet for source ${packet.source_id}`);
       seen.add(packet.source_id);
       const fulltext = normalize(await fs.readFile(path.join(workspaceDir, rel), "utf-8"));
@@ -361,6 +445,9 @@ export async function repairSourceEvidencePackets(workspaceDir: string): Promise
         }
         if (!fulltext.includes(excerpt)) {
           throw new Error(`packet ${packet.source_id} excerpt is not found in ${rel}; copy an exact contiguous excerpt without paraphrasing`);
+        }
+        if (!isClaimBearingEvidenceExcerpt(claim.supporting_excerpt, candidate.title)) {
+          throw new Error(`packet ${packet.source_id} excerpt is bibliographic/provider metadata rather than claim-bearing evidence; select substantive source prose from ${rel}`);
         }
       }
       const minimum = packet.recommended_depth === "A" ? config.research.semantic_screen.min_supported_claims_for_a : config.research.semantic_screen.min_supported_claims_for_b;

@@ -10,10 +10,35 @@ import { writeNovelStage } from "./writing/novel.js";
 import { writeTechnicalBookStage } from "./writing/technical-book.js";
 import { requireSupportedNode } from "./node-runtime.js";
 import { loadRuntimeProfileIfSelected } from "./runtime-profiles.js";
-import { researchWorkflowProfile, researchWorkflowProfileDef, type ResearchWorkflowProfile } from "./research/workflow-profiles.js";
+import { researchWorkflowProfile, type ResearchWorkflowProfile } from "./research/workflow-profiles.js";
 import { ensureWorkspaceEnvFiles } from "./workspace-env.js";
 import { paperProfile, type PaperProfileId } from "./paper-profiles.js";
 import { DEFAULT_GITHUB_CODEBASE_DISCOVERY, type CodebaseConfig, type GithubCodebaseDiscoveryConfig } from "./research/codebase-contract.js";
+
+/**
+ * The flagship workflow uses a lower-cost default for execution work and a
+ * stronger model only where planning or review quality controls the next
+ * branch of work. Keep this in the scaffold, rather than a mutable user-level
+ * Codex config, so every new flagship run is reproducible.
+ */
+const FLAGSHIP_EXECUTION_CONFIG = {
+  default_model: "gpt-5.6-luna",
+  default_model_reasoning_effort: "medium",
+  stage_overrides: {
+    search_planner: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    outline: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    outline_initial_review: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    "outline_quality_loop.outline_revise": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    "outline_quality_loop.outline_recheck_review": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    initial_artifact_plan: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    visual_plan: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    visual_review: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    baseline_review: { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    "improve.claim_judge": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    "improve.visual_review": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+    "improve.review": { model: "gpt-5.6-terra", model_reasoning_effort: "high" },
+  },
+};
 
 export type ScaffoldOptions = {
   mode: LongWriteModeDef;
@@ -125,7 +150,6 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
   const workflowProfile = opts.researchWorkflowProfile
     ? researchWorkflowProfile(opts.researchWorkflowProfile)
     : (isResearchMode ? selectedPaperProfile.defaultWorkflowProfile : mode.default_workflow_profile ?? "standard");
-  const profileDefaults = researchWorkflowProfileDef(workflowProfile);
   // The initial Malaclaw manifest and longwrite.yaml must name the same
   // provider. A standard repository-study still needs live research, even
   // though its workflow budget is smaller than a deep literature survey.
@@ -136,8 +160,8 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
     ? "llm_sections"
     : "scaffold_then_revise";
   const writingStrategy = opts.researchWritingStrategy ?? defaultWritingStrategy;
-  const defaultResearchCandidates = isResearchMode ? profileDefaults.targetCandidates : 100;
-  const defaultResearchQueryBudget = isResearchMode ? profileDefaults.queryBudget : 24;
+  const defaultResearchCandidates = isResearchMode ? selectedPaperProfile.researchBudget.targetCandidates : 100;
+  const defaultResearchQueryBudget = isResearchMode ? selectedPaperProfile.researchBudget.queryBudget : 24;
   const requireLiveUrls = isResearchMode;
   const runtimeProfile = await loadRuntimeProfileIfSelected(opts.runtimeProfile);
   const manifestPath = path.join(targetDir, "malaclaw.yaml");
@@ -171,7 +195,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
     ...(opts.genre ? [`- Genre: ${opts.genre}`] : []),
     ...(opts.audience ? [`- Audience: ${opts.audience}`] : []),
     ...(targetLengthWords ? [`- Target length: about ${targetLengthWords} words total.`] : []),
-    ...(mode.artifact_type === "research_paper" ? [`- Research paper kind: ${opts.researchPaperKind ?? "survey"}; paper profile: ${opts.researchPaperProfile ?? "literature_survey"}.`] : []),
+    ...(mode.artifact_type === "research_paper" ? [`- Research paper kind: ${opts.researchPaperKind ?? "survey"}; paper profile: ${opts.researchPaperProfile ?? "flagship_long_paper"}.`] : []),
     ...(mode.artifact_type === "research_paper" ? [`- Publication target: ${opts.publication?.target ?? "arxiv"}${opts.publication?.anonymous ? " (anonymous)" : ""}.`] : []),
     ...(opts.publication?.requiredSections?.length ? [`- Required submission sections: ${opts.publication.requiredSections.join(", ")}.`] : []),
     `- Research target: ${opts.researchTargetCandidates ?? defaultResearchCandidates} candidates across up to ${opts.researchQueryBudget ?? defaultResearchQueryBudget} queries.`,
@@ -207,7 +231,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
     research: {
       provider: researchProvider,
       paper_kind: opts.researchPaperKind ?? "survey",
-      paper_profile: opts.researchPaperProfile ?? "literature_survey",
+      paper_profile: opts.researchPaperProfile ?? "flagship_long_paper",
       workflow_profile: workflowProfile,
       ...(opts.topic ? { topic: opts.topic } : {}),
       target_candidates: opts.researchTargetCandidates ?? defaultResearchCandidates,
@@ -222,17 +246,19 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       experiment: opts.researchPaperKind === "empirical"
         ? { enabled: true, results_path: "experiments/results.json", min_trials: 3 }
         : { enabled: false, results_path: "experiments/results.json", min_trials: 3 },
-      fulltext: { max_core_sources: isResearchMode ? profileDefaults.fulltextMaxSources : 40, allow_pdf_download: true },
+      fulltext: { max_core_sources: isResearchMode ? selectedPaperProfile.researchBudget.fulltextMaxSources : 40, allow_pdf_download: true },
       // Scaled by paper profile rather than fixed: this cap is the ceiling on
       // how deep a manuscript's evidence can go, so it has to track the length
       // the profile is aiming for.
       semantic_screen: mode.id === "auto_research_agentic"
         ? { enabled: true, max_candidates: selectedPaperProfile.evidenceBudget.maxCandidates, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: selectedPaperProfile.evidenceBudget.maxEvidenceSources, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }
         : { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 },
+      expansion: { max_queries_per_run: 6, target_candidates: 120, provider_timeout_seconds: 20 },
+      quality_control: { max_improvement_rounds: 3 },
       outline_review: mode.id === "auto_research_agentic"
         ? { enabled: true, max_rounds: 2, approval_mode: "auto" }
         : { enabled: false, max_rounds: 2, approval_mode: "auto" },
-      verification: { max_sources: workflowProfile === "deep" ? 100 : 30 },
+      verification: { max_sources: isResearchMode ? selectedPaperProfile.researchBudget.verificationMaxSources : 30 },
       corpus_gates: mode.id === "auto_research_agentic"
         ? selectedPaperProfile.corpusGates
         : { min_candidates: 40, min_sources_per_taxonomy_cell: 1, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1 },
@@ -288,7 +314,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       backends: { nanobanana: { enabled: false, budget_usd: 2.0, requires_approval: true } },
     },
     ...(opts.runLimits ? { run_limits: opts.runLimits } : {}),
-    execution: { stage_overrides: {} },
+    execution: isResearchMode ? FLAGSHIP_EXECUTION_CONFIG : { stage_overrides: {} },
     review: {
       cadence: opts.reviewCadence ?? "manual",
       time: opts.reviewTime ?? "08:00",
@@ -312,7 +338,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       targetCandidates: opts.researchTargetCandidates ?? defaultResearchCandidates,
       queryBudget: opts.researchQueryBudget ?? defaultResearchQueryBudget,
       taxonomy: opts.taxonomy ?? [],
-      paperProfile: opts.researchPaperProfile ?? "literature_survey",
+      paperProfile: opts.researchPaperProfile ?? "flagship_long_paper",
       codebases: opts.codebases ?? [],
       codebaseDiscovery: {
         enabled: opts.codebaseDiscovery?.enabled ?? false,
@@ -324,13 +350,14 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         includeArchived: opts.codebaseDiscovery?.include_archived ?? false,
         languages: opts.codebaseDiscovery?.languages ?? [],
       },
-      fulltextMaxSources: isResearchMode ? profileDefaults.fulltextMaxSources : 40,
+      fulltextMaxSources: isResearchMode ? selectedPaperProfile.researchBudget.fulltextMaxSources : 40,
       allowPdfDownload: true,
       semanticScreenEnabled: mode.id === "auto_research_agentic",
       outlineReviewEnabled: mode.id === "auto_research_agentic",
       outlineReviewMaxRounds: 2,
       outlineApprovalMode: "auto",
-      verificationMaxSources: workflowProfile === "deep" ? 100 : 30,
+      improvementMaxRounds: 3,
+      verificationMaxSources: isResearchMode ? selectedPaperProfile.researchBudget.verificationMaxSources : 30,
       writingStrategy,
       experiment: {
         enabled: opts.researchPaperKind === "empirical",

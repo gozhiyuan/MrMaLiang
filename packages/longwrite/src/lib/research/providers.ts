@@ -13,6 +13,21 @@ export type ResearchProvider = {
   search(topic: string, limit: number): Promise<RawSource[]>;
 };
 
+export type ProviderProgress = {
+  provider: ResearchProviderId;
+  topic: string;
+  outcome: "succeeded" | "failed";
+  sources?: number;
+  error?: string;
+};
+
+export type ProviderOptions = {
+  /** Per-provider request deadline. Individual providers receive this as an
+   * AbortSignal timeout; the multi adapter also records every settlement. */
+  timeoutMs?: number;
+  onProgress?: (progress: ProviderProgress) => void;
+};
+
 export const seedProvider: ResearchProvider = {
   id: "seed",
   async search(topic, limit) {
@@ -33,11 +48,20 @@ export function multiProvider(
     new DblpProvider(),
     new CrossrefProvider(),
   ],
+  onProgress?: ProviderOptions["onProgress"],
 ): ResearchProvider {
   return {
     id: "multi",
     async search(topic, limit) {
       const settled = await Promise.allSettled(providers.map((p) => p.search(topic, limit)));
+      settled.forEach((result, i) => {
+        const provider = providers[i]!;
+        if (result.status === "fulfilled") {
+          onProgress?.({ provider: provider.id, topic, outcome: "succeeded", sources: result.value.length });
+        } else {
+          onProgress?.({ provider: provider.id, topic, outcome: "failed", error: String(result.reason) });
+        }
+      });
       const sources = settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
       if (sources.length === 0) {
         const reasons = settled
@@ -51,13 +75,20 @@ export function multiProvider(
   };
 }
 
-export function providerById(id: ResearchProviderId): ResearchProvider {
+export function providerById(id: ResearchProviderId, options: ProviderOptions = {}): ResearchProvider {
+  const timeoutMs = options.timeoutMs;
   if (id === "seed") return seedProvider;
-  if (id === "arxiv") return new ArxivProvider();
-  if (id === "semantic_scholar") return new SemanticScholarProvider();
-  if (id === "dblp") return new DblpProvider();
-  if (id === "crossref") return new CrossrefProvider();
-  if (id === "openalex") return new OpenAlexProvider();
-  if (id === "multi") return multiProvider();
+  if (id === "arxiv") return new ArxivProvider(fetch, timeoutMs);
+  if (id === "semantic_scholar") return new SemanticScholarProvider(fetch, timeoutMs);
+  if (id === "dblp") return new DblpProvider(fetch, timeoutMs);
+  if (id === "crossref") return new CrossrefProvider(fetch, timeoutMs);
+  if (id === "openalex") return new OpenAlexProvider(fetch, timeoutMs);
+  if (id === "multi") return multiProvider([
+    new ArxivProvider(fetch, timeoutMs),
+    new SemanticScholarProvider(fetch, timeoutMs),
+    new OpenAlexProvider(fetch, timeoutMs),
+    new DblpProvider(fetch, timeoutMs),
+    new CrossrefProvider(fetch, timeoutMs),
+  ], options.onProgress);
   throw new Error(`Provider "${id}" is not registered`);
 }

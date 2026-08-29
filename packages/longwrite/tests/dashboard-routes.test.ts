@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { browseWorkspaceFolders, buildResearchProjection, dashboardRunInvocation, detachedDashboardRunOptions, evidenceProgramFingerprint, resolveWritingWorkspace, updateManifestStage } from "../dashboard-extension/server/routes.js";
+import { browseWorkspaceFolders, buildResearchProjection, dashboardRunInvocation, detachedDashboardRunOptions, evidenceProgramFingerprint, increaseRecordedTokenLimit, resolveWritingWorkspace, updateManifestStage } from "../dashboard-extension/server/routes.js";
 
 const temporaryDirs: string[] = [];
 
@@ -83,6 +83,35 @@ describe("MrMaLiang dashboard workspace selection", () => {
     });
   });
 
+  it("reads array-shaped release gates and keeps unrun packaging visibly pending", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "maliang-dashboard-release-gates-"));
+    temporaryDirs.push(root);
+    await fs.mkdir(path.join(root, "reports"), { recursive: true });
+    await fs.writeFile(path.join(root, "reports", "release-gates.json"), JSON.stringify({
+      version: 1,
+      pass: false,
+      gates: [
+        { id: "citation_verification", pass: true, findings: [] },
+        { id: "evidence_coverage", pass: true, findings: [] },
+        { id: "citation_evidence_ledger", pass: false, findings: ["section-1 has an ungrounded citation"] },
+        { id: "claim_support", pass: true, findings: [] },
+        { id: "publication_figures", pass: true, findings: [] },
+        { id: "publication_latex", pass: true, findings: [] },
+        { id: "rendered_visual_review", pass: false, findings: ["page 3 labels are too small"] },
+        { id: "target_length", pass: true, findings: [] },
+        { id: "empirical_experiment", pass: true, findings: ["survey paper: not applicable"] },
+      ],
+    }), "utf-8");
+
+    const projection = await buildResearchProjection(root);
+    const status = (id: string) => projection.release.gates.find((gate) => gate.id === id);
+    expect(status("citation_verification")).toMatchObject({ status: "passed" });
+    expect(status("evidence_audit")).toMatchObject({ status: "failed", detail: expect.stringContaining("ungrounded citation") });
+    expect(status("visual_qa")).toMatchObject({ status: "failed", detail: expect.stringContaining("labels are too small") });
+    expect(status("submission_package")).toMatchObject({ status: "pending" });
+    expect(projection.release.ready).toBe(false);
+  });
+
   it("opens a public parent workspace by resolving its writing component", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "maliang-dashboard-"));
     temporaryDirs.push(root);
@@ -135,6 +164,20 @@ describe("MrMaLiang dashboard workspace selection", () => {
 });
 
 describe("MrMaLiang dashboard run invocation", () => {
+  it("raises a paused run's token limit without removing other guardrails", () => {
+    expect(increaseRecordedTokenLimit({
+      run_limits: { max_recorded_tokens: 13_000_000, max_unit_minutes: 30, on_limit: "pause" },
+    }, 18_000_000, 13_121_534)).toMatchObject({
+      run_limits: { max_recorded_tokens: 18_000_000, max_unit_minutes: 30, on_limit: "pause" },
+    });
+  });
+
+  it("refuses a non-increase or a cap below recorded usage", () => {
+    const config = { run_limits: { max_recorded_tokens: 13_000_000 } };
+    expect(() => increaseRecordedTokenLimit(config, 13_000_000, 12_000_000)).toThrow(/greater than the current/);
+    expect(() => increaseRecordedTokenLimit(config, 14_000_000, 14_000_000)).toThrow(/must exceed/);
+  });
+
   it("detaches dashboard-started runs and writes their output to durable file descriptors", () => {
     expect(detachedDashboardRunOptions("/workspace", 42)).toEqual({
       cwd: "/workspace",

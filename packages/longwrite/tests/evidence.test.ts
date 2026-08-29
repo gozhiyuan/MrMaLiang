@@ -104,6 +104,18 @@ describe.skipIf(!nodeAtLeast22())("workspace evidence corpus", () => {
     expect(packet.chunks[0].source_id).toMatch(/paper-[ab]/);
   });
 
+  it("keeps explicit outline source allocations and gives every selected source a locator", async () => {
+    const ws = await workspace();
+    await buildEvidenceIndex(ws);
+    await fs.writeFile(path.join(ws, "outline.json"), JSON.stringify({
+      sections: [{ id: "section-1", title: "Section 1", keywords: [], source_ids: ["paper-b", "paper-a"] }],
+    }), "utf-8");
+    await allocateSectionEvidence(ws);
+    const packet = JSON.parse(await fs.readFile(path.join(ws, "evidence", "section-section-1.json"), "utf-8"));
+    expect(packet.source_ids.slice(0, 2)).toEqual(["paper-b", "paper-a"]);
+    expect(packet.chunks.map((chunk: { source_id: string }) => chunk.source_id)).toEqual(expect.arrayContaining(["paper-a", "paper-b"]));
+  });
+
   it("writes a concise evidence audit for generic or unsupported citations", async () => {
     const ws = await workspace();
     await buildEvidenceIndex(ws);
@@ -116,6 +128,19 @@ describe.skipIf(!nodeAtLeast22())("workspace evidence corpus", () => {
     expect(audit.metadataLinked).toBe(1);
     await expect(fs.readFile(path.join(ws, "reports", "evidence-audit.md"), "utf-8"))
       .resolves.toContain("exact chunk id");
+  });
+
+  it("fails the ledger when a non-empty chapter lost every citation marker", async () => {
+    const ws = await workspace();
+    await buildEvidenceIndex(ws);
+    await allocateSectionEvidence(ws, ["planning"]);
+    await fs.mkdir(path.join(ws, "chapters"), { recursive: true });
+    await fs.writeFile(path.join(ws, "chapters", "section-1.md"), "A factual paragraph without a source marker.\n", "utf-8");
+    await consolidateCitationLedger(ws);
+    await expect(validateEvidenceLedger(ws)).resolves.toMatchObject({
+      pass: false,
+      findings: expect.arrayContaining([expect.stringContaining("section-1.md has no evidence-backed")]),
+    });
   });
 
   it("measures taxonomy coverage by meaningful label terms rather than exact phrases", async () => {

@@ -131,7 +131,7 @@ export async function runInit(targetDir: string, opts: InitCommandOptions): Prom
   if (!researchPaperKinds.has(researchPaperKind)) {
     throw new Error("--research-paper-kind must be survey or empirical");
   }
-  const researchPaperProfile = opts.researchPaperProfile ?? "literature_survey";
+  const researchPaperProfile = opts.researchPaperProfile ?? "flagship_long_paper";
   if (!researchPaperProfiles.has(researchPaperProfile)) {
     throw new Error(`--research-paper-profile must be one of: ${PAPER_PROFILE_IDS.join(", ")}`);
   }
@@ -141,7 +141,9 @@ export async function runInit(targetDir: string, opts: InitCommandOptions): Prom
   if (profile.requiresCodebase && codebases.length === 0 && !discoveryEnabled) {
     throw new Error(`--research-paper-profile ${profile.id} requires at least one --repository or --discover-repositories`);
   }
-  if (discoveryEnabled && researchPaperProfile !== "repository_study") throw new Error("--discover-repositories requires --research-paper-profile repository_study");
+  if (discoveryEnabled && !profile.requiresCodebase) {
+    throw new Error(`--discover-repositories requires a GitHub paper profile; received ${profile.id}`);
+  }
   const codebaseDiscovery: GithubCodebaseDiscoveryConfig = {
     ...DEFAULT_GITHUB_CODEBASE_DISCOVERY,
     enabled: discoveryEnabled,

@@ -203,7 +203,7 @@ describe("maliang command surface", () => {
     expect(manifest).toContain("LONGEXPERIMENT_REMOTE_PHASE='candidate_smoke'");
     expect(experiment.outputs.longwrite_workspace).toBe("../writing");
     const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;
-    expect(writing.research).toMatchObject({ paper_kind: "empirical", paper_profile: "literature_survey" });
+    expect(writing.research).toMatchObject({ paper_kind: "empirical", paper_profile: "flagship_long_paper" });
   });
 
   it("materializes a prescribed integrated paper without pretending its runner is configured", async () => {
@@ -233,7 +233,7 @@ describe("maliang command surface", () => {
     expect(project.research).toEqual({ paperKind: "survey", evidenceProfile: "repository", experimentSource: "none" });
     expect(project.components.experiment).toBeUndefined();
     const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;
-    expect(writing.research.paper_profile).toBe("repository_study");
+    expect(writing.research.paper_profile).toBe("flagship_long_github_paper");
     expect(writing.writing.reference_links).toContain("https://example.org/original-paper");
   });
 
@@ -249,10 +249,25 @@ describe("maliang command surface", () => {
     expect(project.research).toEqual({ paperKind: "survey", evidenceProfile: "repository", experimentSource: "none" });
     const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;
     expect(writing.research).toMatchObject({
-      paper_profile: "repository_study", codebases: [],
+      paper_profile: "flagship_long_github_paper", codebases: [],
       codebase_discovery: { enabled: true, query_budget: 2, max_candidates: 12, max_readme_fetches: 4, max_selected: 2, languages: ["Python"] },
     });
     expect(writing.research.experiment.enabled).toBe(false);
+  });
+
+  it("accepts the short survey flagship preset through the public init command", async () => {
+    const workspace = path.join(temporaryRoot, "short-survey");
+    const result = run([
+      "init", workspace, "--template", "paper.survey", "--topic", "Focused agent harness survey",
+      "--research-paper-profile", "flagship_short_paper", "--", "--author", "Test Author",
+      "--email", "test@example.invalid", "--research-provider", "multi", "--research-workflow-profile", "deep",
+      "--research-writing-strategy", "llm_sections", "--target-length-words", "8000",
+    ]);
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    const writing = parse(await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8")) as any;
+    expect(writing.project).toMatchObject({ id: "short-survey", name: "short-survey", authors: [{ name: "Test Author", email: "test@example.invalid" }] });
+    expect(writing.research).toMatchObject({ paper_profile: "flagship_short_paper", provider: "multi", workflow_profile: "deep" });
+    expect(writing.writing.target_length_words).toBe(8000);
   });
 
   it("rejects experiment-only options for a survey", () => {

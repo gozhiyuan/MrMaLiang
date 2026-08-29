@@ -74,6 +74,10 @@ export async function syncWorkspace(workspaceDir: string): Promise<SyncWorkspace
     researchProvider: config.research.provider as ResearchProviderId,
     runtimeProfile,
     runLimits: config.run_limits,
+    executionDefaults: {
+      model: config.execution.default_model,
+      model_reasoning_effort: config.execution.default_model_reasoning_effort,
+    },
     stageOverrides: config.execution.stage_overrides,
     researchPolicy: {
       workflowProfile: config.research.workflow_profile,
@@ -98,6 +102,7 @@ export async function syncWorkspace(workspaceDir: string): Promise<SyncWorkspace
       outlineReviewEnabled: config.research.outline_review.enabled,
       outlineReviewMaxRounds: config.research.outline_review.max_rounds,
       outlineApprovalMode: config.research.outline_review.approval_mode,
+      improvementMaxRounds: config.research.quality_control.max_improvement_rounds,
       verificationMaxSources: config.research.verification.max_sources,
       writingStrategy: config.research.writing_strategy,
       experiment: {

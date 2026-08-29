@@ -210,8 +210,13 @@ async function checkCitedLiteratureReleaseGates(
     if (pages === null) {
       findings.push("cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf");
     } else {
-      const density = citedSources.length / Math.max(1, pages);
-      if (density < gates.min_citations_per_page) findings.push(`cited-source density ${density.toFixed(2)} per page (${citedSources.length}/${pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`);
+      // This gate is explicitly configured as *citations* per page. Counting
+      // unique bibliography entries here made a long paper require an
+      // impossible number of distinct sources even when it cited its evidence
+      // appropriately throughout the prose.
+      const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
+      const density = citationCount / Math.max(1, pages);
+      if (density < gates.min_citations_per_page) findings.push(`citation density ${density.toFixed(2)} per page (${citationCount}/${pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`);
     }
   }
   for (const chapter of chapters) {
@@ -232,7 +237,9 @@ async function checkCitedLiteratureReleaseGates(
     }
   }
   const pages = gates.min_citations_per_page > 0 ? await pdfPageCount(workspaceDir) : null;
-  const summary = `cited=${citedSources.length}; within_1yr=${withinOneYear}/${citedSources.length}; accepted=${accepted}/${citedSources.length}; arxiv_only=${arxivOnly}/${citedSources.length}; pages=${pages ?? "not measured"}`;
+  const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
+  const citationDensity = pages === null ? undefined : citationCount / Math.max(1, pages);
+  const summary = `cited=${citedSources.length}; citations=${citationCount}; citation_density=${citationDensity === undefined ? "not measured" : citationDensity.toFixed(2)}; within_1yr=${withinOneYear}/${citedSources.length}; accepted=${accepted}/${citedSources.length}; arxiv_only=${arxivOnly}/${citedSources.length}; pages=${pages ?? "not measured"}`;
   return { id: "cited_literature_release_gates", pass: findings.length === 0, findings: findings.length === 0 ? [summary] : [summary, ...findings] };
 }
 
