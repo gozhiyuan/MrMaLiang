@@ -688,8 +688,11 @@ brew install tectonic poppler
 ```
 
 `tectonic` is the minimum additional local tool for the promised real PDF.
-`poppler` is strongly recommended because it provides `pdftotext` for
-open-access PDFs that do not have readable HTML. A full release also requires
+`poppler` is required for a visually reviewed release because it provides
+`pdfinfo`, `pdftotext`, and `pdftoppm`; it also extracts open-access PDFs that
+do not have readable HTML. If those inspection tools are unavailable, the flow
+records a repairable failed visual-coverage gate instead of crashing the
+worker. A full release also requires
 the Matplotlib setup below: the source-year corpus plot is a placed publication
 artifact and is no longer silently omitted. You do **not** need a Semantic
 Scholar key or Mermaid CLI merely to start the run.
@@ -707,10 +710,10 @@ Scholar key or Mermaid CLI merely to start the run.
 #### Recommended local tools
 
 `npm install` installs neither Tectonic nor Poppler. The selected Conda or
-Homebrew path above enables a real compiled PDF and lets LongWrite extract
-readable text from open-access PDFs through `pdftotext`. Without these tools,
-the flow remains inspectable but keeps a placeholder PDF and skips unreadable
-PDF text.
+Homebrew path above enables a real compiled PDF, rendered-page visual review,
+and readable-text extraction from open-access PDFs. Without these tools, the
+flow remains inspectable but keeps a placeholder PDF, skips unreadable PDF
+text, and cannot pass the visual-review release gate.
 
 For the full release's required Python-rendered corpus plot, use `uv` rather
 than modifying a system Python:

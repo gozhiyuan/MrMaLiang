@@ -183,7 +183,7 @@ duplicates before Git pins anything.
 
 ## ⚡ Quick Start
 
-**Requires Node.js 22+ and [MalaClaw](https://github.com/gozhiyuan/MalaClaw) `>=2.0.0 <3.0.0` on `PATH`.**
+**Requires Node.js 22+ and [MalaClaw](https://github.com/gozhiyuan/MalaClaw) `>=2.3.0 <3.0.0` on `PATH`.**
 
 ```bash
 git clone https://github.com/gozhiyuan/MrMaLiang.git && cd MrMaLiang
@@ -312,7 +312,7 @@ before the run, never to make an unchanged scope pass. See
 <details>
 <summary><b>Prerequisites</b></summary>
 
-**Everything:** Node.js 22+, MalaClaw `>=2.0.0 <3.0.0` on `PATH`, Git.
+**Everything:** Node.js 22+, MalaClaw `>=2.3.0 <3.0.0` on `PATH`, Git.
 
 **A real manuscript run:** an authenticated `codex` runtime (recommended — the most exercised configuration, and
 what this repository is developed against) or `claude-code`; a LaTeX engine (`tectonic` or `latexmk`); plus

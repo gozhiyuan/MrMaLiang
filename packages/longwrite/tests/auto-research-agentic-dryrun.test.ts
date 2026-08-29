@@ -12,7 +12,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const longwrite = path.join(repoRoot, "dist", "cli.js");
 const malaclawRoot = process.env.MALACLAW_SOURCE_DIR
   ? path.resolve(process.env.MALACLAW_SOURCE_DIR)
-  : path.resolve(repoRoot, "..", "..", "..", "malaclaw");
+  : path.resolve(repoRoot, "..", "..", ".dependencies", "MalaClaw");
 const tmp = path.join(os.tmpdir(), `lw-agentic-dry-${Date.now()}`);
 
 function nodeAtLeast22(): boolean {
@@ -28,6 +28,7 @@ describe.skipIf(!nodeAtLeast22())("auto_research_agentic dry-run", () => {
     const run = (args: string[]) => execFileSync(node, [longwrite, ...args], { cwd: repoRoot, stdio: "pipe" });
     const malaclaw = (args: string[]) =>
       execFileSync(node, [path.join(malaclawRoot, "dist", "cli.js"), ...args], { cwd: ws, stdio: "pipe" });
+    const statePath = path.join(ws, ".malaclaw", "flow", "state.json");
 
     run(["init", ws, "--mode", "auto_research_agentic", "--topic", "agentic dry-run plumbing", "--research-provider", "seed"]);
     const manifestPath = path.join(ws, "malaclaw.yaml");
@@ -35,13 +36,21 @@ describe.skipIf(!nodeAtLeast22())("auto_research_agentic dry-run", () => {
     await fs.writeFile(manifestPath, manifest, "utf-8");
 
     for (let i = 0; i < 24; i++) {
-      try { malaclaw(["flow", "run", "--runtime", "dry-run"]); } catch { /* approval pauses are expected */ }
-      const state = JSON.parse(await fs.readFile(path.join(ws, ".malaclaw", "flow", "state.json"), "utf-8"));
+      let startupError: unknown;
+      try { malaclaw(["flow", "run", "--runtime", "dry-run"]); } catch (error) { startupError = error; /* approval pauses are expected */ }
+      const stateRaw = await fs.readFile(statePath, "utf-8").catch(() => null);
+      if (!stateRaw) {
+        const stderr = startupError && typeof startupError === "object" && "stderr" in startupError
+          ? String((startupError as { stderr?: Buffer | string }).stderr ?? "")
+          : String(startupError ?? "unknown error");
+        throw new Error(`MalaClaw failed before initializing flow state:\n${stderr}`);
+      }
+      const state = JSON.parse(stateRaw);
       if (state.status === "completed" || state.status === "failed") break;
       if (state.status === "paused_for_approval") { try { malaclaw(["flow", "review", "--batch"]); } catch { /* no-op */ } }
     }
 
-    const state = JSON.parse(await fs.readFile(path.join(ws, ".malaclaw", "flow", "state.json"), "utf-8"));
+    const state = JSON.parse(await fs.readFile(statePath, "utf-8"));
     // Full-workflow plumbing gate (merged from the retired v2 dry-run test):
     // every unit must reach a terminal success state, not merely the flow.
     const notDone = Object.entries(state.units)

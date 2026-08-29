@@ -8,6 +8,17 @@ const execFile = promisify(execFileCallback);
 const RENDER_DPI = 144;
 const CAPTION_PAGE_RE = /\b(?:Figure|Table)\s+\d+(?:\s*[:.]|\s)/i;
 
+export type VisualReviewCommandRunner = (
+  command: string,
+  args: string[],
+  options: { timeout: number },
+) => Promise<{ stdout: string }>;
+
+const runCommand: VisualReviewCommandRunner = async (command, args, options) => {
+  const { stdout } = await execFile(command, args, options);
+  return { stdout };
+};
+
 export type VisualRenderManifest = {
   version: 1;
   pdf_path: string;
@@ -40,17 +51,17 @@ async function writeVisualRenderabilityMetric(workspaceDir: string, pageCount: n
   await fs.writeFile(target, `${JSON.stringify({ ...metrics, visual_reviewable_pages: pageCount }, null, 2)}\n`, "utf8");
 }
 
-async function pageCount(pdfPath: string): Promise<number> {
-  const { stdout } = await execFile("pdfinfo", [pdfPath], { timeout: 15_000 });
+async function pageCount(pdfPath: string, run: VisualReviewCommandRunner): Promise<number> {
+  const { stdout } = await run("pdfinfo", [pdfPath], { timeout: 15_000 });
   const match = stdout.match(/^Pages:\s+(\d+)\s*$/m);
   if (!match || Number(match[1]) < 1) throw new Error(`pdfinfo did not report a positive page count for ${pdfPath}`);
   return Number(match[1]);
 }
 
-async function captionPages(pdfPath: string, pages: number): Promise<number[]> {
+async function captionPages(pdfPath: string, pages: number, run: VisualReviewCommandRunner): Promise<number[]> {
   const matches: number[] = [];
   for (let page = 1; page <= pages; page += 1) {
-    const { stdout } = await execFile("pdftotext", ["-layout", "-f", String(page), "-l", String(page), pdfPath, "-"], { timeout: 15_000 });
+    const { stdout } = await run("pdftotext", ["-layout", "-f", String(page), "-l", String(page), pdfPath, "-"], { timeout: 15_000 });
     if (CAPTION_PAGE_RE.test(stdout)) matches.push(page);
   }
   return matches;
@@ -59,12 +70,37 @@ async function captionPages(pdfPath: string, pages: number): Promise<number[]> {
 /** Render every caption-bearing page as a first-class multimodal review input.
  * The PDF remains the source artifact; these PNGs are disposable evidence for
  * a reviewer to judge whether labels, arrows, tables, and captions are legible. */
-export async function renderVisualReviewPages(workspaceDir: string): Promise<VisualRenderManifest> {
+export async function renderVisualReviewPages(
+  workspaceDir: string,
+  run: VisualReviewCommandRunner = runCommand,
+): Promise<VisualRenderManifest> {
   const pdfPath = path.join(workspaceDir, "build", "manuscript.pdf");
   const pdf = await fs.readFile(pdfPath).catch(() => null);
   if (!pdf || pdf.length === 0) throw new Error("build/manuscript.pdf is missing or empty; build before visual review");
-  const pages = await pageCount(pdfPath);
-  const captions = await captionPages(pdfPath, pages);
+  let pages: number;
+  let captions: number[];
+  try {
+    pages = await pageCount(pdfPath, run);
+    captions = await captionPages(pdfPath, pages, run);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "inspection_failed";
+    const manifest: VisualRenderManifest = {
+      version: 1,
+      pdf_path: "build/manuscript.pdf",
+      pdf_sha256: sha256(pdf),
+      render_dpi: RENDER_DPI,
+      caption_pages: [],
+      rendered_pages: [],
+      coverage_complete: false,
+      coverage_failure: code === "ENOENT"
+        ? "PDF visual-review tooling is unavailable; install Poppler (pdfinfo, pdftotext, and pdftoppm)"
+        : `PDF visual-review inspection failed (${code})`,
+    };
+    await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "reports", "visual-render-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await writeVisualRenderabilityMetric(workspaceDir, 0);
+    return manifest;
+  }
   if (captions.length === 0) {
     const manifest: VisualRenderManifest = {
       version: 1,
@@ -89,7 +125,7 @@ export async function renderVisualReviewPages(workspaceDir: string): Promise<Vis
   for (const page of captions) {
     const rel = `reports/visual-review/page-${String(page).padStart(3, "0")}.png`;
     const target = path.join(workspaceDir, rel);
-    await execFile("pdftoppm", ["-png", "-singlefile", "-r", String(RENDER_DPI), "-f", String(page), "-l", String(page), pdfPath, target.replace(/\.png$/, "")], { timeout: 30_000 });
+    await run("pdftoppm", ["-png", "-singlefile", "-r", String(RENDER_DPI), "-f", String(page), "-l", String(page), pdfPath, target.replace(/\.png$/, "")], { timeout: 30_000 });
     const bytes = await fs.readFile(target).catch(() => null);
     if (!bytes || bytes.length === 0) throw new Error(`pdftoppm did not produce ${rel}`);
     rendered.push({ page, path: rel, sha256: sha256(bytes) });
