@@ -62,11 +62,11 @@ describe("agentic semantic-screen contract", () => {
       version: 1,
       packets: [
         { source_id: "paper-a", recommended_depth: "A", claims: [
-          { claim: "The method stores episodic traces.", supporting_excerpt: "Memory architecture stores episodic traces", locator: "opening", comparison_dimensions: ["memory representation"], limitations: [] },
+          { claim: "The method stores episodic traces.", supporting_excerpt: "Memory architecture stores episodic traces", locator: "opening", comparison_dimensions: ["memory representation"], limitations: [], later_use: "not_reported" },
           { claim: "Planning retrieves traces before tool use.", supporting_excerpt: "Planning retrieves traces before tool use", locator: "opening", comparison_dimensions: ["planning integration"], limitations: ["The excerpt reports one retrieval ablation."] },
         ] },
         { source_id: "paper-b", recommended_depth: "B", claims: [
-          { claim: "The baseline stores concise summaries and reports lower retrieval cost.", supporting_excerpt: "The comparison baseline stores concise task summaries", locator: "opening", comparison_dimensions: ["retrieval cost"], limitations: [] },
+          { claim: "The baseline stores concise summaries and reports lower retrieval cost.", supporting_excerpt: "The comparison baseline stores concise task summaries", locator: "opening", comparison_dimensions: ["retrieval cost"], limitations: [], later_use: "not_reported" },
         ] },
       ],
     }), "utf-8");
@@ -91,7 +91,7 @@ describe("agentic semantic-screen contract", () => {
     await fs.writeFile(path.join(dir, "fulltext", "manifest.json"), JSON.stringify({ results: [{ sourceId: "paper", status: "ingested", path: "fulltext/paper.md" }] }), "utf-8");
     await selectSourceEvidenceCandidates(dir);
     await fs.mkdir(path.join(dir, "evidence"), { recursive: true });
-    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "The architecture stores episodic traces for planning.", supporting_excerpt: "Memory architecture stores episodic traces for planning and tool use", locator: { paragraph: 1 }, comparison_dimensions: [], limitations: "The excerpt does not measure every planning setting." }] }] }), "utf-8");
+    await fs.writeFile(path.join(dir, "evidence", "source-packets.json"), JSON.stringify({ version: 1, packets: [{ source_id: "paper", recommended_depth: "B", claims: [{ claim: "The architecture stores episodic traces for planning.", supporting_excerpt: "Memory architecture stores episodic traces for planning and tool use", locator: { paragraph: 1 }, comparison_dimensions: [], limitations: "The excerpt does not measure every planning setting.", later_use: "not_reported" }] }] }), "utf-8");
     await repairSourceEvidencePackets(dir);
     const repaired = JSON.parse(await fs.readFile(path.join(dir, "evidence", "source-packets.json"), "utf8"));
     expect(repaired.packets[0].claims[0]).toMatchObject({ locator: "paragraph: 1", limitations: ["The excerpt does not measure every planning setting."] });

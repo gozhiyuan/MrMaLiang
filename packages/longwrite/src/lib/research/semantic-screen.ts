@@ -61,12 +61,28 @@ export const SemanticScreen = z.object({
 }).strict();
 export type SemanticScreen = z.infer<typeof SemanticScreen>;
 
+const EvidenceStatus = z.enum(["demonstrated", "partial", "reported_without_evaluation", "not_reported", "not_applicable", "contradicted"]);
+
 const SourceEvidenceClaim = z.object({
   claim: z.string().min(12).max(1_000),
   supporting_excerpt: z.string().min(12).max(700),
   locator: z.string().min(1).max(300),
   comparison_dimensions: z.array(z.string().min(2).max(160)).max(8).default([]),
   limitations: z.array(z.string().min(4).max(500)).max(8).default([]),
+  /** System-card fields. All optional so existing packets remain valid; a
+   * claim about a candidate self-improvement system should populate the
+   * ones it can support from full-text evidence, not leave every field off
+   * because the extracted excerpt was short. */
+  modified_object: z.string().min(2).max(200).optional(),
+  proposer_or_improver: z.string().min(2).max(200).optional(),
+  evaluation_mechanism: z.string().min(2).max(300).optional(),
+  persistence_scope: z.string().min(2).max(300).optional(),
+  later_use: EvidenceStatus.optional(),
+  cross_task_transfer: EvidenceStatus.optional(),
+  meta_improvement: EvidenceStatus.optional(),
+  human_oversight: z.string().min(2).max(300).optional(),
+  sandbox_rollback_provenance: z.string().min(2).max(300).optional(),
+  benchmarks: z.array(z.string().min(2).max(200)).max(8).default([]),
 }).strict();
 
 /** Exact-string provenance is necessary but not sufficient for claim evidence:
@@ -409,6 +425,15 @@ export async function selectSourceEvidenceCandidates(workspaceDir: string): Prom
   return [SOURCE_EVIDENCE_CANDIDATES_PATH];
 }
 
+/** An A/B-depth packet whose claims record no later_use/cross_task_transfer/
+ * meta_improvement status field usually means the extractor skipped the
+ * system-card fields rather than that the source genuinely lacks any
+ * evaluable self-improvement mechanism (which would still be recorded, as
+ * not_reported/not_applicable, not omitted). */
+function packetLacksSystemCardStatus(packet: { claims: Array<{ later_use?: string; cross_task_transfer?: string; meta_improvement?: string }> }): boolean {
+  return packet.claims.every((claim) => claim.later_use === undefined && claim.cross_task_transfer === undefined && claim.meta_improvement === undefined);
+}
+
 /** Validates semantic extraction without treating the model's assertion as a
  * fact: every packet must target an ingested source and contain a normalized
  * excerpt that is actually present in the retrieved full text. */
@@ -448,6 +473,9 @@ export async function repairSourceEvidencePackets(workspaceDir: string): Promise
         }
         if (!isClaimBearingEvidenceExcerpt(claim.supporting_excerpt, candidate.title)) {
           throw new Error(`packet ${packet.source_id} excerpt is bibliographic/provider metadata rather than claim-bearing evidence; select substantive source prose from ${rel}`);
+        }
+        if (packet.recommended_depth !== "C" && packetLacksSystemCardStatus(packet)) {
+          throw new Error(`packet ${packet.source_id} claims record no later_use/cross_task_transfer/meta_improvement status; A/B-depth system cards must record at least one system-improvement status field, using not_reported only after inspecting the full text, not because the extracted excerpt was short`);
         }
       }
       const minimum = packet.recommended_depth === "A" ? config.research.semantic_screen.min_supported_claims_for_a : config.research.semantic_screen.min_supported_claims_for_b;
