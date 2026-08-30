@@ -461,3 +461,51 @@ describe("the planner owns the argument, the renderer owns the rendering", () =>
     expect(repair).toContain("not produced");
   });
 });
+
+describe("diagram connectivity gate", () => {
+  it("fails when a loop-captioned concept map is rendered as disconnected components", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      concept_map: {
+        title: "The harness improvement loop",
+        caption: "One conjunctive improvement loop connecting artifact, iteration, evaluation, and later use.",
+        placement: { section_id: "section-01", discussion: "x" },
+        nodes: [
+          { id: "artifact", label: "Artifact / procedure" },
+          { id: "iteration", label: "Iteration / state" },
+          { id: "evaluation", label: "Evaluation / selection" },
+          { id: "later_use", label: "Documented later use" },
+        ],
+        edges: [{ from: "artifact", to: "evaluation" }, { from: "iteration", to: "later_use" }],
+      },
+    }));
+    const report = await validateFigureWorkspace(ws);
+    const check = report.checks.find((c) => c.id === "diagram_connectivity");
+    expect(check?.pass).toBe(false);
+    expect(check?.findings[0]).toContain("disconnected groups");
+  });
+
+  it("passes when the concept map is fully connected", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      concept_map: {
+        title: "The harness improvement loop",
+        caption: "One conjunctive improvement loop.",
+        placement: { section_id: "section-01", discussion: "x" },
+        nodes: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }],
+        edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }, { from: "c", to: "a" }],
+      },
+    }));
+    const report = await validateFigureWorkspace(ws);
+    const check = report.checks.find((c) => c.id === "diagram_connectivity");
+    expect(check?.pass).toBe(true);
+  });
+});

@@ -5,6 +5,14 @@ import { figureManifestSchema, type FigureManifest } from "../writing/figures.js
 import type { ValidationCheck, ValidationReport } from "./research.js";
 import { loadProjectConfigIfExists } from "../project-config.js";
 import { paperProfile } from "../paper-profiles.js";
+import { connectedComponents } from "../research/diagram-connectivity.js";
+
+const LOOP_CAPTION_PATTERN = /\b(loop|cycle|feedback|iterative|conjunctive|end-to-end)\b/i;
+
+type PlacementPlanGraphs = {
+  concept_map?: { title: string; caption: string; nodes: Array<{ id: string; label: string }>; edges: Array<{ from: string; to: string; label?: string }> };
+  diagrams?: Array<{ id: string; title: string; caption: string; nodes: Array<{ id: string; label: string }>; edges: Array<{ from: string; to: string; label?: string }> }>;
+};
 
 async function readText(workspaceDir: string, rel: string): Promise<string | null> {
   try {
@@ -161,6 +169,35 @@ async function checkPublicationLayout(workspaceDir: string): Promise<ValidationC
   return { id: "publication_layout", pass: findings.length === 0, findings };
 }
 
+/** A caption that promises one connected process (a "loop", "cycle", or
+ * "feedback" mechanism) must render as one connected graph. This catches the
+ * exact short-rsi-survey defect: a caption describing one conjunctive
+ * improvement loop whose rendered diagram is two disconnected chains. */
+async function checkDiagramConnectivity(workspaceDir: string): Promise<ValidationCheck> {
+  const raw = await readText(workspaceDir, "figures/placement-plan.json");
+  if (raw === null) return { id: "diagram_connectivity", pass: true, findings: ["figures/placement-plan.json not present; diagram connectivity check skipped"] };
+  let plan: PlacementPlanGraphs;
+  try {
+    plan = JSON.parse(raw) as PlacementPlanGraphs;
+  } catch {
+    return { id: "diagram_connectivity", pass: false, findings: ["diagram_connectivity: figures/placement-plan.json is not valid JSON"] };
+  }
+  const findings: string[] = [];
+  const candidates = [
+    ...(plan.concept_map ? [{ id: "concept-map", ...plan.concept_map }] : []),
+    ...(plan.diagrams ?? []),
+  ];
+  for (const diagram of candidates) {
+    const text = `${diagram.title} ${diagram.caption}`;
+    if (!LOOP_CAPTION_PATTERN.test(text)) continue;
+    const components = connectedComponents({ nodes: diagram.nodes, edges: diagram.edges });
+    if (components.length > 1) {
+      findings.push(`diagram_connectivity: ${diagram.id} caption/title implies one connected process ("${text.trim()}") but its rendered graph forms ${components.length} disconnected groups: ${components.map((group) => `[${group.join(", ")}]`).join(", ")}`);
+    }
+  }
+  return { id: "diagram_connectivity", pass: findings.length === 0, findings };
+}
+
 async function checkManuscriptReferences(workspaceDir: string, manifest?: FigureManifest): Promise<ValidationCheck> {
   const findings: string[] = [];
   if (!manifest) return { id: "figure_references", pass: false, findings: ["figure_references: skipped because manifest is invalid"] };
@@ -202,6 +239,7 @@ export async function validateFigureWorkspace(workspaceDir: string): Promise<Val
     await checkArtifacts(workspaceDir, manifest),
     await checkManuscriptReferences(workspaceDir, manifest),
     await checkPublicationLayout(workspaceDir),
+    await checkDiagramConnectivity(workspaceDir),
   ];
   return { pass: checks.every((item) => item.pass), checks };
 }
