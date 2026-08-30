@@ -43,6 +43,58 @@ describe("detectContradictions", () => {
     const judgments = [j({ subject_key: undefined, polarity: undefined })];
     expect(detectContradictions(judgments)).toEqual([]);
   });
+
+  // Final whole-branch review, Important finding #4: claim_judge writes TWO
+  // independent judgments per sample_id (reviewer_a and reviewer_b) for the
+  // same claim in the same chapter, so a same-chapter reviewer disagreement
+  // is a NORMAL, expected outcome of the double-review design, not a
+  // cross-section contradiction.
+  it("does not flag reviewer_a/reviewer_b disagreement within the same chapter as a contradiction", () => {
+    const judgments = [
+      j({ sample_id: "claim-001", reviewer_id: "reviewer_a", chapter: "chapters/section-04.md", subject_key: "stale-constraint", polarity: "affirms" }),
+      j({ sample_id: "claim-001", reviewer_id: "reviewer_b", chapter: "chapters/section-04.md", subject_key: "stale-constraint", polarity: "denies" }),
+    ];
+    expect(detectContradictions(judgments)).toEqual([]);
+  });
+
+  it("still flags a genuine affirm in one chapter and deny in a different chapter", () => {
+    const judgments = [
+      j({ sample_id: "claim-001", reviewer_id: "reviewer_a", chapter: "chapters/section-04.md", subject_key: "stale-constraint", polarity: "affirms" }),
+      j({ sample_id: "claim-002", reviewer_id: "reviewer_a", chapter: "chapters/section-07.md", subject_key: "stale-constraint", polarity: "denies" }),
+    ];
+    const contradictions = detectContradictions(judgments);
+    expect(contradictions).toHaveLength(1);
+    expect(contradictions[0]!.chapters.sort()).toEqual(["chapters/section-04.md", "chapters/section-07.md"]);
+  });
+
+  it("does not flag a same-chapter reviewer disagreement even when an unrelated qualifies judgment for the same subject exists in another chapter", () => {
+    // This is the exact false-positive scenario the finding describes: the
+    // OLD implementation computed `chapters`/`polarities` over the WHOLE
+    // subject group (all three judgments below), so the unrelated qualifies
+    // judgment in section-09 pushed chapters.size to 2 and the group was
+    // wrongly flagged as "affirmed and denied across section-04, section-09"
+    // even though the affirm/deny disagreement never left section-04.
+    const judgments = [
+      j({ sample_id: "claim-001", reviewer_id: "reviewer_a", chapter: "chapters/section-04.md", subject_key: "stale-constraint", polarity: "affirms" }),
+      j({ sample_id: "claim-001", reviewer_id: "reviewer_b", chapter: "chapters/section-04.md", subject_key: "stale-constraint", polarity: "denies" }),
+      j({ sample_id: "claim-009", reviewer_id: "reviewer_a", chapter: "chapters/section-09.md", subject_key: "stale-constraint", polarity: "qualifies" }),
+    ];
+    expect(detectContradictions(judgments)).toEqual([]);
+  });
+
+  // Final whole-branch review, Important finding #5: subject_key grouping
+  // used raw string equality, so a casing/whitespace mismatch between two
+  // independently-judged claims silently suppressed a real contradiction.
+  it("normalizes subject_key casing and whitespace before grouping", () => {
+    const judgments = [
+      j({ chapter: "chapters/section-04.md", subject_key: "  Stale-Constraint ", polarity: "affirms" }),
+      j({ chapter: "chapters/section-07.md", subject_key: "stale-constraint", polarity: "denies" }),
+    ];
+    const contradictions = detectContradictions(judgments);
+    expect(contradictions).toHaveLength(1);
+    expect(contradictions[0]!.subject_key).toBe("stale-constraint");
+    expect(contradictions[0]!.chapters.sort()).toEqual(["chapters/section-04.md", "chapters/section-07.md"]);
+  });
 });
 
 const tempDirs: string[] = [];
