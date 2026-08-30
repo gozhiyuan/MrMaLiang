@@ -190,6 +190,11 @@ async function checkDiagramConnectivity(workspaceDir: string): Promise<Validatio
   for (const diagram of candidates) {
     const text = `${diagram.title} ${diagram.caption}`;
     if (!LOOP_CAPTION_PATTERN.test(text)) continue;
+    // Guard against malformed diagram entries (missing or non-array nodes/edges)
+    if (!Array.isArray(diagram.nodes) || !Array.isArray(diagram.edges)) {
+      findings.push(`diagram_connectivity: ${diagram.id} has a malformed node/edge structure and cannot be checked`);
+      continue;
+    }
     const components = connectedComponents({ nodes: diagram.nodes, edges: diagram.edges });
     if (components.length > 1) {
       findings.push(`diagram_connectivity: ${diagram.id} caption/title implies one connected process ("${text.trim()}") but its rendered graph forms ${components.length} disconnected groups: ${components.map((group) => `[${group.join(", ")}]`).join(", ")}`);

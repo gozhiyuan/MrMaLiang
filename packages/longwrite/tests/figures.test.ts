@@ -508,4 +508,29 @@ describe("diagram connectivity gate", () => {
     const check = report.checks.find((c) => c.id === "diagram_connectivity");
     expect(check?.pass).toBe(true);
   });
+
+  it("degrades gracefully when a loop-captioned diagram has malformed node/edge structure", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    // Malformed: missing 'nodes' field but has loop-caption
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      concept_map: {
+        title: "The feedback loop",
+        caption: "A cycle through the process",
+        placement: { section_id: "section-01", discussion: "x" },
+        edges: [{ from: "a", to: "b" }],
+        // nodes is missing - malformed!
+      },
+    }));
+    // Should not throw; should return a normal report with diagram_connectivity failing
+    const report = await validateFigureWorkspace(ws);
+    expect(report).toBeDefined();
+    expect(report.checks).toBeDefined();
+    const check = report.checks.find((c) => c.id === "diagram_connectivity");
+    expect(check?.pass).toBe(false);
+    expect(check?.findings.some((f) => f.includes("malformed"))).toBe(true);
+  });
 });
