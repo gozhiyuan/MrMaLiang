@@ -33,6 +33,25 @@
         "phase": "specify"
       },
       {
+        "id": "landmark_scout",
+        "title": "Identify canonical works for this topic before broad recall",
+        "owner": "source-curator",
+        "inputs": [
+          "project_brief.md"
+        ],
+        "outputs": [
+          "research/landmark-candidates.json"
+        ],
+        "instructions": [
+          "Before any broad literature search runs, name the specific canonical or landmark works a domain expert would expect this exact paper to engage with: foundational terminology sources, seminal papers, the most important recent high-impact systems, key surveys, and known counterexamples. Generate these dynamically from the topic and brief — never reuse a fixed list carried over from a different paper's topic.",
+          "Write ONLY research/landmark-candidates.json: {version:1,candidates:[{name,why_canonical,expected_identifiers?:{arxiv_id?,doi?},confidence:high|medium|low}]}. Name real, verifiable works only; omit expected_identifiers rather than inventing one when uncertain of the exact id. List 5 to 30 candidates ordered by confidence."
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "phase": "research"
+      },
+      {
         "id": "search_planner",
         "title": "Search planning",
         "owner": "source-curator",

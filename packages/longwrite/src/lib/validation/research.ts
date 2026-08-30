@@ -20,6 +20,7 @@ import { CodebaseComparisonPacket, validateCodebaseComparison } from "../researc
 import { checkVisualReviewReleaseGate } from "../ops/visual-review.js";
 import { computeRedundancy } from "../research/redundancy.js";
 import { detectContradictions, type ClaimJudgment } from "../research/contradiction.js";
+import { LandmarkCandidates, matchLandmarksToCorpus, computeLandmarkCoverage } from "../research/landmark.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -548,6 +549,30 @@ async function checkNoContradictions(workspaceDir: string): Promise<ValidationCh
   return { id: "claim_contradictions", pass: findings.length === 0, findings };
 }
 
+async function checkLandmarkCoverage(workspaceDir: string, sources: ClassifiedSource[]): Promise<ValidationCheck> {
+  const config = await loadProjectConfig(workspaceDir).catch(() => null);
+  const threshold = config?.research.corpus_gates.min_landmark_coverage_ratio ?? 0;
+  if (threshold <= 0) return { id: "landmark_coverage", pass: true, findings: ["landmark coverage gate is not configured"] };
+  const raw = await readIfExists(path.join(workspaceDir, "research", "landmark-candidates.json"));
+  if (raw === null) return { id: "landmark_coverage", pass: false, findings: ["landmark_coverage: research/landmark-candidates.json is required when min_landmark_coverage_ratio is configured; run the landmark_scout stage"] };
+  let candidates: LandmarkCandidates;
+  try {
+    candidates = LandmarkCandidates.parse(JSON.parse(raw));
+  } catch (error) {
+    return { id: "landmark_coverage", pass: false, findings: [`landmark_coverage: research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`] };
+  }
+  const matches = matchLandmarksToCorpus(candidates.candidates, sources);
+  const coverage = computeLandmarkCoverage(matches);
+  if (coverage.coverageRatio >= threshold) {
+    return { id: "landmark_coverage", pass: true, findings: [`landmark_coverage: ${coverage.matched}/${coverage.total} landmark works matched in the corpus`] };
+  }
+  return {
+    id: "landmark_coverage",
+    pass: false,
+    findings: [`landmark_coverage: coverage ratio ${coverage.coverageRatio.toFixed(3)} (${coverage.matched}/${coverage.total}) is below configured minimum ${threshold.toFixed(3)}; missing: ${coverage.unmatched.join(", ")}`],
+  };
+}
+
 async function checkPublicationArtifacts(workspaceDir: string): Promise<ValidationCheck[]> {
   const main = await statIfExists(path.join(workspaceDir, "paper", "main.tex"));
   const manifest = await statIfExists(path.join(workspaceDir, "figures", "manifest.json"));
@@ -669,6 +694,7 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
     await checkReviewRegressions(workspaceDir),
     await checkClaimSupport(workspaceDir),
     await checkNoContradictions(workspaceDir),
+    await checkLandmarkCoverage(workspaceDir, sources),
     ...(await checkFullResearchContracts(workspaceDir)),
     ...(await checkPublicationArtifacts(workspaceDir)),
     await checkManuscriptBuild(workspaceDir),
