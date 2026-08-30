@@ -77,12 +77,14 @@ workflow:
       owner: source-curator
       inputs:
         - project_brief.md
+        - research/landmark-candidates.json
       outputs:
         # Validated plan; deterministic recall executes its query variants.
         - sources/search-plan.json
       instructions:
         - "Write strict JSON matching {\"version\":1,\"topic\":\"...\",\"query_variants\":[...],\"taxonomy_cells\":[{\"cell\":\"...\",\"query_variants\":[\"...\",\"...\",\"...\"]}],\"exclusion_terms\":[],\"venue_priorities\":[],\"source_types\":[...]}. Preserve every project taxonomy coverage cell verbatim as a taxonomy_cells[].cell; each cell must have at least 3 distinct query variants."
         - "Cover method families, evaluation/benchmark terms, prior surveys, and application variants. Prefer queries that can retrieve both recent and foundational work."
+        - "research/landmark-candidates.json names the specific canonical/landmark works this survey is expected to engage with. Add at least one query_variant per higher-confidence candidate that targets it by name, author, or distinctive terminology rather than only the general topic, so broad recall is likely to actually surface each named landmark."
       validators:
         - required_output_exists
 
