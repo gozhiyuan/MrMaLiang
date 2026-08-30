@@ -93,6 +93,7 @@ describe("research workspace validation", () => {
       "source_coverage",
       "bibliography_consistent",
       "literature_quality_score",
+      "prose_redundancy",
       "citation_verification",
       "research_policy",
       "cited_literature_release_gates",

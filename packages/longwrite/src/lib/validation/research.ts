@@ -18,6 +18,7 @@ import { countWords } from "../ops/word-metrics.js";
 import { codebaseMarkerIds, loadCodebaseManifest } from "../research/codebase-contract.js";
 import { CodebaseComparisonPacket, validateCodebaseComparison } from "../research/codebase-comparison.js";
 import { checkVisualReviewReleaseGate } from "../ops/visual-review.js";
+import { computeRedundancy } from "../research/redundancy.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -330,6 +331,24 @@ function checkLiteratureQuality(sources: ClassifiedSource[]): ValidationCheck {
   return { id: "literature_quality_score", pass: findings.length === 0, findings };
 }
 
+function checkProseRedundancy(
+  chapters: Array<{ rel: string; content: string }>,
+  thresholds: { max_tracked_phrase_occurrences: number; max_repeated_ngram_occurrences: number },
+): ValidationCheck {
+  if (thresholds.max_tracked_phrase_occurrences <= 0 && thresholds.max_repeated_ngram_occurrences <= 0) {
+    return { id: "prose_redundancy", pass: true, findings: ["prose redundancy gate is not configured"] };
+  }
+  const report = computeRedundancy(chapters, {
+    maxTrackedOccurrences: thresholds.max_tracked_phrase_occurrences || Number.MAX_SAFE_INTEGER,
+    maxNgramOccurrences: thresholds.max_repeated_ngram_occurrences || Number.MAX_SAFE_INTEGER,
+  });
+  const findings = [
+    ...report.trackedPhraseOveruse.map((item) => `prose_redundancy: phrase "${item.phrase}" appears ${item.count} times across ${item.sections.length} section(s) (${item.sections.join(", ")}); configured maximum is ${thresholds.max_tracked_phrase_occurrences}`),
+    ...report.repeatedNgramOveruse.map((item) => `prose_redundancy: repeated phrase "${item.phrase}" appears ${item.count} times across ${item.sections.length} sections; configured maximum is ${thresholds.max_repeated_ngram_occurrences}`),
+  ];
+  return { id: "prose_redundancy", pass: findings.length === 0, findings };
+}
+
 function checkCitationVerification(
   sources: ClassifiedSource[],
   citationPlan: CitationPlanEntry[],
@@ -596,8 +615,9 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
 
   let configuredProvider: string | undefined;
   let requireLiveUrls = false;
+  let config: Awaited<ReturnType<typeof loadProjectConfig>> | null = null;
   try {
-    const config = await loadProjectConfig(workspaceDir);
+    config = await loadProjectConfig(workspaceDir);
     configuredProvider = config.research.provider;
     requireLiveUrls = config.research.source_policy.require_live_urls;
   } catch {
@@ -621,6 +641,8 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
     configuredProvider === "seed"
       ? { id: "literature_quality_score", pass: true, findings: ["seed provider: LQS is informational"] }
       : checkLiteratureQuality(sources),
+    config === null ? { id: "prose_redundancy", pass: true, findings: ["longwrite.yaml unavailable; redundancy gate skipped"] }
+      : checkProseRedundancy(chapters, config.research.quality_control),
     evidenceEnabled
       ? checkEvidenceCitationIntegrity(chapters, sourceIds)
       : checkCitationVerification(sources, planResult.rows, chapters, bibliography),
