@@ -19,6 +19,7 @@ import { codebaseMarkerIds, loadCodebaseManifest } from "../research/codebase-co
 import { CodebaseComparisonPacket, validateCodebaseComparison } from "../research/codebase-comparison.js";
 import { checkVisualReviewReleaseGate } from "../ops/visual-review.js";
 import { computeRedundancy } from "../research/redundancy.js";
+import { detectContradictions, type ClaimJudgment } from "../research/contradiction.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -537,6 +538,16 @@ async function checkClaimSupport(workspaceDir: string): Promise<ValidationCheck>
   };
 }
 
+async function checkNoContradictions(workspaceDir: string): Promise<ValidationCheck> {
+  const result = await readJsonlFile<ClaimJudgment>(workspaceDir, "reviews/claim-judgments.jsonl");
+  if (result.error) return { id: "claim_contradictions", pass: true, findings: ["no claim judgments found; contradiction check skipped"] };
+  const contradictions = detectContradictions(result.rows);
+  const findings = contradictions.map((group) =>
+    `claim_contradictions: subject "${group.subject_key}" is both affirmed and denied across ${group.chapters.join(", ")}: ${group.claims.map((claim) => `[${claim.chapter}] ${claim.polarity}: ${claim.claim}`).join(" | ")}`,
+  );
+  return { id: "claim_contradictions", pass: findings.length === 0, findings };
+}
+
 async function checkPublicationArtifacts(workspaceDir: string): Promise<ValidationCheck[]> {
   const main = await statIfExists(path.join(workspaceDir, "paper", "main.tex"));
   const manifest = await statIfExists(path.join(workspaceDir, "figures", "manifest.json"));
@@ -657,6 +668,7 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
     await checkEmpiricalExperiment(workspaceDir),
     await checkReviewRegressions(workspaceDir),
     await checkClaimSupport(workspaceDir),
+    await checkNoContradictions(workspaceDir),
     ...(await checkFullResearchContracts(workspaceDir)),
     ...(await checkPublicationArtifacts(workspaceDir)),
     await checkManuscriptBuild(workspaceDir),

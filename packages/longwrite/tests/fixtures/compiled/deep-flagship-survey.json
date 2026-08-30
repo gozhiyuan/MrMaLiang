@@ -1207,7 +1207,8 @@
             ],
             "instructions": [
               "Deterministically sample substantive cited claims from every section. Use stable sample ids like claim-001.",
-              "Write reviews/claim-judgments.jsonl with TWO independent JSONL judgments per sample_id, reviewer_id values reviewer_a and reviewer_b, and fields {sample_id,reviewer_id,source_id,chapter,claim,evidence_locators,prompt_hash,model,runtime,verdict,rationale}. verdict must be entailed, partial, or unsupported.",
+              "Write reviews/claim-judgments.jsonl with TWO independent JSONL judgments per sample_id, reviewer_id values reviewer_a and reviewer_b, and fields {sample_id,reviewer_id,source_id,chapter,claim,evidence_locators,prompt_hash,model,runtime,verdict,rationale,subject_key,polarity}. verdict must be entailed, partial, or unsupported.",
+              "subject_key is a short, normalized lowercase-hyphenated id naming the specific real-world mechanism or finding the claim is about (e.g. \"stale-constraint-provenance-mechanism\"), not the source or the chapter. Two claims about the same mechanism MUST share the same subject_key even when worded differently, so contradictions across sections can be detected automatically. polarity is affirms, denies, or qualifies: affirms asserts the mechanism holds, denies asserts the evidence cannot establish it or that it does not hold, qualifies neither affirms nor denies but narrows scope.",
               "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
             ],
             "outputs": [

@@ -105,6 +105,7 @@ describe("research workspace validation", () => {
       "empirical_experiment",
       "review_no_regressions",
       "claim_support",
+      "claim_contradictions",
       "full_research_contracts",
       "publication_artifact_contract",
       "manuscript_build",

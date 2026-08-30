@@ -25,6 +25,12 @@ export const ClaimJudgment = z.object({
   runtime: z.string().min(1).optional(),
   verdict: z.enum(["entailed", "partial", "unsupported"]),
   rationale: z.string().optional(),
+  // Cross-section contradiction detection (see src/lib/research/contradiction.ts)
+  // groups judgments by subject_key and flags conflicting affirms/denies
+  // polarities. Both fields are optional here so older judgment rows without
+  // them still validate; the claim_judge stage instructions require them.
+  subject_key: z.string().min(1).optional(),
+  polarity: z.enum(["affirms", "denies", "qualifies"]).optional(),
 }).strict();
 export type ClaimJudgment = z.infer<typeof ClaimJudgment>;
 
