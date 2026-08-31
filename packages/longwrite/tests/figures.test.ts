@@ -533,4 +533,26 @@ describe("diagram connectivity gate", () => {
     expect(check?.pass).toBe(false);
     expect(check?.findings.some((f) => f.includes("malformed"))).toBe(true);
   });
+
+  it("reports malformed graphs without masking connectivity defects in valid siblings", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-mixed-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      diagrams: [
+        { id: "broken", title: "Broken loop", caption: "A feedback cycle", edges: [] },
+        {
+          id: "disconnected", title: "Improvement loop", caption: "One end-to-end feedback process",
+          nodes: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }, { id: "d", label: "D" }],
+          edges: [{ from: "a", to: "b" }, { from: "c", to: "d" }],
+        },
+      ],
+    }));
+    const report = await validateFigureWorkspace(ws);
+    const findings = report.checks.find((check) => check.id === "diagram_connectivity")?.findings ?? [];
+    expect(findings.some((finding) => finding.includes("broken") && finding.includes("malformed"))).toBe(true);
+    expect(findings.some((finding) => finding.includes("disconnected") && finding.includes("2 disconnected"))).toBe(true);
+  });
 });

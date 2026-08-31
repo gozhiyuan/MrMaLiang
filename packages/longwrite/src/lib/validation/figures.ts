@@ -22,7 +22,7 @@ const Graph = z.object({
     if (!known.has(edge.from) || !known.has(edge.to)) ctx.addIssue({ code: "custom", path: ["edges", index], message: "edge endpoints must name existing nodes" });
   });
 });
-const PlacementPlanGraphs = z.object({ concept_map: Graph.optional(), diagrams: z.array(Graph).default([]) }).passthrough();
+const PlacementPlanGraphs = z.object({ concept_map: z.unknown().optional(), diagrams: z.unknown().optional() }).passthrough();
 
 async function readText(workspaceDir: string, rel: string): Promise<string | null> {
   try {
@@ -193,11 +193,24 @@ async function checkDiagramConnectivity(workspaceDir: string): Promise<Validatio
     return { id: "diagram_connectivity", pass: false, findings: [`diagram_connectivity: figures/placement-plan.json has a malformed or invalid graph contract: ${error instanceof Error ? error.message : String(error)}`] };
   }
   const findings: string[] = [];
-  const candidates = [
-    ...(plan.concept_map ? [{ ...plan.concept_map, id: plan.concept_map.id ?? "concept-map" }] : []),
-    ...plan.diagrams.map((diagram, index) => ({ ...diagram, id: diagram.id ?? `diagram-${index + 1}` })),
-  ];
-  for (const diagram of candidates) {
+  const candidates: Array<{ fallbackId: string; value: unknown }> = [];
+  if (plan.concept_map !== undefined) candidates.push({ fallbackId: "concept-map", value: plan.concept_map });
+  if (plan.diagrams !== undefined && !Array.isArray(plan.diagrams)) {
+    findings.push("diagram_connectivity: diagrams must be an array");
+  } else {
+    for (const [index, value] of (plan.diagrams ?? []).entries()) candidates.push({ fallbackId: `diagram-${index + 1}`, value });
+  }
+  for (const candidate of candidates) {
+    const candidateId = candidate.value && typeof candidate.value === "object" && !Array.isArray(candidate.value)
+      && typeof (candidate.value as { id?: unknown }).id === "string"
+      ? (candidate.value as { id: string }).id
+      : candidate.fallbackId;
+    const parsed = Graph.safeParse(candidate.value);
+    if (!parsed.success) {
+      findings.push(`diagram_connectivity: ${candidateId} has a malformed or invalid graph contract: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+      continue;
+    }
+    const diagram = { ...parsed.data, id: parsed.data.id ?? candidateId };
     const text = `${diagram.title} ${diagram.caption}`;
     if (!LOOP_CAPTION_PATTERN.test(text)) continue;
     const components = connectedComponents({ nodes: diagram.nodes, edges: diagram.edges });

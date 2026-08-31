@@ -254,7 +254,9 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         ? { enabled: true, max_candidates: selectedPaperProfile.evidenceBudget.maxCandidates, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: selectedPaperProfile.evidenceBudget.maxEvidenceSources, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }
         : { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 },
       expansion: { max_queries_per_run: 6, target_candidates: 120, provider_timeout_seconds: 20 },
-      quality_control: selectedPaperProfile.qualityControl,
+      quality_control: mode.id === "auto_research_agentic"
+        ? selectedPaperProfile.qualityControl
+        : { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: -1, repeated_ngram_size: 5, max_repeated_ngram_occurrences: -1 },
       outline_review: mode.id === "auto_research_agentic"
         ? { enabled: true, max_rounds: 2, approval_mode: "auto" }
         : { enabled: false, max_rounds: 2, approval_mode: "auto" },

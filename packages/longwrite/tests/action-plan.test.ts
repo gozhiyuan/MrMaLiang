@@ -33,6 +33,24 @@ describe("agentic action-plan contract", () => {
     await expect(fs.stat(path.join(dir, "reviews", "action-plan.json.pre-normalization.md"))).resolves.toBeDefined();
   });
 
+  it("migrates missing directional operators in an in-flight action plan", async () => {
+    const dir = await workspace();
+    await fs.writeFile(path.join(dir, "reviews", "action-plan.json"), JSON.stringify({
+      version: 1,
+      findings: [{ id: "duplicates", severity: "major", summary: "Repeated prose remains." }, { id: "landmarks", severity: "major", summary: "Canonical work coverage is low." }],
+      actions: [{
+        id: "repair", tool: "revise_sections", finding_ids: ["duplicates", "landmarks"], rationale: "Repair both findings.",
+        acceptance_criteria: [{ metric: "prose_redundancy", target: 0 }, { metric: "landmark_citation_coverage_ratio", target: 0.6 }],
+      }],
+    }));
+    await expect(repairAgenticActionPlan(dir)).resolves.toBeDefined();
+    const plan = JSON.parse(await fs.readFile(path.join(dir, "reviews", "action-plan.json"), "utf-8"));
+    expect(plan.actions[0].acceptance_criteria).toEqual([
+      expect.objectContaining({ metric: "prose_redundancy", operator: "at_most" }),
+      expect.objectContaining({ metric: "landmark_citation_coverage_ratio", operator: "at_least" }),
+    ]);
+  });
+
   it("fails visibly instead of dropping an action with an unknown finding", async () => {
     const dir = await workspace();
     await fs.writeFile(path.join(dir, "reviews", "action-plan.json"), JSON.stringify({

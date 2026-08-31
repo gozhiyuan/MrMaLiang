@@ -6,7 +6,7 @@ import { gateOwnedByTool, repairRouteForGate } from "./repair-routing.js";
 
 export const ACCEPTANCE_METRICS = ["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review", "empirical_trials", "outline_readiness", "review_score", "claim_support", "landmark_coverage_ratio", "landmark_citation_coverage_ratio", "claim_contradictions", "prose_redundancy", "diagram_connectivity"] as const;
 
-export const AcceptanceCriterion = z.object({
+const AcceptanceCriterionObject = z.object({
   /** Each metric is mechanically observable in the workspace or by the
    * next independent reviewer; free-form success claims are not accepted.
    * Keep this list in sync with the `action_plan` planner instruction in
@@ -25,6 +25,23 @@ export const AcceptanceCriterion = z.object({
     ctx.addIssue({ code: "custom", path: ["operator"], message: `${criterion.metric} requires operator at_least` });
   }
 });
+
+/** Normalize plans written before directional criteria were introduced.
+ * Direction is unambiguous for the five directional metrics; preserving that
+ * meaning here keeps durable in-flight plans resumable without weakening the
+ * strict post-normalization contract. */
+export const AcceptanceCriterion = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const criterion = value as Record<string, unknown>;
+  if (criterion.operator !== undefined || typeof criterion.metric !== "string") return value;
+  if (["claim_contradictions", "prose_redundancy", "diagram_connectivity"].includes(criterion.metric)) {
+    return { ...criterion, operator: "at_most" };
+  }
+  if (["landmark_coverage_ratio", "landmark_citation_coverage_ratio"].includes(criterion.metric)) {
+    return { ...criterion, operator: "at_least" };
+  }
+  return value;
+}, AcceptanceCriterionObject);
 
 /** The only content an agentic planner may choose. Tool authorization lives in
  * MalaClaw's workflow catalog; this file makes planner output durable,
@@ -66,12 +83,13 @@ function criterionText(criterion: z.infer<typeof AcceptanceCriterion>): string {
   return `${criterion.metric}${criterion.scope ? `(${criterion.scope})` : ""} ${symbol} ${criterion.target}`;
 }
 
-async function gateAcceptanceCriterion(
+export async function gateAcceptanceCriterion(
   workspaceDir: string,
   gateId: string,
+  loadedConfig?: Awaited<ReturnType<typeof loadProjectConfig>>,
 ): Promise<z.infer<typeof AcceptanceCriterion>> {
   if (gateId === "landmark_coverage" || gateId === "landmark_citation_coverage") {
-    const config = await loadProjectConfig(workspaceDir);
+    const config = loadedConfig ?? await loadProjectConfig(workspaceDir);
     return gateId === "landmark_coverage"
       ? { metric: "landmark_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_coverage_ratio, scope: "evidence-backed A/B landmark corpus" }
       : { metric: "landmark_citation_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_citation_coverage_ratio, scope: "landmark works cited in chapters/*.md" };
@@ -80,6 +98,8 @@ async function gateAcceptanceCriterion(
   if (gateId === "prose_redundancy") return { metric: "prose_redundancy", operator: "at_most", target: 0, scope: "configured tracked-phrase and repeated-ngram findings" };
   if (gateId === "diagram_connectivity" || gateId === "publication_figures") return { metric: "diagram_connectivity", operator: "at_most", target: 0, scope: "disconnected loop-captioned diagrams" };
   if (repairRouteForGate(gateId).preferred === "revise_visual_plan") return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
+  if (gateId === "claim_support") return { metric: "claim_support", operator: "at_least", target: 0.9, scope: "fresh independently double-reviewed claim sample" };
+  if (gateId === "review_target") return { metric: "review_score", operator: "at_least", target: 8, scope: "fresh independent multi-persona review" };
   return { metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" };
 }
 
@@ -363,8 +383,10 @@ export async function repairAgenticActionPlan(workspaceDir: string): Promise<{ n
   const raw = await fs.readFile(target, "utf-8");
   const { content, normalized } = unwrapFence(raw);
   let plan: AgenticActionPlan;
+  let parsedValue: unknown;
   try {
-    plan = AgenticActionPlan.parse(JSON.parse(content));
+    parsedValue = JSON.parse(content);
+    plan = AgenticActionPlan.parse(parsedValue);
   } catch (error) {
     const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
@@ -377,7 +399,7 @@ export async function repairAgenticActionPlan(workspaceDir: string): Promise<{ n
   }
   const merged = mergeDuplicateToolActions(plan);
   plan = merged.plan;
-  const changed = normalized || merged.merged.length > 0;
+  const changed = normalized || merged.merged.length > 0 || JSON.stringify(parsedValue) !== JSON.stringify(plan);
   if (changed) {
     await fs.writeFile(`${target}.pre-normalization.md`, raw, "utf-8");
     await fs.writeFile(target, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
@@ -450,8 +472,7 @@ export async function enrichFinalReleaseActionPlan(workspaceDir: string): Promis
   const proseIds = [...failedIds].filter((id) => namedFindings.has(id)
     && repairRouteForGate(id).preferred === "revise_sections"
     && !(id === "review_target" && visuallyOwnedReviewTarget));
-  const proseOwned = new Set(actions.filter((action) => action.tool === "revise_sections").flatMap((action) => action.finding_ids));
-  const proseMissing = proseIds.filter((id) => !proseOwned.has(id));
+  const proseMissing = proseIds.filter((id) => !actions.some((action) => action.tool === "revise_sections" && action.finding_ids.includes(id)));
   if (proseMissing.length > 0) {
     const criteria = await Promise.all(proseMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
     actions.push({

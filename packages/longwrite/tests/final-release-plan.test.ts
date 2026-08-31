@@ -141,6 +141,45 @@ describe("final-release action-plan contract", () => {
     ]));
   });
 
+  it("routes manuscript build failure to visual/build repair", async () => {
+    const root = await workspace(
+      { pass: false, checks: [{ id: "manuscript_build", pass: false, findings: ["build/manuscript.pdf is missing"] }] },
+      { version: 1, findings: [], actions: [] },
+    );
+    await runResearchGenerateFinalReleasePlan(root);
+    const generated = JSON.parse(await fs.readFile(path.join(root, "reviews", "action-plan.json"), "utf-8"));
+    expect(generated.actions).toEqual([expect.objectContaining({
+      tool: "revise_visual_plan", finding_ids: ["manuscript_build"],
+      acceptance_criteria: [expect.objectContaining({ metric: "rendered_visual_review", operator: "equals", target: 1 })],
+    })]);
+  });
+
+  it("enriches claim support with the actual deterministic threshold", async () => {
+    const root = await workspace(
+      { pass: false, checks: [{ id: "claim_support", pass: false, findings: ["claim support is 0.7"] }] },
+      {
+        version: 1,
+        findings: [{ id: "claim_support", severity: "major", summary: "Claim support is below threshold." }],
+        actions: [{ id: "ask", tool: "request_operator_clarification", finding_ids: ["claim_support"], rationale: "Ask what to do.", acceptance_criteria: [{ metric: "citation_depth_per_section", target: 1 }] }],
+      },
+    );
+    await runResearchRepairFinalReleasePlan(root);
+    const generated = JSON.parse(await fs.readFile(path.join(root, "reviews", "action-plan.json"), "utf-8"));
+    expect(generated.actions).toEqual(expect.arrayContaining([expect.objectContaining({
+      tool: "revise_sections",
+      acceptance_criteria: expect.arrayContaining([expect.objectContaining({ metric: "claim_support", operator: "at_least", target: 0.9 })]),
+    })]));
+  });
+
+  it("fails closed when a failed release check has a non-string id", async () => {
+    const root = await workspace(
+      { pass: false, checks: [{ id: 42, pass: false }] },
+      { version: 1, findings: [], actions: [] },
+    );
+    await expect(runResearchRepairFinalReleasePlan(root)).rejects.toThrow("invalid final-release recovery plan");
+    await expect(fs.readFile(path.join(root, "reports", "final-release-plan-repair.md"), "utf-8")).resolves.toContain("without a string id");
+  });
+
   it("preserves exact cited-source and review targets and routes concrete table findings", async () => {
     const root = await workspace(
       { pass: false, checks: [

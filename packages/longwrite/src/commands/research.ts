@@ -9,7 +9,7 @@ import { openAICompatibleEmbeddings } from "../lib/research/embeddings.js";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import { snowballWorkspace } from "../lib/research/snowball.js";
-import { AgenticActionPlan, enrichFinalReleaseActionPlan, evidenceCapacity } from "../lib/ops/action-plan.js";
+import { AgenticActionPlan, enrichFinalReleaseActionPlan, evidenceCapacity, gateAcceptanceCriterion } from "../lib/ops/action-plan.js";
 import { prepareCodebases } from "../lib/research/codebase.js";
 import { discoverGithubCodebases, repairGithubCodebaseSelection } from "../lib/research/github-codebase-discovery.js";
 import { importLongExperiment, prepareExperimentEvidence } from "../lib/research/experiment.js";
@@ -769,7 +769,10 @@ export async function runResearchRepairCorpusRecoveryPlan(workspaceDir: string):
       pass?: boolean;
       findings?: Array<{ id?: string; pass?: boolean }>;
     };
-    const failedIds = new Set((corpus.findings ?? []).filter((finding) => finding.pass === false).map((finding) => finding.id).filter((id): id is string => Boolean(id)));
+    if ((corpus.findings ?? []).some((finding) => finding.pass === false && typeof finding.id !== "string")) {
+      throw new Error("corpus-gate report contains a failed finding without a string id");
+    }
+    const failedIds = new Set((corpus.findings ?? []).filter((finding) => finding.pass === false).map((finding) => finding.id).filter((id): id is string => typeof id === "string"));
     if (corpus.pass || failedIds.size === 0) throw new Error("a recovery plan is valid only while a corpus gate is failing");
     if (plan.actions.length !== 1 || plan.actions[0]?.tool !== "targeted_research_expansion") {
       throw new Error("select exactly one targeted_research_expansion action");
@@ -817,10 +820,13 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
       pass?: boolean;
       checks?: Array<{ id?: string; pass?: boolean; findings?: unknown }>;
     };
+    if ((validation.checks ?? []).some((check) => check.pass === false && typeof check.id !== "string")) {
+      throw new Error("final-release validation contains a failed check without a string id");
+    }
     const failedIds = new Set((validation.checks ?? [])
       .filter((check) => check.pass === false)
       .map((check) => check.id)
-      .filter((id): id is string => Boolean(id)));
+      .filter((id): id is string => typeof id === "string"));
     if (validation.pass || failedIds.size === 0) {
       if (plan.actions.length !== 0) throw new Error("a final-release plan must be empty when all release checks pass");
       await fs.mkdir(path.dirname(reportPath), { recursive: true });
@@ -858,10 +864,8 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
     const visuallyOwnedReviewTarget = failedIds.has("rendered_visual_review") && plan.actions.some((action) =>
       action.tool === "revise_visual_plan" && action.finding_ids.includes("review_target")
       && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
-    const proseRequired = [...failedIds].filter((id) => (
-      (repairRouteForGate(id).preferred === "revise_sections" && repairRouteForGate(id).allowed.length === 1)
-      || id === "cited_literature_release_gates"
-    ) && !(id === "review_target" && visuallyOwnedReviewTarget));
+    const proseRequired = [...failedIds].filter((id) => repairRouteForGate(id).preferred === "revise_sections"
+      && !(id === "review_target" && visuallyOwnedReviewTarget));
     const proseMissing = proseRequired.filter((id) => !proseOwned.has(id));
     if (proseMissing.length > 0) {
       throw new Error(`final-release plan must assign revise_sections to: ${proseMissing.join(", ")}`);
@@ -935,6 +939,9 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
     pass?: unknown;
     checks?: Array<{ id?: unknown; pass?: unknown; detail?: unknown; finding?: unknown; findings?: unknown }>;
   };
+  if ((validation.checks ?? []).some((check) => check.pass === false && typeof check.id !== "string")) {
+    throw new Error("final-release validation contains a failed check without a string id");
+  }
   const failed = (validation.checks ?? []).filter((check): check is { id: string; pass?: unknown; detail?: unknown; finding?: unknown; findings?: unknown } =>
     check.pass === false && typeof check.id === "string",
   );
@@ -978,17 +985,6 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       : typeof check.finding === "string" ? check.finding.slice(0, 7_500)
         : `Deterministic final-release validation reports ${check.id} as failing.`,
   }));
-  const criterionForGate = (id: string): AgenticActionPlan["actions"][number]["acceptance_criteria"][number] => {
-    if (id === "landmark_coverage") return { metric: "landmark_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_coverage_ratio, scope: "evidence-backed A/B landmark corpus" };
-    if (id === "landmark_citation_coverage") return { metric: "landmark_citation_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_citation_coverage_ratio, scope: "landmark works cited in chapters/*.md" };
-    if (id === "claim_contradictions") return { metric: "claim_contradictions", operator: "at_most", target: 0, scope: "cross-chapter affirm/deny groups" };
-    if (id === "prose_redundancy") return { metric: "prose_redundancy", operator: "at_most", target: 0, scope: "configured tracked-phrase and repeated-ngram findings" };
-    if (id === "publication_figures" || id === "diagram_connectivity") return { metric: "diagram_connectivity", operator: "at_most", target: 0, scope: "disconnected loop-captioned diagrams" };
-    if (repairRouteForGate(id).preferred === "revise_visual_plan") return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
-    if (id === "claim_support") return { metric: "claim_support", operator: "at_least", target: 0.9, scope: "fresh independently double-reviewed claim sample" };
-    if (id === "review_target") return { metric: "review_score", operator: "at_least", target: 8, scope: "fresh independent multi-persona review" };
-    return { metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" };
-  };
   const actions: AgenticActionPlan["actions"] = [];
   const visual: string[] = failedIds.filter((id) => repairRouteForGate(id).preferred === "revise_visual_plan");
   if (failedIds.includes("review_target") && visualWeaknesses.length > 0) visual.push("review_target");
@@ -1010,7 +1006,7 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       tool: "targeted_research_expansion",
       finding_ids: research,
       rationale: `Run bounded evidence acquisition targeted only at the missing landmark works or coverage cells named by the deterministic release report; refresh classification, full text, evidence extraction, and allocation before any dependent prose repair.${detail ? ` Exact gaps: ${detail}` : ""}`.slice(0, 8_000),
-      acceptance_criteria: research.map(criterionForGate).slice(0, 5),
+      acceptance_criteria: (await Promise.all(research.map((id) => gateAcceptanceCriterion(resolved, id, config)))).slice(0, 5),
     });
   }
   if (prose.length > 0) {
@@ -1032,7 +1028,7 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       acceptance.push({ metric: "cited_within_one_year_ratio", target: config.research.release_gates.min_cited_within_one_year_ratio, scope: "distinct sources cited in chapters/*.md" });
     }
     for (const id of prose) {
-      if (["claim_support", "review_target", "claim_contradictions", "prose_redundancy", "landmark_citation_coverage"].includes(id)) acceptance.push(criterionForGate(id));
+      if (["claim_support", "review_target", "claim_contradictions", "prose_redundancy", "landmark_citation_coverage"].includes(id)) acceptance.push(await gateAcceptanceCriterion(resolved, id, config));
     }
     if (acceptance.length === 0) acceptance.push({ metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" });
     const proseDetail = proseWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
@@ -1052,7 +1048,7 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       finding_ids: [...new Set(visual)],
       rationale: `Repair the named figure/table content, placement, captions, and legibility defects, then require a fresh rendered-PDF review. The visual gate cannot be waived.${visualDetail ? ` Concrete visual findings: ${visualDetail}` : ""}`.slice(0, 8_000),
       acceptance_criteria: [
-        ...visual.filter((id) => id !== "review_target").map(criterionForGate),
+        ...(await Promise.all(visual.filter((id) => id !== "review_target").map((id) => gateAcceptanceCriterion(resolved, id, config)))),
         ...(visual.includes("review_target") ? [{ metric: "review_score" as const, operator: "at_least" as const, target: 8, scope: "fresh independent multi-persona review after visual repair" }] : []),
       ],
     });

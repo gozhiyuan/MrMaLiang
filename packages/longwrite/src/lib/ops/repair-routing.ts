@@ -29,6 +29,7 @@ const ROUTES: Record<string, GateRepairRoute> = {
   latex_build: { preferred: "revise_visual_plan", allowed: ["revise_visual_plan"] },
   latex_outline_structure: { preferred: "revise_visual_plan", allowed: ["revise_visual_plan"] },
   latex_sources: { preferred: "revise_visual_plan", allowed: ["revise_visual_plan"] },
+  manuscript_build: { preferred: "revise_visual_plan", allowed: ["revise_visual_plan"] },
   full_corpus_gates: { preferred: "targeted_research_expansion", allowed: ["targeted_research_expansion"] },
   evidence_coverage: { preferred: "targeted_research_expansion", allowed: ["targeted_research_expansion", "revise_sections"] },
   literature_quality_score: { preferred: "targeted_research_expansion", allowed: ["targeted_research_expansion"] },

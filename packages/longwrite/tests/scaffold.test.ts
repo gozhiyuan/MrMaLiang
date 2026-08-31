@@ -87,6 +87,18 @@ describe("scaffoldWorkspace", () => {
     await expect(scaffoldWorkspace({ mode, targetDir: target, projectId: "survey" }))
       .rejects.toThrow(/Refusing/);
   });
+
+  it("keeps flagship scholarly gates disabled for non-agentic modes", async () => {
+    process.env.LONGWRITE_ROLE_PROFILES_DIR = path.resolve("role-profiles");
+    const root = await makeWorkspaceRoot();
+    const target = path.join(root, "novel");
+    await scaffoldWorkspace({ mode: await loadMode("novel"), targetDir: target, projectId: "novel" });
+    const config = parseYaml(await fs.readFile(path.join(target, "longwrite.yaml"), "utf-8"));
+    expect(config.research.quality_control).toMatchObject({
+      max_tracked_phrase_occurrences: -1,
+      max_repeated_ngram_occurrences: -1,
+    });
+  });
 });
 
 describe("language and style directives", () => {

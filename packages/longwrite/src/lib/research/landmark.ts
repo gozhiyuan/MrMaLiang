@@ -40,18 +40,27 @@ function titleMatches(candidate: string, source: string): boolean {
   const wanted = normalize(candidate).split(" ").filter(Boolean);
   const actual = normalize(source).split(" ").filter(Boolean);
   if (wanted.length === 0 || actual.length === 0) return false;
-  if (wanted.join(" ") === actual.join(" ")) return true;
-  for (let i = 0; i + wanted.length <= actual.length; i += 1) {
-    if (wanted.every((token, offset) => actual[i + offset] === token)) return true;
-  }
-  return false;
+  const containsSequence = (container: string[], sequence: string[]): boolean => {
+    for (let i = 0; i + sequence.length <= container.length; i += 1) {
+      if (sequence.every((token, offset) => container[i + offset] === token)) return true;
+    }
+    return false;
+  };
+  if (containsSequence(actual, wanted)) return true;
+  // Landmark scouts sometimes record the full canonical title while a
+  // provider returns its distinctive short title. Exact tokens avoid the old
+  // substring false positives (STOP must never match "stopping"). A lone
+  // abbreviated token must be distinctive enough not to be generic noise.
+  if (actual.length === 1 && actual[0]!.length < 5) return false;
+  return containsSequence(wanted, actual);
 }
 
 export type LandmarkMatch = { candidate: string; matchedSourceId: string | null; matchedBy: "identifier" | "title" | null };
 
 /** Identifier matches are normalized but exact and unambiguous. Title matching
- * requires an exact contiguous token sequence, so a short landmark such as
- * "AFlow" can match a titled paper without matching an unrelated substring. */
+ * requires an exact contiguous token sequence in either direction, so a short
+ * distinctive title can match its canonical long form without matching an
+ * unrelated substring. */
 export function matchLandmarksToCorpus(
   candidates: LandmarkCandidates["candidates"],
   sources: ClassifiedSource[],

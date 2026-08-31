@@ -35,6 +35,15 @@ describe("landmark matching and coverage", () => {
     expect(matches[0]!.matchedBy).toBe("title");
   });
 
+  it("matches a provider's abbreviated title when the scout recorded the full canonical title", () => {
+    const candidates = LandmarkCandidates.parse({
+      version: 1,
+      candidates: [{ name: "Promptbreeder: Self-Referential Self-Improvement Via Prompt Evolution", why_canonical: "Evolves both task prompts and the mutation prompts that improve them.", confidence: "medium" }],
+    }).candidates;
+    const matches = matchLandmarksToCorpus(candidates, [source({ id: "pb", title: "Promptbreeder" })]);
+    expect(matches[0]!.matchedSourceId).toBe("pb");
+  });
+
   it("leaves a landmark unmatched when absent from the corpus", () => {
     const candidates = LandmarkCandidates.parse({
       version: 1,
