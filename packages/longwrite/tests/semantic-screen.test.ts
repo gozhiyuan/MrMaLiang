@@ -63,7 +63,7 @@ describe("agentic semantic-screen contract", () => {
       packets: [
         { source_id: "paper-a", recommended_depth: "A", claims: [
           { claim: "The method stores episodic traces.", supporting_excerpt: "Memory architecture stores episodic traces", locator: "opening", comparison_dimensions: ["memory representation"], limitations: [], later_use: "not_reported" },
-          { claim: "Planning retrieves traces before tool use.", supporting_excerpt: "Planning retrieves traces before tool use", locator: "opening", comparison_dimensions: ["planning integration"], limitations: ["The excerpt reports one retrieval ablation."] },
+          { claim: "Planning retrieves traces before tool use.", supporting_excerpt: "Planning retrieves traces before tool use", locator: "opening", comparison_dimensions: ["planning integration"], limitations: ["The excerpt reports one retrieval ablation."], later_use: "not_reported" },
         ] },
         { source_id: "paper-b", recommended_depth: "B", claims: [
           { claim: "The baseline stores concise summaries and reports lower retrieval cost.", supporting_excerpt: "The comparison baseline stores concise task summaries", locator: "opening", comparison_dimensions: ["retrieval cost"], limitations: [], later_use: "not_reported" },

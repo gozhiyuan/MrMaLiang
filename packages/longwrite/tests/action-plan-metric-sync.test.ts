@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import url from "node:url";
-import { AcceptanceCriterion } from "../src/lib/ops/action-plan.js";
+import { ACCEPTANCE_METRICS } from "../src/lib/ops/action-plan.js";
 
 /**
  * Final whole-branch review (2026-08-29 scholarly-quality-v3-core), Critical
@@ -56,7 +56,7 @@ describe("action_plan planner instruction vs. AcceptanceCriterion.metric enum", 
     expect(promptMetrics).toEqual(expect.arrayContaining([
       "landmark_coverage_ratio", "claim_contradictions", "prose_redundancy", "diagram_connectivity",
     ]));
-    const schemaMetrics = new Set(AcceptanceCriterion.shape.metric.options as string[]);
+    const schemaMetrics = new Set<string>(ACCEPTANCE_METRICS);
     const unknown = promptMetrics.filter((metric) => !schemaMetrics.has(metric));
     expect(unknown).toEqual([]);
   });

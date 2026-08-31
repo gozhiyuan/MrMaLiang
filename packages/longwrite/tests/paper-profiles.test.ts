@@ -31,6 +31,9 @@ describe("paper profile registry", () => {
     expect(short.minPages).toBe(20);
     expect(short.releaseGates.min_cited_sources).toBe(30);
     expect(short.researchBudget.targetCandidates).toBe(160);
+    expect(short.corpusGates.min_landmark_coverage_ratio).toBeGreaterThan(0);
+    expect(short.corpusGates.min_landmark_citation_coverage_ratio).toBeGreaterThan(0);
+    expect(short.qualityControl.max_tracked_phrase_occurrences).toBe(0);
     expect(long.targetWords).toBe(24_000);
     expect(long.releaseGates).toEqual(paperProfile("flagship_long_paper").releaseGates);
   });

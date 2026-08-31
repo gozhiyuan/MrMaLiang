@@ -430,8 +430,8 @@ export async function selectSourceEvidenceCandidates(workspaceDir: string): Prom
  * system-card fields rather than that the source genuinely lacks any
  * evaluable self-improvement mechanism (which would still be recorded, as
  * not_reported/not_applicable, not omitted). */
-function packetLacksSystemCardStatus(packet: { claims: Array<{ later_use?: string; cross_task_transfer?: string; meta_improvement?: string }> }): boolean {
-  return packet.claims.every((claim) => claim.later_use === undefined && claim.cross_task_transfer === undefined && claim.meta_improvement === undefined);
+function claimLacksSystemCardStatus(claim: { later_use?: string; cross_task_transfer?: string; meta_improvement?: string }): boolean {
+  return claim.later_use === undefined && claim.cross_task_transfer === undefined && claim.meta_improvement === undefined;
 }
 
 /** Validates semantic extraction without treating the model's assertion as a
@@ -474,8 +474,8 @@ export async function repairSourceEvidencePackets(workspaceDir: string): Promise
         if (!isClaimBearingEvidenceExcerpt(claim.supporting_excerpt, candidate.title)) {
           throw new Error(`packet ${packet.source_id} excerpt is bibliographic/provider metadata rather than claim-bearing evidence; select substantive source prose from ${rel}`);
         }
-        if (packet.recommended_depth !== "C" && packetLacksSystemCardStatus(packet)) {
-          throw new Error(`packet ${packet.source_id} claims record no later_use/cross_task_transfer/meta_improvement status; A/B-depth system cards must record at least one system-improvement status field, using not_reported only after inspecting the full text, not because the extracted excerpt was short`);
+        if (packet.recommended_depth !== "C" && claimLacksSystemCardStatus(claim)) {
+          throw new Error(`packet ${packet.source_id} contains an A/B-depth claim with no later_use/cross_task_transfer/meta_improvement status; every claim must record at least one system-improvement status field, using not_reported only after inspecting the full text`);
         }
       }
       const minimum = packet.recommended_depth === "A" ? config.research.semantic_screen.min_supported_claims_for_a : config.research.semantic_screen.min_supported_claims_for_b;

@@ -29,6 +29,16 @@ type CorpusGates = {
   min_core_sources: number;
   min_recent_ratio: number;
   min_source_type_diversity: number;
+  min_landmark_coverage_ratio: number;
+  min_landmark_citation_coverage_ratio: number;
+};
+
+type QualityControl = {
+  max_improvement_rounds: number;
+  tracked_phrases: string[];
+  max_tracked_phrase_occurrences: number;
+  repeated_ngram_size: number;
+  max_repeated_ngram_occurrences: number;
 };
 
 type FigureGates = {
@@ -70,6 +80,7 @@ export type PaperProfile = {
   };
   releaseGates: ReleaseGates;
   corpusGates: CorpusGates;
+  qualityControl: QualityControl;
   figureGates: FigureGates;
   requiresCodebase: boolean;
   requiredVisualIds: string[];
@@ -101,7 +112,8 @@ const flagshipLongPaper: PaperProfile = {
     // infeasible for a valid corpus (and C is not a higher-quality tier).
     min_citation_depths_per_section: { A: 0, B: 2, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 2,
   },
-  corpusGates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 4 },
+  corpusGates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 4, min_landmark_coverage_ratio: 0.8, min_landmark_citation_coverage_ratio: 0.7 },
+  qualityControl: { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: 0, repeated_ngram_size: 5, max_repeated_ngram_occurrences: 3 },
   evidenceBudget: { maxCandidates: 200, maxEvidenceSources: 96 },
   researchBudget: { targetCandidates: 400, queryBudget: 50, fulltextMaxSources: 100, verificationMaxSources: 100 },
   // A publication-quality survey needs reader-relevant comparisons, not a
@@ -126,7 +138,8 @@ const flagshipLongGithubPaper: PaperProfile = {
     min_accepted_cited_ratio: 0.25, max_cited_arxiv_only_ratio: 0.55,
     min_citation_depths_per_section: { A: 0, B: 1, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 0,
   },
-  corpusGates: { min_candidates: 160, min_sources_per_taxonomy_cell: 0, min_core_sources: 14, min_recent_ratio: 0.2, min_source_type_diversity: 3 },
+  corpusGates: { min_candidates: 160, min_sources_per_taxonomy_cell: 0, min_core_sources: 14, min_recent_ratio: 0.2, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0.7, min_landmark_citation_coverage_ratio: 0.5 },
+  qualityControl: { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: 0, repeated_ngram_size: 5, max_repeated_ngram_occurrences: 3 },
   evidenceBudget: { maxCandidates: 160, maxEvidenceSources: 68 },
   researchBudget: { targetCandidates: 240, queryBudget: 32, fulltextMaxSources: 68, verificationMaxSources: 68 },
   // No count target here either, for the same reason as the survey profile: a
@@ -160,7 +173,8 @@ const flagshipShortPaper: PaperProfile = {
     min_accepted_cited_ratio: 0.3, max_cited_arxiv_only_ratio: 0.5,
     min_citation_depths_per_section: { A: 0, B: 1, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 1,
   },
-  corpusGates: { min_candidates: 120, min_sources_per_taxonomy_cell: 2, min_core_sources: 12, min_recent_ratio: 0.25, min_source_type_diversity: 3 },
+  corpusGates: { min_candidates: 120, min_sources_per_taxonomy_cell: 2, min_core_sources: 12, min_recent_ratio: 0.25, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0.75, min_landmark_citation_coverage_ratio: 0.6 },
+  qualityControl: { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: 0, repeated_ngram_size: 5, max_repeated_ngram_occurrences: 2 },
   evidenceBudget: { maxCandidates: 120, maxEvidenceSources: 56 },
   researchBudget: { targetCandidates: 160, queryBudget: 24, fulltextMaxSources: 56, verificationMaxSources: 56 },
 };
@@ -176,7 +190,8 @@ const flagshipShortGithubPaper: PaperProfile = {
     min_accepted_cited_ratio: 0.2, max_cited_arxiv_only_ratio: 0.6,
     min_citation_depths_per_section: { A: 0, B: 1, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 0,
   },
-  corpusGates: { min_candidates: 75, min_sources_per_taxonomy_cell: 0, min_core_sources: 8, min_recent_ratio: 0.15, min_source_type_diversity: 2 },
+  corpusGates: { min_candidates: 75, min_sources_per_taxonomy_cell: 0, min_core_sources: 8, min_recent_ratio: 0.15, min_source_type_diversity: 2, min_landmark_coverage_ratio: 0.65, min_landmark_citation_coverage_ratio: 0.5 },
+  qualityControl: { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: 0, repeated_ngram_size: 5, max_repeated_ngram_occurrences: 2 },
   evidenceBudget: { maxCandidates: 75, maxEvidenceSources: 36 },
   researchBudget: { targetCandidates: 120, queryBudget: 16, fulltextMaxSources: 36, verificationMaxSources: 36 },
 };

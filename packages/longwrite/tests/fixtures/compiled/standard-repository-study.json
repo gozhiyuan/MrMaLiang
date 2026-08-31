@@ -49,6 +49,17 @@
         "validators": [
           "required_output_exists"
         ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "landmarks",
+              "."
+            ]
+          }
+        ],
         "phase": "research"
       },
       {
@@ -2010,6 +2021,7 @@
           "When reviews/cited-source-upgrade-packet.json has required_distinct_additions > 0, it is a binding cited-source worklist. Add at least that many DISTINCT addition_candidates to their named chapters, writing a useful claim or evidence-boundary statement directly supported by each evidence_excerpt and preserving its exact_marker. Report every added source_id and chapter_path in reviews/revision-report.md. Bibliography padding, stacked citations without a supported textual role, and markers added only to raise a count do not satisfy the contract.",
           "When reviews/cited-source-upgrade-packet.json has required_replacements > 0, it is also a binding release-ratio worklist. Replace at least that many listed nonaccepted citations with distinct accepted replacement markers in the named chapter, or narrow/remove the old claim and write an accepted, packet-backed claim. Do not merely change classification metadata or cite a replacement whose packet cannot support the prose.",
           "Use reviews/artifact-plan.json when it selects a formalization. Decide the exact notation and wording from the cited evidence, define every symbol nearby, and omit the formula if the evidence cannot support a useful formalization. Never fabricate an equation, theorem, or experimental result.",
+          "Never expose evidence-pipeline bookkeeping as reader-facing prose. In particular, do not call sources or evidence records packets, do not write 'not specified in packet', and do not fill tables with pipeline-status placeholders. Translate evidence boundaries into precise scholarly statements about what the cited work reports, does not evaluate, or leaves unresolved.",
           "Configured repositories are pinned codebase evidence, not scholarly literature. Use evidence/codebase-analysis.json as the validated architecture dossier and inspect its exact file/line locators before making a repository claim. Cite `[codebase:<id>]` or `[codebase:<id>:path#Lx-Ly]`; never claim execution results unless a verified empirical result artifact is supplied.",
           "Evaluate whether the manuscript's architecture, entrypoint, interface, data/control-flow, configuration, trust-boundary, and limitation claims agree with evidence/codebase-analysis.json and its exact locators. Treat missing or contradictory repository grounding as a measurable evidence/structure defect; do not award credit for merely mentioning the repository."
         ],

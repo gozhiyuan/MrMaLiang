@@ -16,6 +16,7 @@ import { importLongExperiment, prepareExperimentEvidence } from "../lib/research
 import { repairCodebaseAnalysis } from "../lib/research/codebase-analysis.js";
 import { repairCodebaseComparison } from "../lib/research/codebase-comparison.js";
 import { loadSearchPlan, type SearchPlan } from "../lib/research/search-plan.js";
+import { gateOwnedByTool, repairRouteForGate } from "../lib/ops/repair-routing.js";
 
 /** Copy only a reviewed, publication-eligible LongExperiment result into the
  * paper workspace. LongWrite validates the copied manifest again at release. */
@@ -838,6 +839,13 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
     }
     const missing = [...failedIds].filter((id) => !addressed.has(id));
     if (missing.length > 0) throw new Error(`final-release plan does not address failed checks: ${missing.join(", ")}`);
+    const ownershipMissing = [...failedIds].filter((id) => !plan.actions.some((action) =>
+      action.tool !== "request_operator_clarification"
+      && action.finding_ids.includes(id)
+      && gateOwnedByTool(id, action.tool)));
+    if (ownershipMissing.length > 0) {
+      throw new Error(`final-release plan assigns no compatible repair capability to: ${ownershipMissing.join(", ")}`);
+    }
     // An outline is a planning artifact and an evidence expansion only makes
     // new material available.  Neither changes the rendered manuscript on
     // its own.  Require a prose revision to explicitly own failures whose
@@ -850,10 +858,10 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
     const visuallyOwnedReviewTarget = failedIds.has("rendered_visual_review") && plan.actions.some((action) =>
       action.tool === "revise_visual_plan" && action.finding_ids.includes("review_target")
       && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
-    const proseRequired = [...failedIds].filter((id) =>
-      ["claim_support", "review_target", "taxonomy_direct_evidence", "cited_literature_release_gates"].includes(id)
-      && !(id === "review_target" && visuallyOwnedReviewTarget),
-    );
+    const proseRequired = [...failedIds].filter((id) => (
+      (repairRouteForGate(id).preferred === "revise_sections" && repairRouteForGate(id).allowed.length === 1)
+      || id === "cited_literature_release_gates"
+    ) && !(id === "review_target" && visuallyOwnedReviewTarget));
     const proseMissing = proseRequired.filter((id) => !proseOwned.has(id));
     if (proseMissing.length > 0) {
       throw new Error(`final-release plan must assign revise_sections to: ${proseMissing.join(", ")}`);
@@ -889,10 +897,9 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
     if (executable.length === 0) {
       throw new Error("final-release plan cannot use request_operator_clarification as its only corrective action");
     }
-    const visualRequired = failedIds.has("rendered_visual_review");
-    if (visualRequired && !plan.actions.some((action) => action.tool === "revise_visual_plan" && action.finding_ids.includes("rendered_visual_review"))) {
-      throw new Error("final-release plan must assign revise_visual_plan to rendered_visual_review");
-    }
+    const visualMissing = [...failedIds].filter((id) => repairRouteForGate(id).preferred === "revise_visual_plan"
+      && !plan.actions.some((action) => action.tool === "revise_visual_plan" && action.finding_ids.includes(id)));
+    if (visualMissing.length > 0) throw new Error(`final-release plan must assign revise_visual_plan to: ${visualMissing.join(", ")}`);
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, [
       "# Final-release plan validation", "", "- Status: pass",
@@ -971,8 +978,19 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       : typeof check.finding === "string" ? check.finding.slice(0, 7_500)
         : `Deterministic final-release validation reports ${check.id} as failing.`,
   }));
+  const criterionForGate = (id: string): AgenticActionPlan["actions"][number]["acceptance_criteria"][number] => {
+    if (id === "landmark_coverage") return { metric: "landmark_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_coverage_ratio, scope: "evidence-backed A/B landmark corpus" };
+    if (id === "landmark_citation_coverage") return { metric: "landmark_citation_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_citation_coverage_ratio, scope: "landmark works cited in chapters/*.md" };
+    if (id === "claim_contradictions") return { metric: "claim_contradictions", operator: "at_most", target: 0, scope: "cross-chapter affirm/deny groups" };
+    if (id === "prose_redundancy") return { metric: "prose_redundancy", operator: "at_most", target: 0, scope: "configured tracked-phrase and repeated-ngram findings" };
+    if (id === "publication_figures" || id === "diagram_connectivity") return { metric: "diagram_connectivity", operator: "at_most", target: 0, scope: "disconnected loop-captioned diagrams" };
+    if (repairRouteForGate(id).preferred === "revise_visual_plan") return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
+    if (id === "claim_support") return { metric: "claim_support", operator: "at_least", target: 0.9, scope: "fresh independently double-reviewed claim sample" };
+    if (id === "review_target") return { metric: "review_score", operator: "at_least", target: 8, scope: "fresh independent multi-persona review" };
+    return { metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" };
+  };
   const actions: AgenticActionPlan["actions"] = [];
-  const visual: string[] = failedIds.filter((id) => id === "rendered_visual_review");
+  const visual: string[] = failedIds.filter((id) => repairRouteForGate(id).preferred === "revise_visual_plan");
   if (failedIds.includes("review_target") && visualWeaknesses.length > 0) visual.push("review_target");
   // A low aggregate review score can be caused entirely by a blocking visual
   // defect. In that case, routing review_target to both prose and visual tools
@@ -981,7 +999,20 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
   // minor and the rendered visual gate is independently failing.
   const visualOnlyReviewTarget = failedIds.includes("rendered_visual_review")
     && blockingVisualWeaknesses.length > 0 && blockingProseWeaknesses.length === 0;
-  const prose = failedIds.filter((id) => id !== "rendered_visual_review" && !(id === "review_target" && visualOnlyReviewTarget));
+  const research = failedIds.filter((id) => repairRouteForGate(id).preferred === "targeted_research_expansion");
+  const prose = failedIds.filter((id) => repairRouteForGate(id).preferred === "revise_sections" && !(id === "review_target" && visualOnlyReviewTarget));
+  if (research.length > 0) {
+    const detail = failed.filter((check) => research.includes(check.id))
+      .flatMap((check) => Array.isArray(check.findings) ? check.findings.filter((finding): finding is string => typeof finding === "string") : [])
+      .join("; ");
+    actions.push({
+      id: "required-final-release-research-repair",
+      tool: "targeted_research_expansion",
+      finding_ids: research,
+      rationale: `Run bounded evidence acquisition targeted only at the missing landmark works or coverage cells named by the deterministic release report; refresh classification, full text, evidence extraction, and allocation before any dependent prose repair.${detail ? ` Exact gaps: ${detail}` : ""}`.slice(0, 8_000),
+      acceptance_criteria: research.map(criterionForGate).slice(0, 5),
+    });
+  }
   if (prose.length > 0) {
     const citedFinding = failed.find((check) => check.id === "cited_literature_release_gates");
     const citedText = Array.isArray(citedFinding?.findings)
@@ -1000,9 +1031,10 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
     if (/within[_ -]?1yr|within one year/i.test(citedText)) {
       acceptance.push({ metric: "cited_within_one_year_ratio", target: config.research.release_gates.min_cited_within_one_year_ratio, scope: "distinct sources cited in chapters/*.md" });
     }
-    if (failedIds.includes("claim_support")) acceptance.push({ metric: "claim_support", target: 0.9, scope: "fresh independently double-reviewed claim sample" });
-    if (failedIds.includes("review_target")) acceptance.push({ metric: "review_score", target: 8, scope: "fresh independent multi-persona review" });
-    if (acceptance.length === 0) acceptance.push({ metric: "citation_depth_per_section", target: 1, scope: "sections named by the current release assessment" });
+    for (const id of prose) {
+      if (["claim_support", "review_target", "claim_contradictions", "prose_redundancy", "landmark_citation_coverage"].includes(id)) acceptance.push(criterionForGate(id));
+    }
+    if (acceptance.length === 0) acceptance.push({ metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" });
     const proseDetail = proseWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
     actions.push({
       id: "required-final-release-prose-repair",
@@ -1020,8 +1052,8 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
       finding_ids: [...new Set(visual)],
       rationale: `Repair the named figure/table content, placement, captions, and legibility defects, then require a fresh rendered-PDF review. The visual gate cannot be waived.${visualDetail ? ` Concrete visual findings: ${visualDetail}` : ""}`.slice(0, 8_000),
       acceptance_criteria: [
-        { metric: "rendered_visual_review", target: 1, scope: "fresh rendered PDF review" },
-        ...(visual.includes("review_target") ? [{ metric: "review_score" as const, target: 8, scope: "fresh independent multi-persona review after visual repair" }] : []),
+        ...visual.filter((id) => id !== "review_target").map(criterionForGate),
+        ...(visual.includes("review_target") ? [{ metric: "review_score" as const, operator: "at_least" as const, target: 8, scope: "fresh independent multi-persona review after visual repair" }] : []),
       ],
     });
   }

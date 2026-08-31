@@ -920,6 +920,14 @@ validate
   });
 
 validate
+  .command("landmarks <workspace>")
+  .description("Validate the landmark-scout candidate contract")
+  .action(async (workspace) => {
+    const { runValidateLandmarks } = await import("./commands/validate.js");
+    await runValidateLandmarks(workspace);
+  });
+
+validate
   .command("scorecard <workspace>")
   .description("Validate reviews/scorecard.json against the multi-persona schema")
   .action(async (workspace) => {

@@ -254,14 +254,14 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         ? { enabled: true, max_candidates: selectedPaperProfile.evidenceBudget.maxCandidates, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: selectedPaperProfile.evidenceBudget.maxEvidenceSources, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }
         : { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 },
       expansion: { max_queries_per_run: 6, target_candidates: 120, provider_timeout_seconds: 20 },
-      quality_control: { max_improvement_rounds: 3 },
+      quality_control: selectedPaperProfile.qualityControl,
       outline_review: mode.id === "auto_research_agentic"
         ? { enabled: true, max_rounds: 2, approval_mode: "auto" }
         : { enabled: false, max_rounds: 2, approval_mode: "auto" },
       verification: { max_sources: isResearchMode ? selectedPaperProfile.researchBudget.verificationMaxSources : 30 },
       corpus_gates: mode.id === "auto_research_agentic"
         ? selectedPaperProfile.corpusGates
-        : { min_candidates: 40, min_sources_per_taxonomy_cell: 1, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1 },
+        : { min_candidates: 40, min_sources_per_taxonomy_cell: 1, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1, min_landmark_coverage_ratio: 0, min_landmark_citation_coverage_ratio: 0 },
       writing_strategy: writingStrategy,
       retrieval: { backend: "sqlite_fts", embedding_model: "text-embedding-3-small" },
     },
@@ -441,6 +441,20 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
         exclusion_terms: [],
         venue_priorities: [],
         rationale: "dry-run fixture: single topic-derived query",
+      }, null, 2),
+      "utf-8",
+    );
+    const landmarkDir = path.join(fixturesRoot, "research");
+    await fs.mkdir(landmarkDir, { recursive: true });
+    await fs.writeFile(
+      path.join(landmarkDir, "landmark-candidates.json"),
+      JSON.stringify({
+        version: 1,
+        candidates: [{
+          name: "Dry-run representative landmark",
+          why_canonical: "A deterministic fixture used only to exercise the landmark contract without live research.",
+          confidence: "medium",
+        }],
       }, null, 2),
       "utf-8",
     );

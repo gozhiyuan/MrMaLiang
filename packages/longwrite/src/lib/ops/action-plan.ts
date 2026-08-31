@@ -2,6 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { loadProjectConfig } from "../project-config.js";
+import { gateOwnedByTool, repairRouteForGate } from "./repair-routing.js";
+
+export const ACCEPTANCE_METRICS = ["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review", "empirical_trials", "outline_readiness", "review_score", "claim_support", "landmark_coverage_ratio", "landmark_citation_coverage_ratio", "claim_contradictions", "prose_redundancy", "diagram_connectivity"] as const;
 
 export const AcceptanceCriterion = z.object({
   /** Each metric is mechanically observable in the workspace or by the
@@ -9,10 +12,19 @@ export const AcceptanceCriterion = z.object({
    * Keep this list in sync with the `action_plan` planner instruction in
    * `src/workflow/composition.ts` (the "Use cited_sources, ..." sentence) —
    * see tests/action-plan-metric-sync.test.ts, which fails if they drift. */
-  metric: z.enum(["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review", "empirical_trials", "outline_readiness", "review_score", "claim_support", "landmark_coverage_ratio", "claim_contradictions", "prose_redundancy", "diagram_connectivity"]),
+  metric: z.enum(ACCEPTANCE_METRICS),
+  operator: z.enum(["at_least", "at_most", "equals"]).optional(),
   target: z.number().nonnegative(),
   scope: z.string().min(1).max(160).optional(),
-}).strict();
+}).strict().superRefine((criterion, ctx) => {
+  const inverse = ["claim_contradictions", "prose_redundancy", "diagram_connectivity"].includes(criterion.metric);
+  if (inverse && criterion.operator !== "at_most" && criterion.operator !== "equals") {
+    ctx.addIssue({ code: "custom", path: ["operator"], message: `${criterion.metric} requires operator at_most or equals` });
+  }
+  if ((criterion.metric === "landmark_coverage_ratio" || criterion.metric === "landmark_citation_coverage_ratio") && criterion.operator !== "at_least") {
+    ctx.addIssue({ code: "custom", path: ["operator"], message: `${criterion.metric} requires operator at_least` });
+  }
+});
 
 /** The only content an agentic planner may choose. Tool authorization lives in
  * MalaClaw's workflow catalog; this file makes planner output durable,
@@ -48,6 +60,28 @@ export const AgenticActionPlan = z.object({
 });
 
 export type AgenticActionPlan = z.infer<typeof AgenticActionPlan>;
+
+function criterionText(criterion: z.infer<typeof AcceptanceCriterion>): string {
+  const symbol = criterion.operator === "at_most" ? "<=" : criterion.operator === "equals" ? "=" : ">=";
+  return `${criterion.metric}${criterion.scope ? `(${criterion.scope})` : ""} ${symbol} ${criterion.target}`;
+}
+
+async function gateAcceptanceCriterion(
+  workspaceDir: string,
+  gateId: string,
+): Promise<z.infer<typeof AcceptanceCriterion>> {
+  if (gateId === "landmark_coverage" || gateId === "landmark_citation_coverage") {
+    const config = await loadProjectConfig(workspaceDir);
+    return gateId === "landmark_coverage"
+      ? { metric: "landmark_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_coverage_ratio, scope: "evidence-backed A/B landmark corpus" }
+      : { metric: "landmark_citation_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_citation_coverage_ratio, scope: "landmark works cited in chapters/*.md" };
+  }
+  if (gateId === "claim_contradictions") return { metric: "claim_contradictions", operator: "at_most", target: 0, scope: "cross-chapter affirm/deny groups" };
+  if (gateId === "prose_redundancy") return { metric: "prose_redundancy", operator: "at_most", target: 0, scope: "configured tracked-phrase and repeated-ngram findings" };
+  if (gateId === "diagram_connectivity" || gateId === "publication_figures") return { metric: "diagram_connectivity", operator: "at_most", target: 0, scope: "disconnected loop-captioned diagrams" };
+  if (repairRouteForGate(gateId).preferred === "revise_visual_plan") return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
+  return { metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" };
+}
 
 function unwrapFence(raw: string): { content: string; normalized: boolean } {
   const trimmed = raw.trim();
@@ -354,7 +388,7 @@ export async function repairAgenticActionPlan(workspaceDir: string): Promise<{ n
     `- Findings: ${plan.findings.length}`,
     `- Selected actions: ${plan.actions.length}`,
     ...plan.actions.flatMap((action) => [
-      `- ${action.id} criteria: ${action.acceptance_criteria.map((criterion) => `${criterion.metric}${criterion.scope ? `(${criterion.scope})` : ""} >= ${criterion.target}`).join("; ")}`,
+      `- ${action.id} criteria: ${action.acceptance_criteria.map(criterionText).join("; ")}`,
     ]),
     `- Envelope normalized: ${normalized ? "yes" : "no"}`,
     `- Duplicate tool actions merged: ${merged.merged.length > 0 ? merged.merged.join(", ") : "none"}`,
@@ -414,17 +448,32 @@ export async function enrichFinalReleaseActionPlan(workspaceDir: string): Promis
     && action.finding_ids.includes("review_target")
     && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
   const proseIds = [...failedIds].filter((id) => namedFindings.has(id)
-    && ["claim_support", "review_target", "taxonomy_direct_evidence", "cited_literature_release_gates"].includes(id)
+    && repairRouteForGate(id).preferred === "revise_sections"
     && !(id === "review_target" && visuallyOwnedReviewTarget));
   const proseOwned = new Set(actions.filter((action) => action.tool === "revise_sections").flatMap((action) => action.finding_ids));
   const proseMissing = proseIds.filter((id) => !proseOwned.has(id));
   if (proseMissing.length > 0) {
+    const criteria = await Promise.all(proseMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
     actions.push({
       id: "required-final-release-prose-repair",
       tool: "revise_sections",
       finding_ids: proseMissing,
       rationale: "These deterministic release failures require an evidence-backed manuscript revision. Preserve all configured release thresholds, use the current packet-backed evidence, and narrow or remove claims that cannot be supported.",
-      acceptance_criteria: [{ metric: "citation_depth_per_section", target: 1, scope: "sections named by the current release assessment" }],
+      acceptance_criteria: criteria.slice(0, 5),
+    });
+  }
+  const explicitResearchIds = [...failedIds].filter((id) => namedFindings.has(id)
+    && repairRouteForGate(id).preferred === "targeted_research_expansion");
+  const researchMissing = explicitResearchIds.filter((id) => !actions.some((action) =>
+    action.finding_ids.includes(id) && gateOwnedByTool(id, action.tool)));
+  if (researchMissing.length > 0) {
+    const criteria = await Promise.all(researchMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
+    actions.unshift({
+      id: "required-final-release-research-repair",
+      tool: "targeted_research_expansion",
+      finding_ids: researchMissing,
+      rationale: "These deterministic coverage failures require bounded, finding-specific evidence acquisition before any manuscript revision. Target only the missing works or coverage cells named by the release report.",
+      acceptance_criteria: criteria.slice(0, 5),
     });
   }
   // Preserve the validator's actual quantitative contract on the executable
@@ -446,13 +495,18 @@ export async function enrichFinalReleaseActionPlan(workspaceDir: string): Promis
       .filter((criterion, index, all) => all.findIndex((candidate) => candidate.metric === criterion.metric && candidate.scope === criterion.scope) === index)
       .slice(0, 5);
   }
-  if (failedIds.has("rendered_visual_review") && namedFindings.has("rendered_visual_review") && !actions.some((action) => action.tool === "revise_visual_plan" && action.finding_ids.includes("rendered_visual_review"))) {
+  const explicitVisualIds = [...failedIds].filter((id) => namedFindings.has(id)
+    && repairRouteForGate(id).preferred === "revise_visual_plan");
+  const visualMissing = explicitVisualIds.filter((id) => !actions.some((action) =>
+    action.finding_ids.includes(id) && gateOwnedByTool(id, action.tool)));
+  if (visualMissing.length > 0) {
+    const criteria = await Promise.all(visualMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
     actions.push({
       id: "required-final-release-visual-repair",
       tool: "revise_visual_plan",
-      finding_ids: ["rendered_visual_review"],
+      finding_ids: visualMissing,
       rationale: "A failed rendered visual review requires a durable figure/table placement or layout repair and a fresh rendered-PDF review; it cannot be waived by a planner posture.",
-      acceptance_criteria: [{ metric: "rendered_visual_review", target: 1, scope: "fresh rendered PDF review" }],
+      acceptance_criteria: criteria.slice(0, 5),
     });
   }
   enriched = mergeDuplicateToolActions(AgenticActionPlan.parse({ ...enriched, findings, actions })).plan;
@@ -462,7 +516,7 @@ export async function enrichFinalReleaseActionPlan(workspaceDir: string): Promis
     await fs.writeFile(`${target}.pre-final-release-enrichment.json`, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
     await fs.writeFile(target, `${JSON.stringify(enriched, null, 2)}\n`, "utf-8");
   }
-  return { added: [...routed.required, ...(proseMissing.length > 0 ? ["revise_sections"] : []), ...(failedIds.has("rendered_visual_review") ? ["revise_visual_plan"] : [])] };
+  return { added: [...routed.required, ...(researchMissing.length > 0 ? ["targeted_research_expansion"] : []), ...(proseMissing.length > 0 ? ["revise_sections"] : []), ...(visualMissing.length > 0 ? ["revise_visual_plan"] : [])] };
 }
 
 /** Preserve one LLM decision record while dispatching it in dependency order:

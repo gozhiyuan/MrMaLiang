@@ -20,6 +20,7 @@ import { CodebaseComparisonPacket, validateCodebaseComparison } from "../researc
 import { checkVisualReviewReleaseGate } from "../ops/visual-review.js";
 import { computeRedundancy } from "../research/redundancy.js";
 import { detectContradictions, type ClaimJudgment } from "../research/contradiction.js";
+import { ClaimJudgment as ClaimJudgmentSchema } from "../ops/claim-gate.js";
 import { LandmarkCandidates, matchLandmarksToCorpus, computeLandmarkCoverage } from "../research/landmark.js";
 
 const execFile = promisify(execFileCallback);
@@ -335,14 +336,16 @@ function checkLiteratureQuality(sources: ClassifiedSource[]): ValidationCheck {
 
 function checkProseRedundancy(
   chapters: Array<{ rel: string; content: string }>,
-  thresholds: { max_tracked_phrase_occurrences: number; max_repeated_ngram_occurrences: number },
+  thresholds: { tracked_phrases: string[]; max_tracked_phrase_occurrences: number; repeated_ngram_size: number; max_repeated_ngram_occurrences: number },
 ): ValidationCheck {
-  if (thresholds.max_tracked_phrase_occurrences <= 0 && thresholds.max_repeated_ngram_occurrences <= 0) {
+  if (thresholds.max_tracked_phrase_occurrences < 0 && thresholds.max_repeated_ngram_occurrences < 0) {
     return { id: "prose_redundancy", pass: true, findings: ["prose redundancy gate is not configured"] };
   }
   const report = computeRedundancy(chapters, {
-    maxTrackedOccurrences: thresholds.max_tracked_phrase_occurrences || Number.MAX_SAFE_INTEGER,
-    maxNgramOccurrences: thresholds.max_repeated_ngram_occurrences || Number.MAX_SAFE_INTEGER,
+    trackedPhrases: thresholds.tracked_phrases,
+    maxTrackedOccurrences: thresholds.max_tracked_phrase_occurrences < 0 ? Number.MAX_SAFE_INTEGER : thresholds.max_tracked_phrase_occurrences,
+    ngramSize: thresholds.repeated_ngram_size,
+    maxNgramOccurrences: thresholds.max_repeated_ngram_occurrences < 0 ? Number.MAX_SAFE_INTEGER : thresholds.max_repeated_ngram_occurrences,
   });
   const findings = [
     ...report.trackedPhraseOveruse.map((item) => `prose_redundancy: phrase "${item.phrase}" appears ${item.count} times across ${item.sections.length} section(s) (${item.sections.join(", ")}); configured maximum is ${thresholds.max_tracked_phrase_occurrences}`),
@@ -541,36 +544,61 @@ async function checkClaimSupport(workspaceDir: string): Promise<ValidationCheck>
 
 async function checkNoContradictions(workspaceDir: string): Promise<ValidationCheck> {
   const result = await readJsonlFile<ClaimJudgment>(workspaceDir, "reviews/claim-judgments.jsonl");
-  if (result.error) return { id: "claim_contradictions", pass: true, findings: ["no claim judgments found; contradiction check skipped"] };
-  const contradictions = detectContradictions(result.rows);
+  if (result.error?.endsWith("is missing")) return { id: "claim_contradictions", pass: true, findings: ["no claim judgments found; contradiction check skipped"] };
+  if (result.error) return { id: "claim_contradictions", pass: false, findings: [`claim_contradictions: ${result.error}`] };
+  const parsed = result.rows.map((row, index) => ({ index, parsed: ClaimJudgmentSchema.safeParse(row) }));
+  const invalid = parsed.filter((entry) => !entry.parsed.success);
+  if (invalid.length > 0) return { id: "claim_contradictions", pass: false, findings: invalid.map((entry) => `claim_contradictions: reviews/claim-judgments.jsonl row ${entry.index + 1} violates the claim-judgment schema`) };
+  const contradictions = detectContradictions(parsed.map((entry) => entry.parsed.data as ClaimJudgment));
   const findings = contradictions.map((group) =>
     `claim_contradictions: subject "${group.subject_key}" is both affirmed and denied across ${group.chapters.join(", ")}: ${group.claims.map((claim) => `[${claim.chapter}] ${claim.polarity}: ${claim.claim}`).join(" | ")}`,
   );
   return { id: "claim_contradictions", pass: findings.length === 0, findings };
 }
 
-async function checkLandmarkCoverage(workspaceDir: string, sources: ClassifiedSource[]): Promise<ValidationCheck> {
+async function checkLandmarkCoverage(workspaceDir: string, sources: ClassifiedSource[], chapters: Array<{ rel: string; content: string }>): Promise<ValidationCheck[]> {
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   const threshold = config?.research.corpus_gates.min_landmark_coverage_ratio ?? 0;
-  if (threshold <= 0) return { id: "landmark_coverage", pass: true, findings: ["landmark coverage gate is not configured"] };
+  const citationThreshold = config?.research.corpus_gates.min_landmark_citation_coverage_ratio ?? 0;
+  if (threshold <= 0 && citationThreshold <= 0) return [
+    { id: "landmark_coverage", pass: true, findings: ["landmark coverage gate is not configured"] },
+    { id: "landmark_citation_coverage", pass: true, findings: ["landmark citation coverage gate is not configured"] },
+  ];
   const raw = await readIfExists(path.join(workspaceDir, "research", "landmark-candidates.json"));
-  if (raw === null) return { id: "landmark_coverage", pass: false, findings: ["landmark_coverage: research/landmark-candidates.json is required when min_landmark_coverage_ratio is configured; run the landmark_scout stage"] };
+  if (raw === null) return [
+    { id: "landmark_coverage", pass: threshold <= 0, findings: ["landmark_coverage: research/landmark-candidates.json is required when landmark coverage is configured; run the landmark_scout stage"] },
+    { id: "landmark_citation_coverage", pass: citationThreshold <= 0, findings: ["landmark_citation_coverage: landmark discovery has not produced a candidate set"] },
+  ];
   let candidates: LandmarkCandidates;
   try {
     candidates = LandmarkCandidates.parse(JSON.parse(raw));
   } catch (error) {
-    return { id: "landmark_coverage", pass: false, findings: [`landmark_coverage: research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`] };
+    const finding = `research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`;
+    return [{ id: "landmark_coverage", pass: false, findings: [`landmark_coverage: ${finding}`] }, { id: "landmark_citation_coverage", pass: false, findings: [`landmark_citation_coverage: ${finding}`] }];
   }
-  const matches = matchLandmarksToCorpus(candidates.candidates, sources);
+  const canonical = candidates.candidates.filter((candidate) => candidate.confidence !== "low");
+  if (canonical.length === 0) {
+    const finding = "landmark scout produced no high/medium-confidence candidates";
+    return [{ id: "landmark_coverage", pass: threshold <= 0, findings: [`landmark_coverage: ${finding}`] }, { id: "landmark_citation_coverage", pass: citationThreshold <= 0, findings: [`landmark_citation_coverage: ${finding}`] }];
+  }
+  const evidenceSources = sources.filter((source) => source.citation_depth === "A" || source.citation_depth === "B");
+  const matches = matchLandmarksToCorpus(canonical, evidenceSources);
   const coverage = computeLandmarkCoverage(matches);
-  if (coverage.coverageRatio >= threshold) {
-    return { id: "landmark_coverage", pass: true, findings: [`landmark_coverage: ${coverage.matched}/${coverage.total} landmark works matched in the corpus`] };
-  }
-  return {
+  const cited = citedSourceIds(chapters);
+  const citationCoverage = computeLandmarkCoverage(matches.map((match) => cited.has(match.matchedSourceId ?? "") ? match : { ...match, matchedSourceId: null, matchedBy: null }));
+  return [{
     id: "landmark_coverage",
-    pass: false,
-    findings: [`landmark_coverage: coverage ratio ${coverage.coverageRatio.toFixed(3)} (${coverage.matched}/${coverage.total}) is below configured minimum ${threshold.toFixed(3)}; missing: ${coverage.unmatched.join(", ")}`],
-  };
+    pass: threshold <= 0 || coverage.coverageRatio >= threshold,
+    findings: threshold <= 0 || coverage.coverageRatio >= threshold
+      ? [`landmark_coverage: ${coverage.matched}/${coverage.total} high/medium landmark works have A/B evidence`]
+      : [`landmark_coverage: A/B evidence coverage ratio ${coverage.coverageRatio.toFixed(3)} (${coverage.matched}/${coverage.total}) is below configured minimum ${threshold.toFixed(3)}; missing: ${coverage.unmatched.join(", ")}`],
+  }, {
+    id: "landmark_citation_coverage",
+    pass: citationThreshold <= 0 || citationCoverage.coverageRatio >= citationThreshold,
+    findings: citationThreshold <= 0 || citationCoverage.coverageRatio >= citationThreshold
+      ? [`landmark_citation_coverage: ${citationCoverage.matched}/${citationCoverage.total} high/medium landmark works with A/B evidence are cited in the manuscript`]
+      : [`landmark_citation_coverage: cited A/B landmark ratio ${citationCoverage.coverageRatio.toFixed(3)} (${citationCoverage.matched}/${citationCoverage.total}) is below configured minimum ${citationThreshold.toFixed(3)}; missing or uncited: ${citationCoverage.unmatched.join(", ")}`],
+  }];
 }
 
 async function checkPublicationArtifacts(workspaceDir: string): Promise<ValidationCheck[]> {
@@ -694,7 +722,7 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
     await checkReviewRegressions(workspaceDir),
     await checkClaimSupport(workspaceDir),
     await checkNoContradictions(workspaceDir),
-    await checkLandmarkCoverage(workspaceDir, sources),
+    ...(await checkLandmarkCoverage(workspaceDir, sources, chapters)),
     ...(await checkFullResearchContracts(workspaceDir)),
     ...(await checkPublicationArtifacts(workspaceDir)),
     await checkManuscriptBuild(workspaceDir),

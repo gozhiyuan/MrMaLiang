@@ -107,6 +107,7 @@ describe("research workspace validation", () => {
       "claim_support",
       "claim_contradictions",
       "landmark_coverage",
+      "landmark_citation_coverage",
       "full_research_contracts",
       "publication_artifact_contract",
       "manuscript_build",

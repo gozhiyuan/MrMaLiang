@@ -97,7 +97,7 @@ it("rejects an A-depth packet whose claims record no system-improvement status f
   expect(report).toContain("later_use/cross_task_transfer/meta_improvement");
 });
 
-it("accepts an A-depth packet once at least one claim records a system-improvement status field", async () => {
+it("accepts an A-depth packet once every claim records a system-improvement status field", async () => {
   const ws = await buildWorkspace();
   await fs.writeFile(path.join(ws, SOURCE_EVIDENCE_PATH), JSON.stringify({
     version: 1,
@@ -106,7 +106,7 @@ it("accepts an A-depth packet once at least one claim records a system-improveme
       recommended_depth: "A",
       claims: [
         { claim: "The agent modifies its own scaffolding code before promotion.", supporting_excerpt: "modifies its own scaffolding code and evaluates the change", locator: "p1", later_use: "demonstrated" },
-        { claim: "The change is evaluated against a benchmark suite before use.", supporting_excerpt: "evaluates the change against a benchmark suite before promoting", locator: "p1" },
+        { claim: "The change is evaluated against a benchmark suite before use.", supporting_excerpt: "evaluates the change against a benchmark suite before promoting", locator: "p1", later_use: "not_reported" },
       ],
     }],
   }));

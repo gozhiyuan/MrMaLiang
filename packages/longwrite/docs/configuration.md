@@ -786,7 +786,18 @@ the work passed; completing an unrelated weaker criterion is not progress.
 research:
   quality_control:
     max_improvement_rounds: 3  # 1–8; default 3
+    tracked_phrases: [packet]
+    max_tracked_phrase_occurrences: 0 # -1 disables; 0 forbids reader-facing leakage
+    repeated_ngram_size: 5
+    max_repeated_ngram_occurrences: 2 # -1 disables
 ```
+
+Flagship profiles enable these scholarly-quality controls by default. They
+also set `corpus_gates.min_landmark_coverage_ratio` for high/medium-confidence
+landmarks with A/B evidence and `min_landmark_citation_coverage_ratio` for the
+subset actually cited in the manuscript. The two gates deliberately repair
+differently: missing evidence triggers bounded research expansion; available
+but uncited evidence triggers section revision.
 
 Every `revise_sections` action rebuilds and strictly validates the citation
 ledger immediately. A marker without a current evidence-packet locator, or a

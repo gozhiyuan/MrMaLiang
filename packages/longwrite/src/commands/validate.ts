@@ -174,3 +174,18 @@ export async function runValidateSearchPlan(workspaceDir: string): Promise<void>
   }
   console.log(`Search plan valid: ${load.plan.query_variants.length} query variants`);
 }
+
+export async function runValidateLandmarks(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { LandmarkCandidates } = await import("../lib/research/landmark.js");
+  try {
+    const raw = await fs.readFile(path.join(resolved, "research", "landmark-candidates.json"), "utf-8");
+    const parsed = LandmarkCandidates.parse(JSON.parse(raw));
+    const canonical = parsed.candidates.filter((candidate) => candidate.confidence !== "low");
+    if (canonical.length === 0) throw new Error("at least one high- or medium-confidence landmark is required");
+    console.log(`Landmark candidates valid: ${canonical.length} high/medium of ${parsed.candidates.length}`);
+  } catch (error) {
+    console.error(`research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
+}

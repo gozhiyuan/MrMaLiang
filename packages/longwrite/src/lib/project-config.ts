@@ -162,15 +162,15 @@ export const LongWriteProjectConfig = z
         quality_control: z
           .object({
             max_improvement_rounds: z.number().int().min(1).max(8).default(3),
-            /** 0 disables the gate. Counts tracked phrases (e.g. "packet")
-             * summed across all chapters. */
-            max_tracked_phrase_occurrences: z.number().int().min(0).max(1_000).default(0),
-            /** 0 disables the gate. A 5-gram repeated more than this many
-             * times AND spanning more than one section is flagged. */
-            max_repeated_ngram_occurrences: z.number().int().min(0).max(1_000).default(0),
+            tracked_phrases: z.array(z.string().min(1).max(100)).max(20).default(["packet"]),
+            /** -1 disables the gate; 0 forbids reader-facing occurrences. */
+            max_tracked_phrase_occurrences: z.number().int().min(-1).max(1_000).default(-1),
+            repeated_ngram_size: z.number().int().min(3).max(12).default(5),
+            /** -1 disables the gate. Findings must also span sections. */
+            max_repeated_ngram_occurrences: z.number().int().min(-1).max(1_000).default(-1),
           })
           .strict()
-          .default({ max_improvement_rounds: 3, max_tracked_phrase_occurrences: 0, max_repeated_ngram_occurrences: 0 }),
+          .default({ max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: -1, repeated_ngram_size: 5, max_repeated_ngram_occurrences: -1 }),
         /** Bounded pre-draft outline critique is agentic-only. It is kept
          * separate from manuscript review because it changes the paper's
          * intellectual structure before any chapter prose exists. */
@@ -198,9 +198,12 @@ export const LongWriteProjectConfig = z
             /** 0 disables the gate. Fraction of research/landmark-candidates.json
              * entries matched (by identifier or title) in classified_sources. */
             min_landmark_coverage_ratio: Ratio.default(0),
+            /** Fraction of high/medium landmarks both backed by A/B evidence
+             * and cited in chapters. 0 disables the manuscript-engagement gate. */
+            min_landmark_citation_coverage_ratio: Ratio.default(0),
           })
           .strict()
-          .default({ min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0 }),
+          .default({ min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0, min_landmark_citation_coverage_ratio: 0 }),
         // The default deterministic scaffold makes dry-runs reproducible.
         // llm_sections promotes each foreach section to a real worker task
         // with its evidence packet injected through MalaClaw skills.
@@ -214,7 +217,7 @@ export const LongWriteProjectConfig = z
           .default({ backend: "sqlite_fts", embedding_model: "text-embedding-3-small" }),
       })
       .strict()
-      .default({ provider: "seed", paper_kind: "survey", paper_profile: "flagship_long_paper", workflow_profile: "standard", target_candidates: 100, query_budget: 24, taxonomy: [], codebases: [], repository_figures: [], codebase_discovery: DEFAULT_GITHUB_CODEBASE_DISCOVERY, source_policy: { min_recent_ratio: 0.4, min_verified_ratio: 0.8, max_arxiv_only_ratio: 0.6, require_live_urls: false }, release_gates: { min_cited_sources: 0, min_citations_per_page: 0, min_cited_within_one_year_ratio: 0, min_accepted_cited_ratio: 0, max_cited_arxiv_only_ratio: 1, min_citation_depths_per_section: { A: 0, B: 0, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 0 }, experiment: { enabled: false, results_path: "experiments/results.json", min_trials: 3 }, fulltext: { max_core_sources: 40, allow_pdf_download: true }, semantic_screen: { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }, expansion: { max_queries_per_run: 6, target_candidates: 120, provider_timeout_seconds: 20 }, quality_control: { max_improvement_rounds: 3, max_tracked_phrase_occurrences: 0, max_repeated_ngram_occurrences: 0 }, outline_review: { enabled: false, max_rounds: 2, approval_mode: "auto" }, verification: { max_sources: 30 }, corpus_gates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0 }, writing_strategy: "scaffold_then_revise", retrieval: { backend: "sqlite_fts", embedding_model: "text-embedding-3-small" } }),
+      .default({ provider: "seed", paper_kind: "survey", paper_profile: "flagship_long_paper", workflow_profile: "standard", target_candidates: 100, query_budget: 24, taxonomy: [], codebases: [], repository_figures: [], codebase_discovery: DEFAULT_GITHUB_CODEBASE_DISCOVERY, source_policy: { min_recent_ratio: 0.4, min_verified_ratio: 0.8, max_arxiv_only_ratio: 0.6, require_live_urls: false }, release_gates: { min_cited_sources: 0, min_citations_per_page: 0, min_cited_within_one_year_ratio: 0, min_accepted_cited_ratio: 0, max_cited_arxiv_only_ratio: 1, min_citation_depths_per_section: { A: 0, B: 0, C: 0 }, min_cited_ab_sources_per_taxonomy_cell: 0 }, experiment: { enabled: false, results_path: "experiments/results.json", min_trials: 3 }, fulltext: { max_core_sources: 40, allow_pdf_download: true }, semantic_screen: { enabled: false, max_candidates: 80, min_candidates_per_taxonomy_cell: 3, max_evidence_sources: 24, min_supported_claims_for_a: 2, min_supported_claims_for_b: 1 }, expansion: { max_queries_per_run: 6, target_candidates: 120, provider_timeout_seconds: 20 }, quality_control: { max_improvement_rounds: 3, tracked_phrases: ["packet"], max_tracked_phrase_occurrences: -1, repeated_ngram_size: 5, max_repeated_ngram_occurrences: -1 }, outline_review: { enabled: false, max_rounds: 2, approval_mode: "auto" }, verification: { max_sources: 30 }, corpus_gates: { min_candidates: 200, min_sources_per_taxonomy_cell: 3, min_core_sources: 20, min_recent_ratio: 0.25, min_source_type_diversity: 3, min_landmark_coverage_ratio: 0, min_landmark_citation_coverage_ratio: 0 }, writing_strategy: "scaffold_then_revise", retrieval: { backend: "sqlite_fts", embedding_model: "text-embedding-3-small" } }),
     // Run guardrails compiled into the MalaClaw workflow. These protect
     // THIS run; they are not provider quotas (which MalaClaw cannot see)
     // and token caps are checked between units, so one in-flight unit can

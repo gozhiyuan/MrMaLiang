@@ -49,6 +49,17 @@
         "validators": [
           "required_output_exists"
         ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "validate",
+              "landmarks",
+              "."
+            ]
+          }
+        ],
         "phase": "research"
       },
       {
@@ -1807,7 +1818,8 @@
           "When reviews/citation-repair-packet.json is present, it is a binding, finite worklist: repair every listed chapter/source item using only its exact marker options or remove/rewrite the unsupported claim. Do not retain a source-only marker, invent a locator, or claim the repair is complete while any listed item remains. In reviews/revision-report.md, list each repaired work-item key as chapter_path + source_id and state whether it was replaced or removed.",
           "When reviews/cited-source-upgrade-packet.json has required_distinct_additions > 0, it is a binding cited-source worklist. Add at least that many DISTINCT addition_candidates to their named chapters, writing a useful claim or evidence-boundary statement directly supported by each evidence_excerpt and preserving its exact_marker. Report every added source_id and chapter_path in reviews/revision-report.md. Bibliography padding, stacked citations without a supported textual role, and markers added only to raise a count do not satisfy the contract.",
           "When reviews/cited-source-upgrade-packet.json has required_replacements > 0, it is also a binding release-ratio worklist. Replace at least that many listed nonaccepted citations with distinct accepted replacement markers in the named chapter, or narrow/remove the old claim and write an accepted, packet-backed claim. Do not merely change classification metadata or cite a replacement whose packet cannot support the prose.",
-          "Use reviews/artifact-plan.json when it selects a formalization. Decide the exact notation and wording from the cited evidence, define every symbol nearby, and omit the formula if the evidence cannot support a useful formalization. Never fabricate an equation, theorem, or experimental result."
+          "Use reviews/artifact-plan.json when it selects a formalization. Decide the exact notation and wording from the cited evidence, define every symbol nearby, and omit the formula if the evidence cannot support a useful formalization. Never fabricate an equation, theorem, or experimental result.",
+          "Never expose evidence-pipeline bookkeeping as reader-facing prose. In particular, do not call sources or evidence records packets, do not write 'not specified in packet', and do not fill tables with pipeline-status placeholders. Translate evidence boundaries into precise scholarly statements about what the cited work reports, does not evaluate, or leaves unresolved."
         ],
         "outputs": [
           "chapters/*.md",

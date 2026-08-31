@@ -6,13 +6,23 @@ import type { ValidationCheck, ValidationReport } from "./research.js";
 import { loadProjectConfigIfExists } from "../project-config.js";
 import { paperProfile } from "../paper-profiles.js";
 import { connectedComponents } from "../research/diagram-connectivity.js";
+import { z } from "zod";
 
 const LOOP_CAPTION_PATTERN = /\b(loop|cycle|feedback|iterative|conjunctive|end-to-end)\b/i;
 
-type PlacementPlanGraphs = {
-  concept_map?: { title: string; caption: string; nodes: Array<{ id: string; label: string }>; edges: Array<{ from: string; to: string; label?: string }> };
-  diagrams?: Array<{ id: string; title: string; caption: string; nodes: Array<{ id: string; label: string }>; edges: Array<{ from: string; to: string; label?: string }> }>;
-};
+const Graph = z.object({
+  id: z.string().min(1).optional(), title: z.string().default(""), caption: z.string().default(""),
+  nodes: z.array(z.object({ id: z.string().min(1), label: z.string().default("") }).passthrough()),
+  edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1), label: z.string().optional() }).passthrough()),
+}).passthrough().superRefine((graph, ctx) => {
+  const ids = graph.nodes.map((node) => node.id);
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", message: "node ids must be unique" });
+  const known = new Set(ids);
+  graph.edges.forEach((edge, index) => {
+    if (!known.has(edge.from) || !known.has(edge.to)) ctx.addIssue({ code: "custom", path: ["edges", index], message: "edge endpoints must name existing nodes" });
+  });
+});
+const PlacementPlanGraphs = z.object({ concept_map: Graph.optional(), diagrams: z.array(Graph).default([]) }).passthrough();
 
 async function readText(workspaceDir: string, rel: string): Promise<string | null> {
   try {
@@ -176,25 +186,20 @@ async function checkPublicationLayout(workspaceDir: string): Promise<ValidationC
 async function checkDiagramConnectivity(workspaceDir: string): Promise<ValidationCheck> {
   const raw = await readText(workspaceDir, "figures/placement-plan.json");
   if (raw === null) return { id: "diagram_connectivity", pass: true, findings: ["figures/placement-plan.json not present; diagram connectivity check skipped"] };
-  let plan: PlacementPlanGraphs;
+  let plan: z.infer<typeof PlacementPlanGraphs>;
   try {
-    plan = JSON.parse(raw) as PlacementPlanGraphs;
-  } catch {
-    return { id: "diagram_connectivity", pass: false, findings: ["diagram_connectivity: figures/placement-plan.json is not valid JSON"] };
+    plan = PlacementPlanGraphs.parse(JSON.parse(raw));
+  } catch (error) {
+    return { id: "diagram_connectivity", pass: false, findings: [`diagram_connectivity: figures/placement-plan.json has a malformed or invalid graph contract: ${error instanceof Error ? error.message : String(error)}`] };
   }
   const findings: string[] = [];
   const candidates = [
-    ...(plan.concept_map ? [{ id: "concept-map", ...plan.concept_map }] : []),
-    ...(plan.diagrams ?? []),
+    ...(plan.concept_map ? [{ ...plan.concept_map, id: plan.concept_map.id ?? "concept-map" }] : []),
+    ...plan.diagrams.map((diagram, index) => ({ ...diagram, id: diagram.id ?? `diagram-${index + 1}` })),
   ];
   for (const diagram of candidates) {
     const text = `${diagram.title} ${diagram.caption}`;
     if (!LOOP_CAPTION_PATTERN.test(text)) continue;
-    // Guard against malformed diagram entries (missing or non-array nodes/edges)
-    if (!Array.isArray(diagram.nodes) || !Array.isArray(diagram.edges)) {
-      findings.push(`diagram_connectivity: ${diagram.id} has a malformed node/edge structure and cannot be checked`);
-      continue;
-    }
     const components = connectedComponents({ nodes: diagram.nodes, edges: diagram.edges });
     if (components.length > 1) {
       findings.push(`diagram_connectivity: ${diagram.id} caption/title implies one connected process ("${text.trim()}") but its rendered graph forms ${components.length} disconnected groups: ${components.map((group) => `[${group.join(", ")}]`).join(", ")}`);

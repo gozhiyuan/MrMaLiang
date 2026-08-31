@@ -55,6 +55,15 @@ export function withResearchScriptStages(
         ],
       };
     }
+    if (String(stage.id) === "landmark_scout") {
+      return {
+        ...stage,
+        validator_commands: [
+          ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
+          longwriteCommand(["validate", "landmarks", "."]),
+        ],
+      };
+    }
     if (String(stage.id) === "recall") {
       return {
         ...stage,

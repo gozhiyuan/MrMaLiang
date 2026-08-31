@@ -119,6 +119,28 @@ describe("final-release action-plan contract", () => {
     ]));
   });
 
+  it("routes v3 gates to their owning repair capability with directional criteria", async () => {
+    const root = await workspace(
+      { pass: false, checks: [
+        { id: "landmark_coverage", pass: false, findings: ["missing: AFlow"] },
+        { id: "landmark_citation_coverage", pass: false, findings: ["uncited: Promptbreeder"] },
+        { id: "claim_contradictions", pass: false, findings: ["Sections 5 and 9 conflict"] },
+        { id: "diagram_connectivity", pass: false, findings: ["Figure 1 has two components"] },
+      ] },
+      { version: 1, findings: [], actions: [] },
+    );
+    await fs.appendFile(path.join(root, "longwrite.yaml"), "\n" + [
+      "  corpus_gates:", "    min_landmark_coverage_ratio: 0.75", "    min_landmark_citation_coverage_ratio: 0.6",
+    ].join("\n") + "\n");
+    await runResearchGenerateFinalReleasePlan(root);
+    const generated = JSON.parse(await fs.readFile(path.join(root, "reviews", "action-plan.json"), "utf-8"));
+    expect(generated.actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tool: "targeted_research_expansion", finding_ids: ["landmark_coverage"], acceptance_criteria: [expect.objectContaining({ metric: "landmark_coverage_ratio", operator: "at_least", target: 0.75 })] }),
+      expect.objectContaining({ tool: "revise_sections", finding_ids: expect.arrayContaining(["landmark_citation_coverage", "claim_contradictions"]), acceptance_criteria: expect.arrayContaining([expect.objectContaining({ metric: "claim_contradictions", operator: "at_most", target: 0 })]) }),
+      expect.objectContaining({ tool: "revise_visual_plan", finding_ids: ["diagram_connectivity"], acceptance_criteria: [expect.objectContaining({ metric: "diagram_connectivity", operator: "at_most", target: 0 })] }),
+    ]));
+  });
+
   it("preserves exact cited-source and review targets and routes concrete table findings", async () => {
     const root = await workspace(
       { pass: false, checks: [

@@ -44,6 +44,24 @@ describe("landmark matching and coverage", () => {
     expect(matches[0]!.matchedSourceId).toBeNull();
   });
 
+  it("does not match a short landmark as a substring of an unrelated token", () => {
+    const candidates = LandmarkCandidates.parse({
+      version: 1,
+      candidates: [{ name: "STOP", why_canonical: "A canonical self-improvement work whose exact identity must be preserved.", confidence: "high" }],
+    }).candidates;
+    const matches = matchLandmarksToCorpus(candidates, [source({ title: "Stopping Criteria for Agent Evaluation" })]);
+    expect(matches[0]!.matchedSourceId).toBeNull();
+  });
+
+  it("normalizes arXiv URL and version suffixes without weakening exact identity", () => {
+    const candidates = LandmarkCandidates.parse({
+      version: 1,
+      candidates: [{ name: "Darwin Godel Machine", why_canonical: "Iteratively modifies its own agent code and evaluates changes empirically.", expected_identifiers: { arxiv_id: "arXiv:2505.22954" }, confidence: "high" }],
+    }).candidates;
+    const matches = matchLandmarksToCorpus(candidates, [source({ id: "dgm", identifiers: { arxiv_id: "https://arxiv.org/abs/2505.22954v2" } })]);
+    expect(matches[0]!.matchedSourceId).toBe("dgm");
+  });
+
   it("computes coverage ratio and lists unmatched candidate names", () => {
     const matches = [
       { candidate: "A", matchedSourceId: "s1", matchedBy: "identifier" as const },
