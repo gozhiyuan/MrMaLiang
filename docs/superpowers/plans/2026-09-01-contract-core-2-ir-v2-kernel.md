@@ -41,6 +41,9 @@
 | M9 | Blocked corrective subflows | 15–16 |
 | M10 | Run pin storage and migration | 17 |
 | M11 | Integration across scheduler shapes | 18–21 |
+| M12 | Dispatch protocol and integration hardening | 22–24 |
+
+**Ordering note.** Tasks 22 to 24 are numbered last but are *prerequisites* of Task 18: the engine cycle cannot be integrated before the dispatch protocol, the observation binding and safe lease acquisition exist. Implement M12 immediately after M8, then M9 to M11.
 
 ---
 
@@ -618,7 +621,8 @@ describe("task workspace", () => {
     const dir = await canonical({ "src/a.ts": "one", "src/b.ts": "two" });
     const ws = await createTaskWorkspace(dir, unit, { invocationId: "i1", snapshotId: "s1" });
     dirs.push(ws.root);
-    expect(ws.materialized.sort()).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(ws.materialized.map((entry) => entry.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(ws.materialized[0].digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("materializes a declared read that does not yet exist as absent", async () => {
@@ -626,7 +630,7 @@ describe("task workspace", () => {
     const ws = await createTaskWorkspace(dir, { ...unit, reads: ["src/**", "src/new.ts"] },
       { invocationId: "i1", snapshotId: "s1" });
     dirs.push(ws.root);
-    expect(ws.materialized).not.toContain("src/new.ts");
+    expect(ws.materialized.map((entry) => entry.path)).not.toContain("src/new.ts");
     await expect(fs.access(path.join(ws.root, "src/new.ts"))).rejects.toThrow();
   });
 
@@ -667,8 +671,10 @@ export type TaskWorkspace = {
   unitKey: string;
   invocationId: string;
   snapshotId: string;
-  /** Relative paths copied in; the baseline for the commit diff. */
-  materialized: string[];
+  /** Paths copied in WITH their digests at materialization time. The digest is
+   * the diff baseline; recomputing it from the task copy after the run would
+   * compare the copy against itself. */
+  materialized: Array<{ path: string; digest: string }>;
 };
 
 const ENGINE_STATE = ".malaclaw";
@@ -829,6 +835,15 @@ describe("effect commit", () => {
     await expect(fs.access(path.join(dir, "docs/new.md"))).rejects.toThrow();
   });
 
+  it("records a commit manifest so an interrupted commit is recoverable", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    const diff = await diffTaskWorkspace(ws, unit);
+    await commitEffects(dir, ws, diff);
+    // Cleared on success; present means the commit was interrupted.
+    expect(await pendingCommit(dir, ws.invocationId)).toBeNull();
+  });
+
   it("propagates a deletion inside the envelope", async () => {
     const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
     await fs.rm(path.join(ws.root, "src/b.ts"));
@@ -915,13 +930,22 @@ export function validateDiff(diff: EffectDiff, _unit: EffectUnit): ContractOutco
   return diff.undeclared.length > 0 ? "undeclared_write" : null;
 }
 
-/** All or nothing. A rejected attempt commits none of its changes, including
- * the valid ones, so a partially applied repair can never reach the canonical
- * workspace. */
+/** A rejected attempt commits none of its changes, including the valid ones.
+ *
+ * This is NOT atomic across files: a crash mid-commit can leave some files
+ * copied and some not, and no filesystem primitive gives multi-file atomicity.
+ * The honest guarantee is *recoverable*: a commit manifest records the intended
+ * file list and per-file progress before the first copy, so a resumed run
+ * finishes or reverses a partial commit rather than guessing. Claiming
+ * all-or-nothing without the manifest would be a promise the code cannot keep. */
 export async function commitEffects(
   canonicalDir: string, workspace: TaskWorkspace, diff: EffectDiff,
 ): Promise<string[]> {
   if (diff.undeclared.length > 0) throw new Error("refusing to commit a diff with undeclared writes");
+  const planned = [...diff.declared, ...diff.owned];
+  // Written before the first copy, so a crash leaves a record of what was
+  // about to change and how far it got.
+  await writeCommitManifest(canonicalDir, workspace.invocationId, { planned, done: [] });
   const committed: string[] = [];
   for (const rel of [...diff.declared, ...diff.owned]) {
     const source = path.join(workspace.root, rel);
@@ -932,12 +956,26 @@ export async function commitEffects(
     await fs.copyFile(source, temporary);
     await fs.rename(temporary, target);
     committed.push(rel);
+    await writeCommitManifest(canonicalDir, workspace.invocationId, { planned, done: committed });
   }
+  await clearCommitManifest(canonicalDir, workspace.invocationId);
   return committed.sort();
 }
+
+/** A manifest left behind means a commit was interrupted. The engine resumes it
+ * from `done` or reverses it, and never treats the workspace as clean. */
+export async function pendingCommit(
+  canonicalDir: string, invocationId: string,
+): Promise<{ planned: string[]; done: string[] } | null> { /* read the manifest, or null */ }
 ```
 
-Note the baseline subtlety: `diffTaskWorkspace` must compare against digests captured **at materialization**, not against the post-run task copy. Extend `TaskWorkspace.materialized` to `Array<{ path: string; digest: string }>` in Task 4 and adjust both files together; the test above is unaffected because it only asserts on paths.
+**The baseline must be captured at materialization.** `diffTaskWorkspace`
+cannot compare a post-run task copy against itself, so `TaskWorkspace.materialized`
+is `Array<{ path: string; digest: string }>` from the start — Task 4's
+implementation and its test are written that way, not retrofitted here. Task 4's
+assertion reads `ws.materialized.map((entry) => entry.path).sort()`; a plan that
+changes a type in one task and claims another task's test is unaffected is
+describing two incompatible codebases.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -957,7 +995,7 @@ git commit -m "feat(workflow): validate a task-workspace diff and commit effects
 
 **Files:**
 - Modify: `src/lib/workflow/runtimes/base.ts` (`StageRunRequest` gains `taskWorkspaceRoot`)
-- Modify: `src/lib/workflow/runtimes/script.ts`, `subprocess.ts`, `codex.ts`, `claude-code.ts`, `dry-run.ts`
+- Modify: every runtime under `src/lib/workflow/runtimes/` — including `chat-api.ts` and `openai-compatible.ts`, which a hand-written list omitted
 - Test: `tests/contract-isolated-dispatch.test.ts`
 
 **Interfaces:**
@@ -994,6 +1032,23 @@ describe("isolated dispatch", () => {
     expect(result.outcome).toBe("succeeded");
     expect(await fs.readFile(path.join(task, "out.txt"), "utf-8")).toBe("here");
     await expect(fs.access(path.join(canonical, "out.txt"))).rejects.toThrow();
+  });
+
+  it("honours the task workspace in every registered runtime", async () => {
+    // Enumerated from the registry rather than a hand-written list, which is
+    // how chat-api and openai-compatible were missed.
+    const { runtimeRegistry } = await import("../src/lib/workflow/runtimes/registry.js");
+    for (const runtime of runtimeRegistry()) {
+      expect(typeof runtime.runStage, runtime.id).toBe("function");
+      expect(runtime.capabilities, runtime.id).toBeDefined();
+      // A runtime that cannot honour an isolated workspace must say so, rather
+      // than silently writing to the canonical one.
+      expect(
+        runtime.capabilities.requires_isolated_workspace !== undefined
+        || runtime.capabilities.honours_task_workspace === true,
+        `${runtime.id} does not declare task-workspace behaviour`,
+      ).toBe(true);
+    }
   });
 
   it("falls back to the canonical workspace when no task root is supplied", async () => {
@@ -3496,11 +3551,22 @@ Seed `tests/domain-allowlist.json` with the existing files that legitimately men
 Run: `npm test -- domain-neutrality`
 Expected: PASS. Any offender is either a real leak or a reviewed allowlist entry.
 
-- [ ] **Step 3: Document IR v2**
+- [ ] **Step 3: Bump the package to 3.0.0**
+
+IR v2 is a breaking revision and MrMaLiang's `runtime-compatibility.json`
+requires `>=3.0.0 <4.0.0`. Set `version` to `3.0.0` in `package.json`, and
+record the break in `CHANGELOG.md`: required `ir_version: 2`, engine-owned
+observations, transactional task workspaces, typed contract outcomes, and the
+removal of output-changed success inference.
+
+Run: `npm run build && npm pack --dry-run | head -3`
+Expected: the tarball is `malaclaw-3.0.0.tgz`.
+
+- [ ] **Step 4: Document IR v2**
 
 In `docs/workflow-ir.md`: `ir_version: 2` is required and never defaulted; v1 manifests are rejected with a migration message; work units gain `kind`, `reads`, `writes`, `owns`, `writes_observations`, `evaluate_with`, `acceptance`, `must_improve`, `must_preserve`, `strategy`; success is no longer inferred from changed outputs; mutations execute in an isolated task workspace and commit atomically; the kernel owns observation storage, sequencing and acceptance arithmetic per the wire contract. Add a recovery-table row: **Adopt IR v2 → `reset`**, because existing unit records are reinterpreted under new semantics.
 
-- [ ] **Step 4: Full verification**
+- [ ] **Step 5: Full verification**
 
 Run:
 ```bash
@@ -3511,23 +3577,507 @@ git diff --check
 ```
 Expected: all pass.
 
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/domain-neutrality.test.ts tests/domain-allowlist.json docs/workflow-ir.md README.md package.json CHANGELOG.md
+git commit -m "test(workflow): enforce the domain boundary automatically and document IR v2"
+```
+
+---
+
+---
+
+## M12 — Dispatch protocol and integration hardening
+
+**Ordering: implement this milestone immediately after M8.** Tasks 22 to 24 are
+prerequisites of Task 18; they are numbered last only to avoid renumbering the
+tasks that reference each other.
+
+### Task 22: The domain dispatch protocol
+
+Four things currently exist only as prose or as domain helper functions with no
+kernel counterpart: a pre-dispatch verdict, an estimated cost, a materializer
+that turns a finding into a concrete action, and the transition into diagnosis.
+Without a protocol, MrMaLiang can implement all four and the engine will still
+never call them.
+
+**Files:**
+- Modify: `src/lib/schema.ts`
+- Create: `src/lib/workflow/dispatch-protocol.ts`
+- Test: `tests/contract-dispatch-protocol.test.ts`
+
+**Interfaces:**
+- Consumes: `WorkflowCommand`, `Criterion` (Task 2); `ContractOutcome` (Task 1).
+- Produces: on `ActionDispatchStage` — `materializer: WorkflowCommand`, `verdict_inputs: string[]`, `cost_probe?: WorkflowCommand`; schemas `PreDispatchVerdict`, `ActionInstance`, `CostEstimate`; `readVerdict(dir, path)`, `parseActionInstance(raw)`, `runMaterializer(dir, stage, request)`.
+
+Everything is domain-neutral: the kernel reads named verdicts, numeric costs and
+a declared action shape. It never learns what any of them mean.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/contract-dispatch-protocol.test.ts`:
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { WorkflowDef } from "../src/lib/schema.js";
+import {
+  PreDispatchVerdict, ActionInstance, CostEstimate, readVerdict, parseActionInstance,
+} from "../src/lib/workflow/dispatch-protocol.js";
+
+const dirs: string[] = [];
+afterEach(async () => {
+  while (dirs.length > 0) await fs.rm(dirs.pop()!, { recursive: true, force: true });
+});
+async function workspace(files: Record<string, unknown>): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-dispatch-"));
+  dirs.push(dir);
+  for (const [rel, body] of Object.entries(files)) {
+    await fs.mkdir(path.join(dir, path.dirname(rel)), { recursive: true });
+    await fs.writeFile(path.join(dir, rel), JSON.stringify(body), "utf-8");
+  }
+  return dir;
+}
+
+describe("dispatch protocol", () => {
+  it("lets a dispatch stage declare a materializer command", () => {
+    const wf = WorkflowDef.parse({
+      ir_version: 2,
+      stages: [{
+        type: "action_dispatch", id: "improve", owner: "pm", plan_path: "reviews/findings.json",
+        materializer: { cmd: "longwrite", args: ["research", "materialize-action", "."] },
+        verdict_inputs: ["reports/reachability-verdict.json"],
+      }],
+    });
+    const stage = wf.stages[0] as { materializer: { cmd: string }; verdict_inputs: string[] };
+    expect(stage.materializer.cmd).toBe("longwrite");
+    expect(stage.verdict_inputs).toEqual(["reports/reachability-verdict.json"]);
+  });
+
+  it("rejects a materializer using shell interpolation", () => {
+    expect(() => WorkflowDef.parse({
+      ir_version: 2,
+      stages: [{ type: "action_dispatch", id: "improve", owner: "pm", plan_path: "p.json",
+        materializer: { cmd: "sh -c 'longwrite'", args: [] } }],
+    })).toThrow();
+  });
+
+  it("parses a pre-dispatch verdict of named objectives", async () => {
+    const dir = await workspace({ "reports/reachability-verdict.json": {
+      version: 1, unreachable: [{ objective: "landmark_coverage ", detail: "only 3 of 12" }],
+    } });
+    const verdict = await readVerdict(dir, "reports/reachability-verdict.json");
+    expect(verdict.unreachable[0].objective).toBe("landmark_coverage ");
+  });
+
+  it("knows nothing about what an objective means", () => {
+    // The kernel reads a name and a detail string; the domain decides both.
+    expect(PreDispatchVerdict.safeParse({
+      version: 1, unreachable: [{ objective: "anything at all", detail: "" }],
+    }).success).toBe(true);
+  });
+
+  it("parses a materialized action instance", () => {
+    const instance = {
+      version: 1, from_template: "revise_sections", action_id: "a1",
+      findings: ["f1"], scope_key: "section-03",
+      reads: ["repair/a1/packet.json", "chapters/section-03.md"],
+      owns: ["chapters/section-03.md"], writes: ["chapters/section-03.md"],
+      acceptance: [{ metric: "rendered_visual_review", scope_key: "", operator: "equals",
+                     target: 1, tolerance: 0, direction: "maximize" }],
+      must_preserve: [{ metric: "claim_support", scope_key: "", operator: "at_least",
+                        target: 0.9, tolerance: 0.000001, direction: "maximize" }],
+      strategy_key: ["template", "finding_ids", "scope_key", "acceptance"],
+    };
+    expect(parseActionInstance(instance).action_id).toBe("a1");
+  });
+
+  it("rejects an instance whose writes escape its own envelope", () => {
+    expect(() => parseActionInstance({
+      version: 1, from_template: "revise_sections", action_id: "a1", findings: ["f1"], scope_key: "",
+      reads: [], owns: ["chapters/section-03.md"], writes: ["chapters/section-99.md"],
+      acceptance: [], must_preserve: [], strategy_key: ["template"],
+    })).toThrow(/outside its owns envelope/);
+  });
+
+  it("rejects an instance with no acceptance", () => {
+    // A materialized repair with no measurable objective is the failure this
+    // whole program removes.
+    expect(() => parseActionInstance({
+      version: 1, from_template: "revise_sections", action_id: "a1", findings: ["f1"], scope_key: "",
+      reads: [], owns: ["chapters/a.md"], writes: ["chapters/a.md"],
+      acceptance: [], must_preserve: [], strategy_key: ["template"],
+    })).toThrow(/acceptance/);
+  });
+
+  it("parses a cost estimate the scheduler can compare to run limits", () => {
+    expect(CostEstimate.safeParse({ version: 1, model_calls: 5, renders: 1 }).success).toBe(true);
+  });
+
+  it("declares a diagnosis transition target on the dispatch stage", () => {
+    const wf = WorkflowDef.parse({
+      ir_version: 2,
+      stages: [{ type: "action_dispatch", id: "improve", owner: "pm", plan_path: "p.json",
+        materializer: { cmd: "longwrite", args: ["x"] }, on_diagnose: "diagnose_objective" }],
+    });
+    expect((wf.stages[0] as { on_diagnose: string }).on_diagnose).toBe("diagnose_objective");
+  });
+
+  it("rejects a diagnosis target that is not a declared stage", () => {
+    expect(() => WorkflowDef.parse({
+      ir_version: 2,
+      stages: [{ type: "action_dispatch", id: "improve", owner: "pm", plan_path: "p.json",
+        materializer: { cmd: "longwrite", args: ["x"] }, on_diagnose: "nowhere" }],
+    })).toThrow(/on_diagnose/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- contract-dispatch-protocol`
+Expected: FAIL — `materializer` is rejected by the strict stage schema.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `ActionDispatchStage` in `src/lib/schema.ts`:
+
+```ts
+    /** Turns one validated finding set into a concrete action instance. The
+     * kernel executes this command and validates its output; it never learns
+     * what a finding means. */
+    materializer: WorkflowCommand.optional(),
+    /** Artifacts carrying pre-dispatch verdicts the kernel reads BEFORE
+     * selecting actions, so an objective proven unattainable never consumes a
+     * round. */
+    verdict_inputs: z.array(workspacePath).default([]),
+    /** Optional command returning a CostEstimate for the round the kernel is
+     * about to dispatch, compared against run_limits before spending. */
+    cost_probe: WorkflowCommand.optional(),
+    /** Stage to run when a contract outcome maps to `diagnose`. Validated
+     * against the declared stage ids. */
+    on_diagnose: workflowId.optional(),
+```
+
+Create `src/lib/workflow/dispatch-protocol.ts` with `PreDispatchVerdict`
+(`{ version: 1, unreachable: Array<{ objective, detail }> }`), `CostEstimate`
+(`{ version: 1, model_calls, renders }`), and `ActionInstance` — the wire
+contract §8 shape — whose `superRefine` requires at least one acceptance
+criterion and confines `writes` to `owns`. `runMaterializer` writes the request
+artifact, runs the declared command in a task workspace, and parses its output;
+a materializer that emits an invalid instance fails the dispatch rather than
+being partially believed. Validate `on_diagnose` against declared stage ids in
+the workflow-level refinement.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- contract-dispatch-protocol && npm run schema:export && npm test -- manifest-schema-export`
+Expected: PASS, 10 tests.
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/domain-neutrality.test.ts tests/domain-allowlist.json docs/workflow-ir.md README.md
-git commit -m "test(workflow): enforce the domain boundary automatically and document IR v2"
+git add src/lib/schema.ts src/lib/workflow/dispatch-protocol.ts schemas/ tests/contract-dispatch-protocol.test.ts
+git commit -m "feat(workflow): add a domain-neutral dispatch protocol for verdicts, cost and materialization"
+```
+
+---
+
+### Task 23: Observation binding across an attempt
+
+A compiled criterion carries no digests, so `currentObservation` cannot find its
+"before" record from the criterion alone. Worse, the cycle called `snapshotFor`
+only after the mutation and its measurements had run, by which point no
+trustworthy before-state exists — and the measurement wrote its envelope into
+its own task workspace while ingestion read the canonical one.
+
+**Files:**
+- Modify: `src/lib/workflow/observations.ts`
+- Modify: `src/lib/workflow/measurements.ts`
+- Modify: `src/lib/workflow/attempts.ts` (`AttemptTransition.observation_bindings`)
+- Test: `tests/contract-observation-binding.test.ts`
+
+**Interfaces:**
+- Consumes: `Observation`, `Criterion`.
+- Produces: `observationRecordId(observation): string`; `bindObservations(dir, store, criteria): Promise<ObservationBinding[]>` where `ObservationBinding = { metric, scope_key, record_id: string | null }`; `resolveBinding(dir, store, binding)`; `ingestEnvelope(canonicalDir, storePath, envelopeAbsPath, unit)` taking an **absolute** envelope path.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/contract-observation-binding.test.ts`:
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+  Observation, appendObservation, observationRecordId, bindObservations, resolveBinding,
+} from "../src/lib/workflow/observations.js";
+import { ingestEnvelope } from "../src/lib/workflow/measurements.js";
+
+const dirs: string[] = [];
+afterEach(async () => {
+  while (dirs.length > 0) await fs.rm(dirs.pop()!, { recursive: true, force: true });
+});
+const STORE = ".malaclaw/observations";
+const criterion = { metric: "test_coverage", scope_key: "", operator: "at_least" as const,
+                    target: 0.9, tolerance: 1e-6, direction: "maximize" as const };
+const record = (o: Record<string, unknown> = {}) => Observation.parse({
+  metric: "test_coverage", scope_key: "", value: 0.5, evaluator: "coverage",
+  evaluator_digest: "a".repeat(64), input_digest: "b".repeat(64),
+  sequence: 1, measured_at: new Date().toISOString(), ...o,
+});
+
+describe("observation binding", () => {
+  it("binds a criterion to the newest matching record before dispatch", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-"));
+    dirs.push(dir);
+    await appendObservation(dir, STORE, record({ value: 0.5, sequence: 1 }));
+    const [binding] = await bindObservations(dir, STORE, [criterion]);
+    // A criterion carries no digests, so the binding — not the criterion — is
+    // what identifies the exact "before" record.
+    expect(binding.record_id).toBeTruthy();
+    expect((await resolveBinding(dir, STORE, binding))?.value).toBe(0.5);
+  });
+
+  it("binds to null when no observation exists yet", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-none-"));
+    dirs.push(dir);
+    expect((await bindObservations(dir, STORE, [criterion]))[0].record_id).toBeNull();
+  });
+
+  it("keeps the before binding stable when a newer record is appended", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-stable-"));
+    dirs.push(dir);
+    await appendObservation(dir, STORE, record({ value: 0.5, sequence: 1 }));
+    const [before] = await bindObservations(dir, STORE, [criterion]);
+    await appendObservation(dir, STORE, record({ value: 0.9, sequence: 2, input_digest: "c".repeat(64) }));
+    // The bound record is the one the attempt started from, not whatever is
+    // newest at evaluation time.
+    expect((await resolveBinding(dir, STORE, before))?.value).toBe(0.5);
+  });
+
+  it("gives a record a stable content-addressed id", async () => {
+    expect(observationRecordId(record())).toBe(observationRecordId(record()));
+    expect(observationRecordId(record())).not.toBe(observationRecordId(record({ value: 0.7 })));
+  });
+
+  it("ingests an envelope from the measurement task workspace", async () => {
+    const canonical = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-canon-"));
+    const task = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-task-"));
+    dirs.push(canonical, task);
+    await fs.mkdir(path.join(task, "reports"), { recursive: true });
+    await fs.writeFile(path.join(task, "reports/measurements.json"), JSON.stringify({
+      version: 1, measurements: [{
+        metric: "test_coverage", scope_key: "", status: "measured", value: 0.95,
+        evaluator: "coverage", evaluator_digest: "a".repeat(64), input_digest: "b".repeat(64),
+        measurement_kind: "script",
+      }],
+    }), "utf-8");
+    // The measurement unit runs in isolation, so its envelope is never in the
+    // canonical workspace when ingestion happens.
+    const result = await ingestEnvelope(canonical, STORE,
+      path.join(task, "reports/measurements.json"), { unitKey: "m", writes_observations: ["test_coverage"] });
+    expect(result.appended).toHaveLength(1);
+  });
+
+  it("records the before and after bindings on the attempt", async () => {
+    const { AttemptTransition } = await import("../src/lib/workflow/attempts.js");
+    expect(AttemptTransition.safeParse({
+      invocation_id: "i1", idempotency_key: "k", unit_key: "u", to: "measured",
+      at: new Date().toISOString(), intended_effects: [], applied_effects: [],
+      observation_bindings: {
+        before: [{ metric: "test_coverage", scope_key: "", record_id: "abc" }],
+        after: [{ metric: "test_coverage", scope_key: "", record_id: "def" }],
+      },
+    }).success).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- contract-observation-binding`
+Expected: FAIL — `observationRecordId` and `bindObservations` do not exist, and `ingestEnvelope` takes a workspace-relative path.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add `observationRecordId` (the record's content digest, already the filename
+stem), `bindObservations` and `resolveBinding` to `observations.ts`. Change
+`ingestEnvelope` to take an **absolute** envelope path so it can read the
+measurement's task workspace. Add `observation_bindings` to `AttemptTransition`.
+
+Then correct the Task 18 cycle order to:
+
+1. `bindObservations` for the unit's acceptance and `must_preserve` criteria →
+   the **before** bindings, journaled with `prepared`.
+2. Run the mutation in its task workspace; validate and commit its diff.
+3. Run each `evaluate_with` measurement against the post-mutation state, in its
+   own task workspace.
+4. `ingestEnvelope` from that task workspace's absolute envelope path.
+5. `bindObservations` again → the **after** bindings, journaled with `measured`.
+6. `evaluateContract` over the resolved before and after records — those exact
+   records, not a re-query that could pick up an unrelated newer measurement.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- contract-observation-binding contract-measurement-ingest`
+Expected: PASS, 6 + 8 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/workflow/observations.ts src/lib/workflow/measurements.ts src/lib/workflow/attempts.ts tests/contract-observation-binding.test.ts
+git commit -m "feat(workflow): bind before and after observation records to each attempt"
+```
+
+---
+
+### Task 24: Safe lease acquisition and supervisor heartbeat
+
+Writing a lease file through temp-and-rename is atomic *replacement*, not atomic
+*acquisition*: two owners can both observe an absent or expired lease and both
+rename their replacement, and the second silently wins. With no fencing token, a
+stale owner can also renew or commit after takeover.
+
+**Files:**
+- Modify: `src/lib/workflow/leases.ts`
+- Modify: `src/lib/workflow/supervisor.ts`
+- Modify: `src/lib/workflow/engine.ts` (present the token on commit)
+- Test: `tests/contract-lease-safety.test.ts`
+
+**Interfaces:**
+- Consumes: `Lease` (Task 13).
+- Produces: `Lease.generation: number` and `Lease.token: string`; `acquireLease` returning `{ status, lease? }` via exclusive create; `renewLease(dir, unitKey, token, ...)`; `assertLeaseHeld(dir, unitKey, token)`; `startHeartbeat(dir, unitKey, token, intervalMs)`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/contract-lease-safety.test.ts`:
+
+```ts
+import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {
+  acquireLease, renewLease, releaseLease, readLease, assertLeaseHeld, startHeartbeat,
+} from "../src/lib/workflow/leases.js";
+
+const dirs: string[] = [];
+afterEach(async () => {
+  while (dirs.length > 0) await fs.rm(dirs.pop()!, { recursive: true, force: true });
+});
+async function workspace(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-lease-safe-"));
+  dirs.push(dir);
+  return dir;
+}
+const NOW = Date.parse("2026-09-01T12:00:00.000Z");
+
+describe("lease safety", () => {
+  it("gives exactly one winner under concurrent acquisition", async () => {
+    const dir = await workspace();
+    // Temp-and-rename is atomic replacement, not atomic acquisition: both
+    // callers would observe an absent lease and both would win.
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, index) => acquireLease(dir, "u", `worker-${index}`, 60_000, NOW)));
+    expect(results.filter((result) => result.status === "acquired")).toHaveLength(1);
+  });
+
+  it("issues a monotonic generation on each takeover", async () => {
+    const dir = await workspace();
+    const first = await acquireLease(dir, "u", "worker-1", 1_000, NOW);
+    const second = await acquireLease(dir, "u", "worker-2", 1_000, NOW + 2_000);
+    expect(second.lease!.generation).toBeGreaterThan(first.lease!.generation);
+  });
+
+  it("refuses a renewal presenting a stale token", async () => {
+    const dir = await workspace();
+    const first = await acquireLease(dir, "u", "worker-1", 1_000, NOW);
+    await acquireLease(dir, "u", "worker-2", 60_000, NOW + 2_000);
+    await expect(renewLease(dir, "u", first.lease!.token, 1, 60_000, NOW + 3_000))
+      .rejects.toThrow(/stale|token/i);
+  });
+
+  it("refuses a commit from a superseded owner", async () => {
+    const dir = await workspace();
+    const first = await acquireLease(dir, "u", "worker-1", 1_000, NOW);
+    await acquireLease(dir, "u", "worker-2", 60_000, NOW + 2_000);
+    // Without fencing, a slow worker-1 could commit effects after takeover.
+    await expect(assertLeaseHeld(dir, "u", first.lease!.token)).rejects.toThrow(/superseded|stale/i);
+  });
+
+  it("accepts a commit from the current owner", async () => {
+    const dir = await workspace();
+    const held = await acquireLease(dir, "u", "worker-1", 60_000, NOW);
+    await expect(assertLeaseHeld(dir, "u", held.lease!.token)).resolves.toBeUndefined();
+  });
+
+  it("renews from a supervisor heartbeat even when the runtime emits nothing", async () => {
+    const dir = await workspace();
+    const held = await acquireLease(dir, "u", "worker-1", 200, Date.now());
+    const stop = startHeartbeat(dir, "u", held.lease!.token, 50);
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    stop();
+    // A runtime with no event stream must not lose its lease for being quiet.
+    expect(Date.parse((await readLease(dir, "u"))!.lease_expires_at)).toBeGreaterThan(Date.now());
+  });
+
+  it("stops renewing once released", async () => {
+    const dir = await workspace();
+    const held = await acquireLease(dir, "u", "worker-1", 200, Date.now());
+    const stop = startHeartbeat(dir, "u", held.lease!.token, 50);
+    await releaseLease(dir, "u", held.lease!.token);
+    stop();
+    expect(await acquireLease(dir, "u", "worker-2", 60_000, Date.now())).toMatchObject({ status: "acquired" });
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- contract-lease-safety`
+Expected: FAIL — acquisition is not exclusive and `Lease` has no token.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Acquire through an exclusive create (`fs.open(lockPath, "wx")`) on a per-unit
+lock file, holding it only long enough to read the current lease, decide, and
+write the successor with `generation + 1` and a fresh `token`. `renewLease`,
+`releaseLease` and `assertLeaseHeld` all require the current token and throw on
+a stale one. `startHeartbeat` renews on an interval from the supervisor, so a
+runtime that emits no events keeps its lease.
+
+Separately, keep the existing `timeoutMs` as an **explicitly configured hard
+kill**, distinct from stall diagnosis: document that a unit exceeding it is
+terminated by policy, so "only lease expiry terminates an attempt" is not
+contradicted by a timeout nobody declared.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- contract-lease-safety contract-leases`
+Expected: PASS, 7 + 11 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/workflow/leases.ts src/lib/workflow/supervisor.ts src/lib/workflow/engine.ts tests/contract-lease-safety.test.ts
+git commit -m "feat(workflow): make lease acquisition exclusive and fence stale owners"
 ```
 
 ---
 
 ## Plan Self-Review
 
-**Spec coverage.** §B1 execution roles → Task 2. §B2 effects → Tasks 2, 4, 5, 6. §B3 acceptance, progress, invariants → Task 9. §B4 measurement scheduling → Tasks 8, 18 (`evaluate_with` dispatch and envelope ingestion); the metric registry and cost tiers are MrMaLiang's. §B5 two-axis outcomes → Task 1. §B6 fingerprints and per-objective stagnation → Task 10. §B7 transitions → Task 1's policies, applied in Task 18. §B8 removals → Task 3 (`ir_version`), Task 18 (output-changed inference). §B9 reachability → consumed as a pre-dispatch verdict in Task 18; the analysis is MrMaLiang's. §B10 blocked workspace → Tasks 15, 16. §B11 observation store → Task 7. §B12 cost accounting → deferred to Plan 3, which owns `estimated_cost`. §B13 attempt lifecycle → Task 12. §B14 checkpoint contract → Tasks 12, 18. §B15 leases → Tasks 11, 13. §B16 concurrency → Task 14. §B17 pinning → Task 17. §B18 untrusted content → Plan 3 builds the task packet; Task 4's isolation is the mechanism that bounds it.
+**Spec coverage.** §B1 execution roles → Task 2. §B2 effects → Tasks 2, 4, 5, 6. §B3 acceptance, progress, invariants → Task 9. §B4 measurement scheduling → Tasks 8, 18 (`evaluate_with` dispatch and envelope ingestion); the metric registry and cost tiers are MrMaLiang's. §B5 two-axis outcomes → Task 1. §B6 fingerprints and per-objective stagnation → Task 10. §B7 transitions → Task 1's policies, applied in Task 18. §B8 removals → Task 3 (`ir_version`), Task 18 (output-changed inference). §B9 reachability → the pre-dispatch verdict protocol is Task 22; the analysis is MrMaLiang's. §B10 blocked workspace → Tasks 15, 16. §B11 observation store → Tasks 7, 23. §B12 cost accounting → the `cost_probe` protocol is Task 22; the estimates are MrMaLiang's. §B13 attempt lifecycle → Task 12. §B14 checkpoint contract → Tasks 12, 18, 23. §B15 leases → Tasks 11, 13, 24. §B16 concurrency → Task 14. §B17 pinning → Task 17. §B18 untrusted content → Plan 3 builds the task packet; Task 4's isolation is the mechanism that bounds it.
 
 **Wire contract coverage.** §2 ownership → Tasks 7, 8, 9 own storage, ingestion and arithmetic; no other implementation exists. §3 envelope → Task 8. §4 identity and freshness → Task 7. §5 compiled criterion → Task 2. §6 arithmetic → Task 9. §7 conformance fixtures → Tasks 9, 20. §8 action instantiation → the kernel consumes instances; MrMaLiang emits them (Plan 3).
 
 **Type consistency.** `Criterion` and `MustImprove` are defined once in `schema.ts` (Task 2) and imported by `acceptance.ts` (Task 9) and `stagnation.ts` (Task 10). `snapshotKey(metric, scopeKey)` is exported by `observations.ts` (Task 7) and is the only key format `evaluateContract` accepts. `EffectUnit` and `TaskWorkspace` come from `task-workspace.ts` (Task 4) and are consumed by `effects.ts` (Task 5). `AttemptTransition` (Task 12) is the parameter of `classifyHealth` (Task 13). `canonicalJson` (Task 7) is used by pinning, attempts and stagnation. `runFlow` keeps its single-object signature throughout.
 
-**Ordering constraints.** Task 20 requires Tasks 2, 8 and 9. Task 2 precedes Tasks 4, 5, 9, 14 (all import from `schema.ts`). Task 7 precedes Tasks 8, 9, 10, 12, 17 (`snapshotKey`, `canonicalJson`). Task 4 precedes Tasks 5 and 6. Task 11 precedes Task 13 — a lease cannot be renewed without an event stream. Tasks 1 through 17 all precede Task 18.
+**Ordering constraints.** M12 (Tasks 22–24) implements immediately after M8 and precedes Task 18: the engine cycle needs the dispatch protocol, the observation binding and safe leases. Task 20 requires Tasks 2, 8 and 9. Task 2 precedes Tasks 4, 5, 9, 14 (all import from `schema.ts`). Task 7 precedes Tasks 8, 9, 10, 12, 17 (`snapshotKey`, `canonicalJson`). Task 4 precedes Tasks 5 and 6. Task 11 precedes Task 13 — a lease cannot be renewed without an event stream. Tasks 1 through 17 all precede Task 18.
 
 **Deliberately not here.** The metric registry, evaluators, cost tiers, reachability analysis, repair packets, and prompt rendering are MrMaLiang's; this plan consumes their outputs through the wire contract and knows nothing about their meaning.

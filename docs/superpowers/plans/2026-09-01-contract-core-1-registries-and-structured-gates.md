@@ -41,7 +41,8 @@
 | M4 | Scoped evaluators | 8–10 |
 | M5 | Envelope emission | 11 |
 | M6 | Producer migration | 12–17 |
-| M7 | Verification | 18 |
+| M6a | Canonical scope | 18 |
+| M7 | Verification | 19 |
 
 ---
 
@@ -68,7 +69,8 @@ import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_KINDS, REQUIRED_EFFECTS, GATE_CLASSES,
   ArtifactKindSchema, RequiredEffectSchema, GateIdSchema,
-  gateId, metricId, gateFamily, isParameterized, EDITABLE_KIND_PATHS,
+  gateId, metricId, gateFamily, isParameterized,
+  EDITABLE_KIND_PATHS, OPERATOR_TARGET_KINDS, GENERATED_KINDS,
 } from "../src/lib/registry/ids.js";
 
 describe("registry ids", () => {
@@ -102,16 +104,37 @@ describe("registry ids", () => {
     expect(isParameterized(gateId("figure_references"))).toBe(false);
   });
 
+  it("accepts a slug parameter, because taxonomy cells are free-form strings", () => {
+    // config.research.taxonomy is z.array(z.string().min(2)), so "agent memory"
+    // is a legal cell and must survive the round trip.
+    expect(GateIdSchema.safeParse("taxonomy:agent-memory").success).toBe(true);
+    expect(gateFamily(gateId("taxonomy:agent-memory"))).toBe("taxonomy");
+  });
+
   it("rejects a malformed identifier and a multi-segment parameter", () => {
     expect(GateIdSchema.safeParse("Figure References").success).toBe(false);
     expect(GateIdSchema.safeParse("taxonomy:a:b").success).toBe(false);
     expect(() => gateId("Figure References")).toThrow();
   });
 
-  it("records generated kinds as having no editable path of their own", () => {
+  it("gives the publication template a real editable path", () => {
+    // The first draft left it empty, then declared a repair_template route —
+    // a route the shape validator would have rejected.
+    expect(EDITABLE_KIND_PATHS.publication_template).toContain("paper/template/");
+  });
+
+  it("records a generated kind as having no editable path of its own", () => {
     expect(EDITABLE_KIND_PATHS.latex_layout).toEqual([]);
-    expect(EDITABLE_KIND_PATHS.publication_template).toEqual([]);
+    expect(GENERATED_KINDS).toContain("latex_layout");
     expect(EDITABLE_KIND_PATHS.figure_spec).toContain("figures/placement-plan.json");
+  });
+
+  it("separates operator targets from generated artifacts", () => {
+    // A missing compiler is a real target with no editable path — it is not a
+    // generated artifact, and a finding about it routes to an operator.
+    expect(OPERATOR_TARGET_KINDS).toContain("toolchain");
+    expect(OPERATOR_TARGET_KINDS).toContain("experiment_manifest");
+    expect(OPERATOR_TARGET_KINDS).not.toContain("latex_layout");
   });
 
   it("keeps gate and metric ids as distinct brands", () => {
@@ -137,7 +160,12 @@ const SEGMENT = "[a-z][a-z0-9_]*";
  * parameterized form exists because corpus-gates emits one gate per taxonomy
  * cell at runtime; pretending every gate id is a static literal is what made
  * the first inventory of this registry wrong twice. */
-const GATE_ID = new RegExp("^" + SEGMENT + "(:" + SEGMENT + ")?$");
+/** The parameter segment is a SLUG, not an identifier. Taxonomy cells are
+ * configured free-form strings (`z.array(z.string().min(2))`), so a real cell
+ * is "agent memory" or "long-horizon planning"; requiring an identifier there
+ * would reject every realistic configuration. */
+const SLUG = "[a-z0-9][a-z0-9-]{0,62}";
+const GATE_ID = new RegExp("^" + SEGMENT + "(:" + SLUG + ")?$");
 const PLAIN_ID = new RegExp("^" + SEGMENT + "$");
 
 declare const gateBrand: unique symbol;
@@ -192,7 +220,7 @@ export const EDITABLE_KIND_PATHS: Record<ArtifactKind, readonly string[]> = {
   figure_spec: ["figures/placement-plan.json"],
   table_spec: ["figures/placement-plan.json"],
   latex_layout: [],
-  publication_template: [],
+  publication_template: ["paper/template/"],
   bibliography: ["sources/bibliography.bib"],
   source_record: ["sources/classified_sources.jsonl"],
   evidence_packet: ["evidence/"],
@@ -200,6 +228,22 @@ export const EDITABLE_KIND_PATHS: Record<ArtifactKind, readonly string[]> = {
   experiment_manifest: [],
   toolchain: [],
 };
+
+/** Kinds with no editable path fall into two groups, and conflating them made
+ * the first draft self-contradictory: it declared routes for
+ * `publication_template` and `toolchain` while rejecting every kind with an
+ * empty path.
+ *
+ * `latex_layout` is GENERATED: a finding against it must name its producing
+ * surface instead, and may never be a finding's own artifact kind.
+ *
+ * `toolchain` and `experiment_manifest` are OPERATOR TARGETS: they are real
+ * things a finding is about, but nothing this product owns can edit them. A
+ * finding of these kinds is legal only when its capability is
+ * `request_operator_clarification`. */
+export const OPERATOR_TARGET_KINDS: readonly ArtifactKind[] = ["toolchain", "experiment_manifest"];
+export const GENERATED_KINDS: readonly ArtifactKind[] = ["latex_layout"];
+export const OPERATOR_CAPABILITY = "request_operator_clarification";
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -310,14 +354,29 @@ describe("generated routing", () => {
     expect(() => registerProducers([sample, sample])).toThrow(/declared by more than one producer/i);
   });
 
-  it("rejects a finding whose kind has no editable path", () => {
-    // A generated kind cannot be the artifact of a repair; the producing
-    // surface must be named instead.
+  it("rejects a generated kind as a finding's artifact", () => {
     expect(() => defineProducer({
       module: "bad", gates: [{ id: "g", class: "manuscript", findings: [
         { kind: "latex_layout", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
       ] }],
-    })).toThrow(/no editable path/i);
+    })).toThrow(/generated/i);
+  });
+
+  it("accepts an operator-target kind when an operator capability owns it", () => {
+    expect(() => defineProducer({
+      module: "ok", gates: [{ id: "g", class: "manuscript", findings: [
+        { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+      ] }],
+    })).not.toThrow();
+  });
+
+  it("rejects an operator-target kind owned by a repair capability", () => {
+    // Nothing this product owns can install a LaTeX compiler.
+    expect(() => defineProducer({
+      module: "bad", gates: [{ id: "g", class: "manuscript", findings: [
+        { kind: "toolchain", effect: "repair_toolchain", capability: "revise_visual_plan" },
+      ] }],
+    })).toThrow(/only request_operator_clarification/i);
   });
 });
 ```
@@ -334,8 +393,9 @@ Create `packages/longwrite/src/lib/registry/producer-types.ts`:
 ```ts
 import { z } from "zod";
 import {
-  ArtifactKindSchema, CapabilityIdSchema, EDITABLE_KIND_PATHS, GateClassSchema,
-  GateIdSchema, MetricIdSchema, RequiredEffectSchema,
+  ArtifactKindSchema, CapabilityIdSchema, GateClassSchema, GateIdSchema,
+  GENERATED_KINDS, MetricIdSchema, OPERATOR_CAPABILITY, OPERATOR_TARGET_KINDS,
+  RequiredEffectSchema,
 } from "./ids.js";
 
 export const FindingShape = z.object({
@@ -343,9 +403,16 @@ export const FindingShape = z.object({
   effect: RequiredEffectSchema,
   capability: CapabilityIdSchema,
 }).strict().superRefine((shape, ctx) => {
-  if (EDITABLE_KIND_PATHS[shape.kind].length === 0) {
+  if (GENERATED_KINDS.includes(shape.kind)) {
     ctx.addIssue({ code: "custom", path: ["kind"],
-      message: `${shape.kind} has no editable path; name the producing surface instead and carry the generated location in \`location\`` });
+      message: `${shape.kind} is generated; name the producing surface instead and carry the generated location in \`location\`` });
+    return;
+  }
+  // An operator target has no editable path but is still a real finding
+  // subject; only an operator capability may own one.
+  if (OPERATOR_TARGET_KINDS.includes(shape.kind) && String(shape.capability) !== OPERATOR_CAPABILITY) {
+    ctx.addIssue({ code: "custom", path: ["capability"],
+      message: `${shape.kind} has no editable path; only ${OPERATOR_CAPABILITY} may own it` });
   }
 });
 
@@ -722,7 +789,9 @@ Create `packages/longwrite/tests/registry-records.test.ts`:
 import { describe, expect, it } from "vitest";
 import {
   FindingSchema, MeasurementEntrySchema, MeasurementEnvelopeSchema, StructuredCheckSchema,
+  validateFindingAgainstRegistry,
 } from "../src/lib/registry/records.js";
+import { REGISTRY } from "../src/lib/registry/producers.js";
 
 const finding = {
   id: "figure-1-missing-reference",
@@ -759,8 +828,11 @@ describe("structured records", () => {
     }).success).toBe(false);
   });
 
-  it("rejects a triple its gate never declared", () => {
-    expect(FindingSchema.safeParse({ ...finding, gate_id: "core_sources" }).success).toBe(false);
+  it("rejects a triple its gate never declared, at the registry boundary", () => {
+    // The shape schema stays registry-free so producers can import it without
+    // creating records -> producers -> validation -> records.
+    const parsed = FindingSchema.parse({ ...finding, gate_id: "core_sources" });
+    expect(() => validateFindingAgainstRegistry(parsed, REGISTRY)).toThrow(/never declared/);
   });
 
   it("accepts a script measurement entry with no judgment", () => {
@@ -834,7 +906,12 @@ import {
   ArtifactKindSchema, EDITABLE_KIND_PATHS, GateIdSchema, MetricIdSchema, RequiredEffectSchema,
   type ArtifactKind,
 } from "./ids.js";
-import { REGISTRY } from "./producers.js";
+
+// Deliberately NO import of ./producers.js. The migrated validation modules
+// import FindingSchema, producers.ts imports those modules, and records.ts
+// importing producers.ts would close the cycle
+// records -> producers -> validation -> records.
+// Registry-dependent checks live in validate-finding.ts, which sits above both.
 
 function pathMatchesKind(kind: ArtifactKind, filePath: string): boolean {
   const prefixes = EDITABLE_KIND_PATHS[kind];
@@ -859,14 +936,12 @@ export const FindingSchema = z.object({
   /** For operators. Never parsed, never routed on. */
   diagnostic: z.string().min(1).max(8_000),
 }).strict().superRefine((finding, ctx) => {
+  // Shape-level only. Registry agreement is checked at the boundary, in
+  // validate-finding.ts, so this schema stays importable by the producers it
+  // describes.
   if (!pathMatchesKind(finding.artifact.kind, finding.artifact.path)) {
     ctx.addIssue({ code: "custom", path: ["artifact", "path"],
       message: `${finding.artifact.path} is not an editable ${finding.artifact.kind}; name the producing surface and put the generated location in \`location\`` });
-  }
-  const legal = REGISTRY.legalTriples(finding.gate_id);
-  if (!legal.some((t) => t.kind === finding.artifact.kind && t.effect === finding.required_effect)) {
-    ctx.addIssue({ code: "custom", path: ["required_effect"],
-      message: `${finding.gate_id} never declared (${finding.artifact.kind}, ${finding.required_effect}); declare it on the producer or fix the finding` });
   }
 });
 export type Finding = z.infer<typeof FindingSchema>;
@@ -924,6 +999,20 @@ export const MeasurementEnvelopeSchema = z.object({
   measurements: z.array(MeasurementEntrySchema).max(2_000),
 }).strict();
 export type MeasurementEnvelope = z.infer<typeof MeasurementEnvelopeSchema>;
+
+/** The registry boundary. Called by the coverage test, the packet builder and
+ * the action materializer — never by a producer, which would reintroduce the
+ * import cycle. */
+export function validateFindingAgainstRegistry(
+  finding: Finding, registry: { legalTriples(gate: GateId): readonly { kind: ArtifactKind; effect: RequiredEffect }[] },
+): void {
+  const legal = registry.legalTriples(finding.gate_id);
+  if (!legal.some((t) => t.kind === finding.artifact.kind && t.effect === finding.required_effect)) {
+    throw new Error(
+      `${finding.gate_id} never declared (${finding.artifact.kind}, ${finding.required_effect}); ` +
+      `declare it on the producer or fix the finding`);
+  }
+}
 
 export const StructuredCheckSchema = z.object({
   id: GateIdSchema,
@@ -1770,7 +1859,15 @@ git commit -m "feat(validation): convert the figures producer to structured find
 - Modify: `packages/longwrite/tests/fixtures/producer-probe/corpus-gates/`
 - Test: `packages/longwrite/tests/corpus-gates-structured.test.ts`
 
-Gate-to-metric mapping: `total_candidates → candidate_count`, `core_sources → core_sources`, `freshness → recent_source_ratio`, `source_type_diversity → source_type_diversity_count`, `taxonomy:<cell> → taxonomy_cell_ab_sources` scoped to that cell.
+Gate-to-metric mapping: `total_candidates → candidate_count`, `core_sources → core_sources`, `freshness → recent_source_ratio`, `source_type_diversity → source_type_diversity_count`, `taxonomy:<slug> → taxonomy_cell_ab_sources` scoped to that cell.
+
+**The module must also emit structured findings, not only measurements.** The
+first draft kept the existing `{ id, pass, detail }` summaries and added
+numbers beside them, which leaves every retrieval failure without an artifact,
+effect or capability — exactly the routing gap this program exists to close.
+Each failing corpus gate emits a `corpus / acquire_additional_evidence` finding
+(or `upgrade_source_quality` for a quality gate) with the cell's
+`objective_scope_key`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2051,6 +2148,16 @@ describe("latex and longform structured output", () => {
       && f.required_effect === "repair_bibliography_consistency")).toBe(true);
   });
 
+  it("emits no finding for an unrecognized build error", async () => {
+    const report = await validateLatexWorkspace(await latexWorkspace("unknown_error"));
+    const build = report.checks.find((check) => check.id === "latex_build")!;
+    expect(build.pass).toBe(false);
+    // Defaulting the unknown case to figure placement is the heuristic route
+    // this design removes; an unclassified error goes to diagnosis instead.
+    expect(build.findings).toEqual([]);
+    expect(build.diagnostic).toMatch(/unclassified/i);
+  });
+
   it("routes a float placement failure to the placement plan", async () => {
     const report = await validateLatexWorkspace(await latexWorkspace("float_placement"));
     const build = report.checks.find((check) => check.id === "latex_build")!;
@@ -2096,7 +2203,18 @@ Expected: FAIL — both modules return `findings: string[]`.
 
 - [ ] **Step 3: Convert both modules**
 
-Return `StructuredCheck` from every check. `latex_build` and `manuscript_build` classify the build log: a missing package or compiler fault gives `toolchain / repair_toolchain`, an undefined citation gives `bibliography / repair_bibliography_consistency`, and anything else gives `figure_spec / repair_artifact_placement` naming `figures/placement-plan.json` with the TeX location in `location`. `target_length` chooses by direction; `style_drift` emits a prose finding.
+Return `StructuredCheck` from every check. `latex_build` and `manuscript_build` classify the build log against a closed
+table: a missing package or compiler fault gives `toolchain / repair_toolchain`
+owned by `request_operator_clarification`; an undefined citation gives
+`bibliography / repair_bibliography_consistency`; a float or placement error
+gives `figure_spec / repair_artifact_placement` naming
+`figures/placement-plan.json` with the TeX location in `location`.
+
+**An unrecognized build error emits no finding and fails the check closed.**
+Defaulting the unknown case to figure placement would reinstate exactly the
+heuristic route this design removes — it would look like coverage while sending
+an unclassified compiler error to a figure editor. The unclassified diagnostic
+is carried on the check so diagnosis, not a guess, decides what happens next. `target_length` chooses by direction; `style_drift` emits a prose finding.
 
 - [ ] **Step 4: Extend the probe fixtures**
 
@@ -2207,7 +2325,12 @@ Expected: FAIL — all three modules return `findings: string[]`.
 
 - [ ] **Step 3: Convert the three modules**
 
-Return `StructuredCheck` from every check. `publication_custom_template` emits `publication_template / repair_template`; `publication_page_limit` and `publication_min_pages` choose trimming or expansion by direction; `related_work_matrix` emits a `table_spec` finding alongside its outline finding. `checkVisualReviewReleaseGate` maps each failing page's recorded remediation to one of the four shapes its producer declares.
+Return `StructuredCheck` from every check. `publication_custom_template` emits `publication_template / repair_template`; `publication_page_limit` and `publication_min_pages` choose trimming or expansion by direction; `related_work_matrix` emits a `table_spec` finding alongside its outline finding. `checkVisualReviewReleaseGate` reads **validated fields** from the visual-QA
+artifact rather than parsing free-form remediation prose. Extend the `VisualQa`
+schema so each finding carries `artifact_kind`, `artifact_path` and
+`required_effect`, validated against the closed vocabularies; a page whose
+review omits them, or names a triple the gate never declared, fails the check
+rather than being classified by keyword matching.
 
 - [ ] **Step 4: Extend the probe fixtures** for all three modules so every gate fails.
 
@@ -2312,9 +2435,207 @@ git commit -m "feat(preflight): emit environment-class checks with no findings"
 
 ---
 
+## M6a — Canonical scope
+
+### Task 18: Scope keys and objective scope
+
+Three defects share one cause. Gate ids allowed only an identifier parameter,
+but taxonomy cells are free-form configured strings. The kernel constrains
+`scope_key` to `[A-Za-z0-9._:-]`, while evaluators were to emit the configured
+string directly. And Plan 3 derived an objective's scope from an artifact path —
+unreliable, because a section artifact can carry a workspace-global objective
+and a taxonomy objective may name no chapter at all.
+
+**Files:**
+- Create: `packages/longwrite/src/lib/registry/scope.ts`
+- Modify: `packages/longwrite/src/lib/registry/records.ts` (add `objective_scope_key` to `FindingSchema`)
+- Test: `packages/longwrite/tests/registry-scope.test.ts`
+
+**Interfaces:**
+- Consumes: `canonicalJson` (Task 7).
+- Produces: `ScopeKey` branded type; `scopeKey(kind, label): ScopeKey`; `scopeLabel(workspaceDir, key): Promise<string>`; `GLOBAL_SCOPE`; `ScopeRecord` schema `{ key, kind, label }`; `writeScopeIndex(workspaceDir, records)`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/registry-scope.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { GLOBAL_SCOPE, scopeKey, scopeLabel, writeScopeIndex } from "../src/lib/registry/scope.js";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
+});
+
+describe("canonical scope keys", () => {
+  it("accepts a free-form taxonomy label", () => {
+    // "agent memory" is a legal configured cell and must not be rejected.
+    expect(() => scopeKey("taxonomy_cell", "agent memory")).not.toThrow();
+  });
+
+  it("produces a key the kernel's scope pattern accepts", () => {
+    const KERNEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$|^$/;
+    for (const label of ["agent memory", "long-horizon planning", "RL / control", "内存"]) {
+      expect(KERNEL.test(scopeKey("taxonomy_cell", label)), label).toBe(true);
+    }
+  });
+
+  it("is stable for the same kind and label", () => {
+    expect(scopeKey("taxonomy_cell", "agent memory")).toBe(scopeKey("taxonomy_cell", "agent memory"));
+  });
+
+  it("does not collide for labels that slugify identically", () => {
+    // "RL/control" and "RL control" share a slug; the digest suffix separates
+    // them, so two cells never merge into one objective.
+    expect(scopeKey("taxonomy_cell", "RL/control")).not.toBe(scopeKey("taxonomy_cell", "RL control"));
+  });
+
+  it("does not collide across scope kinds", () => {
+    expect(scopeKey("section", "memory")).not.toBe(scopeKey("taxonomy_cell", "memory"));
+  });
+
+  it("uses the empty string for workspace-global scope", () => {
+    expect(GLOBAL_SCOPE).toBe("");
+  });
+
+  it("recovers the human label from the scope index", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-scope-"));
+    roots.push(ws);
+    const key = scopeKey("taxonomy_cell", "agent memory");
+    await writeScopeIndex(ws, [{ key, kind: "taxonomy_cell", label: "agent memory" }]);
+    // The key is machine-safe; the label is what an operator reads.
+    expect(await scopeLabel(ws, key)).toBe("agent memory");
+  });
+
+  it("falls back to the key when no label is recorded", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-scope-none-"));
+    roots.push(ws);
+    expect(await scopeLabel(ws, "taxonomy-cell-abc123")).toBe("taxonomy-cell-abc123");
+  });
+});
+
+describe("objective scope on findings", () => {
+  it("carries an objective scope distinct from the artifact path", async () => {
+    const { FindingSchema } = await import("../src/lib/registry/records.js");
+    const finding = {
+      id: "f1", gate_id: "rendered_visual_review",
+      artifact: { kind: "chapter_prose", path: "chapters/section-03.md" },
+      // The defect is in section 3, but the objective is the whole rendered PDF.
+      objective_scope_key: "",
+      required_effect: "add_explicit_artifact_reference", severity: "major",
+      diagnostic: "Figure 1 is not named before its placement.",
+    };
+    expect(FindingSchema.safeParse(finding).success).toBe(true);
+  });
+
+  it("requires objective_scope_key rather than inferring it", async () => {
+    const { FindingSchema } = await import("../src/lib/registry/records.js");
+    const finding = {
+      id: "f1", gate_id: "rendered_visual_review",
+      artifact: { kind: "chapter_prose", path: "chapters/section-03.md" },
+      required_effect: "add_explicit_artifact_reference", severity: "major",
+      diagnostic: "x",
+    };
+    expect(FindingSchema.safeParse(finding).success).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-scope`
+Expected: FAIL — cannot resolve `scope.js`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/longwrite/src/lib/registry/scope.ts`:
+
+```ts
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { z } from "zod";
+import { canonicalJson } from "./canonical.js";
+
+export type ScopeKind = "global" | "section" | "taxonomy_cell";
+export const GLOBAL_SCOPE = "";
+
+/** A machine-safe key for a human label the operator configured.
+ *
+ * Taxonomy cells are free-form strings, so the label cannot be the key: it may
+ * contain spaces, slashes or non-ASCII. A slug alone is not enough either —
+ * "RL/control" and "RL control" slugify identically and would silently merge
+ * into one objective — so the key carries a short digest of the exact label. */
+export function scopeKey(kind: ScopeKind, label: string): string {
+  if (kind === "global") return GLOBAL_SCOPE;
+  const slug = label.toLowerCase().normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "x";
+  const digest = crypto.createHash("sha256").update(canonicalJson([kind, label])).digest("hex").slice(0, 10);
+  return `${kind.replace(/_/g, "-")}-${slug}-${digest}`;
+}
+
+export const ScopeRecord = z.object({
+  key: z.string().min(1),
+  kind: z.enum(["section", "taxonomy_cell"]),
+  label: z.string().min(1),
+}).strict();
+
+const INDEX = path.join("reports", "scope-index.json");
+
+export async function writeScopeIndex(workspaceDir: string, records: unknown[]): Promise<string> {
+  const parsed = records.map((record) => ScopeRecord.parse(record));
+  const target = path.join(workspaceDir, INDEX);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify({ version: 1, scopes: parsed }, null, 2)}\n`, "utf-8");
+  return INDEX;
+}
+
+/** The key is what the kernel stores; the label is what an operator reads. */
+export async function scopeLabel(workspaceDir: string, key: string): Promise<string> {
+  const raw = await fs.readFile(path.join(workspaceDir, INDEX), "utf-8").catch(() => null);
+  if (raw === null) return key;
+  const parsed = z.object({ version: z.literal(1), scopes: z.array(ScopeRecord) }).safeParse(JSON.parse(raw));
+  if (!parsed.success) return key;
+  return parsed.data.scopes.find((record) => record.key === key)?.label ?? key;
+}
+```
+
+Add to `FindingSchema` in `records.ts`:
+
+```ts
+  /** The scope of the OBJECTIVE this finding belongs to — never inferred from
+   * the artifact path. A prose defect in section 3 can belong to a
+   * workspace-global rendered-PDF objective, and a taxonomy objective may name
+   * no chapter at all. */
+  objective_scope_key: z.string(),
+```
+
+Every producer emitting a finding supplies it: `GLOBAL_SCOPE` for a global
+gate, `scopeKey("section", sectionId)` for a section-scoped one,
+`scopeKey("taxonomy_cell", cell)` for a taxonomy gate. Corpus gates write the
+scope index alongside their measurements so labels survive.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-scope registry-records`
+Expected: PASS, 10 + the records suite.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/longwrite/src/lib/registry/scope.ts packages/longwrite/src/lib/registry/records.ts packages/longwrite/tests/registry-scope.test.ts
+git commit -m "feat(registry): add canonical scope keys and explicit objective scope"
+```
+
+---
+
 ## M7 — Verification
 
-### Task 18: Full verification and documentation
+### Task 19: Full verification and documentation
 
 **Files:**
 - Modify: `packages/longwrite/README.md`
