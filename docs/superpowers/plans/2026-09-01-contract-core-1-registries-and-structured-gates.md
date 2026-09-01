@@ -1,46 +1,53 @@
-# Contract Core, Plan 1: Registries and Structured Gates Implementation Plan
+# Contract Core, Plan 1: Registries, Producers and Measurement Envelopes Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **STATUS: BLOCKED — do not execute.** A review found compile-time and
-> semantic defects in this plan. It must be amended against
-> [the Observation and Criterion Wire Contract](../specs/2026-09-01-observation-and-criterion-wire-contract.md)
-> before any task is started. The required amendments are listed at the end of
-> this document under "Pending Amendments".
+**Goal:** Make every deterministic gate emit structured findings and scoped measurement entries instead of prose, behind typed producer definitions from which the routing table is generated and CI-enforced.
 
+**Architecture:** Gates already compute both the routing triple (artifact, kind, effect) and the numeric observation, then flatten both into `string` and discard them. This plan adds `src/lib/registry/` — branded ids, **typed producer definitions colocated with each gate module**, a generated routing table, the metric registry, digests, and evaluators — then converts all nine producers. MrMaLiang produces a measurement **envelope**; MalaClaw owns storage, sequencing and arithmetic.
 
-**Goal:** Make MrMaLiang's deterministic gates emit structured findings and numeric observations instead of prose, behind closed registries that a triple-level coverage test enforces.
+**Tech Stack:** TypeScript (ESM, Node 22+), Zod 3, Vitest 4, the existing `longwrite` Commander CLI.
 
-**Architecture:** Gates already compute both the routing triple (artifact, kind, effect) and the numeric observation (value, target), then flatten both into `string` and discard them. This plan adds `src/lib/registry/` — branded ids, explicit producer registration, the legal-triple and routing tables, the metric registry, and a content-addressed observation store — then converts the gate producers. No MalaClaw change and no workflow-topology change.
+**Specs:**
+- `docs/superpowers/specs/2026-08-31-contract-enforcement-core-design.md` — §A1, §A2, §A3, §A3a, §A3b, §A4.
+- `docs/superpowers/specs/2026-09-01-observation-and-criterion-wire-contract.md` — **the boundary.** §2 assigns ownership, §3 defines the envelope this plan emits, §5 defines the criteria this plan compiles.
 
-**Tech Stack:** TypeScript (ESM, Node 22+), Zod 3, Vitest 4, existing `longwrite` Commander CLI.
-
-**Spec:** `docs/superpowers/specs/2026-08-31-contract-enforcement-core-design.md` — §A1, §A2, §A3, §A3a, §A3b, §A4.
-
-**Explicitly out of scope, and why:**
-- **§A9 (model tiering)** is a compiler concern; it lands in Plan 3 Task 8 with the IR v2 units. This plan does not claim it.
-- **§B4 (measurement scheduling)** is only *partly* here: this plan defines dependency-driven invalidation and reuse. Deferred measurement, `pending_verification`, and round scheduling are kernel behavior and belong to Plan 2.
-- **§A5 to §A8** are Plan 3.
+**Explicitly out of scope:**
+- **Observation storage, sequence allocation and acceptance arithmetic.** The kernel owns all three (wire contract §2). This plan emits envelope entries and stops.
+- **Measurement reuse.** Whether to dispatch a measurement unit at all is a kernel scheduling decision; an evaluator measures what it is asked for.
+- **§A9 model tiering** — Plan 3 Task 8, with the IR v2 units.
+- **§A5–A8** — Plan 3.
 
 ## Global Constraints
 
 - Node.js 22 or newer. ESM; **relative imports carry the `.js` extension** in `.ts` files.
-- Zod schemas are `.strict()`. Malformed durable state **throws**; it is never silently skipped, because a skipped record becomes a trusted wrong number.
-- Registries are the single source of truth. Never restate registry content in a prompt — Plan 3 renders prompts from these registries.
+- Zod schemas are `.strict()`. Malformed durable state **throws**; a skipped record becomes a trusted wrong number.
+- **The routing table is generated from typed producer definitions.** Never hand-maintain a parallel list; a definition lives beside the code that emits the findings it describes.
 - Routing fails closed. No default route. An unresolved triple is an error.
-- Never order or compare observations by wall-clock time, and never select an observation without first matching its dependency and evaluator digests.
-- **Reuse the canonical helpers.** `citedSourceIds`, `isAcceptedSource`, and `isArxivOnlySource` already exist in `src/lib/validation/research.ts`. A second implementation of any of them is a defect, not an evaluator.
-- Every measurement is reproducible from its inputs. Anything time-dependent takes an explicit `evaluation_as_of_date` that enters the digest.
-- Sequence numbers are allocated atomically or supplied by the caller. A read-then-increment is a race and is not acceptable.
-- MalaClaw gains nothing in this plan.
+- **Every measurement carries `scope_key`.** A scoped metric emits one entry per scope, never an aggregate.
+- **Reuse the canonical helpers.** `citedSourceIds`, `isAcceptedSource`, `isArxivOnlySource` and `isWithinOneCalendarYear` already exist in `src/lib/validation/research.ts`. A second implementation of any of them is a defect.
+- A time-dependent metric declares `time_dependent: true` and takes an explicit `as_of_date` that enters its digest. A metric that does not declare it must never fold a timestamp into its digest, or every static measurement invalidates daily.
+- MrMaLiang never writes `.malaclaw/`.
 - Tests: `npm test --workspace @mr-maliang/longwrite`. Fixtures use `fs.mkdtemp` under `os.tmpdir()`, removed in `afterEach`, following `tests/corpus-gates.test.ts`.
 - Preserve the dirty worktree. Only touch files named in a task.
 
+## Milestones
+
+| # | Milestone | Tasks |
+| --- | --- | --- |
+| M1 | Vocabulary and typed producer definitions | 1–4 |
+| M2 | Structured records | 5 |
+| M3 | Metric registry and digests | 6–7 |
+| M4 | Scoped evaluators | 8–10 |
+| M5 | Envelope emission | 11 |
+| M6 | Producer migration | 12–17 |
+| M7 | Verification | 18 |
+
 ---
 
-### Task 1: Branded ids, closed vocabularies, and gate families
+## M1 — Vocabulary and typed producer definitions
 
-Gate ids are not all static literals: `corpus-gates.ts:93` emits a template-literal id of the form `taxonomy:<cell>`, which contains a colon and is generated at runtime. A registry that assumes plain lowercase literals cannot represent it, and a scanner looking for a quoted `id:` cannot see it.
+### Task 1: Branded ids and closed vocabularies
 
 **Files:**
 - Create: `packages/longwrite/src/lib/registry/ids.ts`
@@ -48,7 +55,9 @@ Gate ids are not all static literals: `corpus-gates.ts:93` emits a template-lite
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: types `GateId`, `MetricId`, `CapabilityId`; `ARTIFACT_KINDS`/`ArtifactKind`, `REQUIRED_EFFECTS`/`RequiredEffect`, `GATE_CLASSES`/`GateClass`; constructors `gateId`, `metricId`, `capabilityId`; schemas `GateIdSchema`, `MetricIdSchema`, `ArtifactKindSchema`, `RequiredEffectSchema`; `gateFamily(id: GateId): GateId` mapping a parameterized id to its family; `isParameterized(id: GateId): boolean`; `EDITABLE_KIND_PATHS`.
+- Produces: `GateId`, `MetricId`, `CapabilityId` branded types with `gateId`, `metricId`, `capabilityId` constructors and schemas; `GATE_CLASSES`/`GateClass`; `ARTIFACT_KINDS`/`ArtifactKind`; `REQUIRED_EFFECTS`/`RequiredEffect`; `gateFamily`; `isParameterized`; `EDITABLE_KIND_PATHS`.
+
+Three effects are added beyond the original set, because the routing review found gates whose only legal repair had no name: an under-length manuscript needs `expand_argument`, a publication-template defect needs `repair_template`, and a build-toolchain defect needs `repair_toolchain`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -63,20 +72,18 @@ import {
 } from "../src/lib/registry/ids.js";
 
 describe("registry ids", () => {
-  it("exposes the closed artifact-kind vocabulary", () => {
-    expect(ARTIFACT_KINDS).toContain("chapter_prose");
-    expect(ARTIFACT_KINDS).toContain("latex_layout");
+  it("exposes closed, duplicate-free vocabularies", () => {
     expect(new Set(ARTIFACT_KINDS).size).toBe(ARTIFACT_KINDS.length);
-  });
-
-  it("exposes the closed required-effect vocabulary", () => {
-    expect(REQUIRED_EFFECTS).toContain("add_explicit_artifact_reference");
-    expect(REQUIRED_EFFECTS).toContain("repair_bibliography_consistency");
     expect(new Set(REQUIRED_EFFECTS).size).toBe(REQUIRED_EFFECTS.length);
+    expect([...GATE_CLASSES].sort()).toEqual(["environment", "manuscript", "measurement"]);
   });
 
-  it("exposes the three gate classes", () => {
-    expect([...GATE_CLASSES].sort()).toEqual(["environment", "manuscript", "measurement"]);
+  it("names an effect for every repair the routing review found unrepresentable", () => {
+    // An under-length manuscript, a broken publication template and a missing
+    // compiler each had no legal effect before.
+    for (const effect of ["expand_argument", "repair_template", "repair_toolchain"]) {
+      expect(REQUIRED_EFFECTS).toContain(effect);
+    }
   });
 
   it("rejects values outside a closed vocabulary", () => {
@@ -103,6 +110,7 @@ describe("registry ids", () => {
 
   it("records generated kinds as having no editable path of their own", () => {
     expect(EDITABLE_KIND_PATHS.latex_layout).toEqual([]);
+    expect(EDITABLE_KIND_PATHS.publication_template).toEqual([]);
     expect(EDITABLE_KIND_PATHS.figure_spec).toContain("figures/placement-plan.json");
   });
 
@@ -128,7 +136,7 @@ const SEGMENT = "[a-z][a-z0-9_]*";
 /** A gate id is a family, optionally followed by one parameter segment. The
  * parameterized form exists because corpus-gates emits one gate per taxonomy
  * cell at runtime; pretending every gate id is a static literal is what made
- * the first inventory of this registry wrong. */
+ * the first inventory of this registry wrong twice. */
 const GATE_ID = new RegExp("^" + SEGMENT + "(:" + SEGMENT + ")?$");
 const PLAIN_ID = new RegExp("^" + SEGMENT + "$");
 
@@ -140,21 +148,16 @@ export type GateId = string & { readonly [gateBrand]: true };
 export type MetricId = string & { readonly [metricBrand]: true };
 export type CapabilityId = string & { readonly [capabilityBrand]: true };
 
-export const GateIdSchema = z.string().regex(GATE_ID).transform((value) => value as GateId);
-export const MetricIdSchema = z.string().regex(PLAIN_ID).transform((value) => value as MetricId);
-export const CapabilityIdSchema = z.string().regex(PLAIN_ID).transform((value) => value as CapabilityId);
+export const GateIdSchema = z.string().regex(GATE_ID).transform((v) => v as GateId);
+export const MetricIdSchema = z.string().regex(PLAIN_ID).transform((v) => v as MetricId);
+export const CapabilityIdSchema = z.string().regex(PLAIN_ID).transform((v) => v as CapabilityId);
 
 export function gateId(value: string): GateId { return GateIdSchema.parse(value); }
 export function metricId(value: string): MetricId { return MetricIdSchema.parse(value); }
 export function capabilityId(value: string): CapabilityId { return CapabilityIdSchema.parse(value); }
 
-/** Registry lookups key on the family, so one entry covers every instance. */
-export function gateFamily(id: GateId): GateId {
-  return id.split(":")[0] as GateId;
-}
-export function isParameterized(id: GateId): boolean {
-  return id.includes(":");
-}
+export function gateFamily(id: GateId): GateId { return id.split(":")[0] as GateId; }
+export function isParameterized(id: GateId): boolean { return id.includes(":"); }
 
 export const GATE_CLASSES = ["manuscript", "environment", "measurement"] as const;
 export type GateClass = (typeof GATE_CLASSES)[number];
@@ -162,8 +165,8 @@ export const GateClassSchema = z.enum(GATE_CLASSES);
 
 export const ARTIFACT_KINDS = [
   "chapter_prose", "abstract", "outline",
-  "figure_spec", "table_spec", "latex_layout", "bibliography",
-  "source_record", "evidence_packet", "corpus", "experiment_manifest",
+  "figure_spec", "table_spec", "latex_layout", "publication_template", "bibliography",
+  "source_record", "evidence_packet", "corpus", "experiment_manifest", "toolchain",
 ] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export const ArtifactKindSchema = z.enum(ARTIFACT_KINDS);
@@ -171,17 +174,17 @@ export const ArtifactKindSchema = z.enum(ARTIFACT_KINDS);
 export const REQUIRED_EFFECTS = [
   "add_explicit_artifact_reference", "add_supporting_citation", "remove_unsupported_claim",
   "repair_citation_marker", "replace_organizing_claim", "resolve_contradiction",
-  "remove_redundant_prose", "repair_artifact_content", "repair_artifact_placement",
+  "remove_redundant_prose", "expand_argument",
+  "repair_artifact_content", "repair_artifact_placement", "repair_template",
   "acquire_additional_evidence", "upgrade_source_quality", "repair_source_metadata",
-  "repair_bibliography_consistency",
+  "repair_bibliography_consistency", "repair_toolchain",
 ] as const;
 export type RequiredEffect = (typeof REQUIRED_EFFECTS)[number];
 export const RequiredEffectSchema = z.enum(REQUIRED_EFFECTS);
 
-/** Editable path prefixes per artifact kind, used by Task 6 to validate that a
- * finding's declared kind matches the path it names. A generated kind has no
- * editable path of its own: a finding against generated TeX must name the
- * producing surface and put the TeX location in `location`. */
+/** Editable path prefixes per artifact kind. A generated kind has no editable
+ * path of its own: a finding against generated TeX must name the producing
+ * surface and carry the generated location in `location`. */
 export const EDITABLE_KIND_PATHS: Record<ArtifactKind, readonly string[]> = {
   chapter_prose: ["chapters/"],
   abstract: ["paper/abstract.md"],
@@ -189,48 +192,239 @@ export const EDITABLE_KIND_PATHS: Record<ArtifactKind, readonly string[]> = {
   figure_spec: ["figures/placement-plan.json"],
   table_spec: ["figures/placement-plan.json"],
   latex_layout: [],
+  publication_template: [],
   bibliography: ["sources/bibliography.bib"],
   source_record: ["sources/classified_sources.jsonl"],
   evidence_packet: ["evidence/"],
   corpus: ["sources/"],
   experiment_manifest: [],
+  toolchain: [],
 };
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- registry-ids`
-Expected: PASS, 9 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/longwrite/src/lib/registry/ids.ts packages/longwrite/tests/registry-ids.test.ts
-git commit -m "feat(registry): add branded ids, closed vocabularies and parameterized gate families"
+git commit -m "feat(registry): add branded ids and closed artifact/effect vocabularies"
 ```
 
 ---
 
-### Task 2: Explicit producer registration
+### Task 2: Producer definition type and generated routing
 
-A regex scan over source text cannot see a template-literal id, a helper-built id, or a single-quoted one, and it silently reports absence as coverage. Producers declare their gate ids instead.
+The routing table is no longer authored by hand. Each producer declares, beside its checks, which gates it emits and which findings each gate can produce; the class table, legal triples and routes are all derived from those declarations.
 
 **Files:**
+- Create: `packages/longwrite/src/lib/registry/producer-types.ts`
+- Create: `packages/longwrite/src/lib/registry/routing.ts`
+- Test: `packages/longwrite/tests/registry-routing.test.ts`
+
+**Interfaces:**
+- Consumes: Task 1 ids.
+- Produces: `FindingShape = { kind: ArtifactKind; effect: RequiredEffect; capability: CapabilityId }`; `GateDefinition = { id: GateId; class: GateClass; findings: FindingShape[]; observes?: MetricId[] }`; `ProducerDefinition = { module: string; gates: GateDefinition[] }`; `defineProducer(definition)` validating shape; and from `routing.ts` — `registerProducers(definitions)`, `GATE_CLASS_TABLE`, `gateClass`, `gatesOfClass`, `legalTriples`, `routedTripleKeys`, `resolveCapability`, `UnroutedFindingError`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/registry-routing.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { defineProducer } from "../src/lib/registry/producer-types.js";
+import { gateId } from "../src/lib/registry/ids.js";
+import {
+  registerProducers, resolveCapability, UnroutedFindingError, legalTriples, gateClass,
+} from "../src/lib/registry/routing.js";
+
+const sample = defineProducer({
+  module: "sample",
+  gates: [
+    { id: "visual_review", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "compiler_present", class: "environment", findings: [] },
+    { id: "taxonomy", class: "manuscript", findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+  ],
+});
+const registry = registerProducers([sample]);
+
+describe("generated routing", () => {
+  it("routes one gate to different capabilities by artifact kind", () => {
+    expect(String(registry.resolveCapability({
+      gate: gateId("visual_review"), kind: "chapter_prose", effect: "add_explicit_artifact_reference",
+    }))).toBe("revise_sections");
+    expect(String(registry.resolveCapability({
+      gate: gateId("visual_review"), kind: "figure_spec", effect: "repair_artifact_content",
+    }))).toBe("revise_visual_plan");
+  });
+
+  it("resolves a parameterized gate through its family", () => {
+    expect(String(registry.resolveCapability({
+      gate: gateId("taxonomy:agent_memory"), kind: "corpus", effect: "acquire_additional_evidence",
+    }))).toBe("targeted_research_expansion");
+  });
+
+  it("throws instead of defaulting when the triple is unrouted", () => {
+    expect(() => registry.resolveCapability({
+      gate: gateId("visual_review"), kind: "corpus", effect: "acquire_additional_evidence",
+    })).toThrow(UnroutedFindingError);
+  });
+
+  it("derives the gate class from the producer definition", () => {
+    expect(registry.gateClass(gateId("visual_review"))).toBe("manuscript");
+    expect(registry.gateClass(gateId("compiler_present"))).toBe("environment");
+  });
+
+  it("throws rather than defaulting for an unknown gate", () => {
+    expect(() => registry.gateClass(gateId("never_declared"))).toThrow(/unclassified gate/);
+  });
+
+  it("derives legal triples from declared findings, never a parallel list", () => {
+    expect(registry.legalTriples(gateId("visual_review")).map((t) => t.effect).sort())
+      .toEqual(["add_explicit_artifact_reference", "repair_artifact_content"]);
+  });
+
+  it("rejects a manuscript gate that declares no findings", () => {
+    expect(() => defineProducer({
+      module: "bad", gates: [{ id: "orphan", class: "manuscript", findings: [] }],
+    })).toThrow(/manuscript gate.*at least one finding/i);
+  });
+
+  it("rejects an environment or measurement gate that declares findings", () => {
+    expect(() => defineProducer({
+      module: "bad", gates: [{ id: "env", class: "environment", findings: [
+        { kind: "corpus", effect: "acquire_additional_evidence", capability: "x" },
+      ] }],
+    })).toThrow(/environment.*must declare no findings/i);
+  });
+
+  it("rejects two producers declaring the same gate", () => {
+    expect(() => registerProducers([sample, sample])).toThrow(/declared by more than one producer/i);
+  });
+
+  it("rejects a finding whose kind has no editable path", () => {
+    // A generated kind cannot be the artifact of a repair; the producing
+    // surface must be named instead.
+    expect(() => defineProducer({
+      module: "bad", gates: [{ id: "g", class: "manuscript", findings: [
+        { kind: "latex_layout", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      ] }],
+    })).toThrow(/no editable path/i);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-routing`
+Expected: FAIL — cannot resolve `producer-types.js`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/longwrite/src/lib/registry/producer-types.ts`:
+
+```ts
+import { z } from "zod";
+import {
+  ArtifactKindSchema, CapabilityIdSchema, EDITABLE_KIND_PATHS, GateClassSchema,
+  GateIdSchema, MetricIdSchema, RequiredEffectSchema,
+} from "./ids.js";
+
+export const FindingShape = z.object({
+  kind: ArtifactKindSchema,
+  effect: RequiredEffectSchema,
+  capability: CapabilityIdSchema,
+}).strict().superRefine((shape, ctx) => {
+  if (EDITABLE_KIND_PATHS[shape.kind].length === 0) {
+    ctx.addIssue({ code: "custom", path: ["kind"],
+      message: `${shape.kind} has no editable path; name the producing surface instead and carry the generated location in \`location\`` });
+  }
+});
+
+export const GateDefinition = z.object({
+  id: GateIdSchema,
+  class: GateClassSchema,
+  /** Every finding this gate can legally emit. Legal triples and routes are
+   * derived from this list — there is no parallel table to drift from. */
+  findings: z.array(FindingShape).default([]),
+  /** Metrics this gate measures while deciding. */
+  observes: z.array(MetricIdSchema).default([]),
+}).strict().superRefine((gate, ctx) => {
+  if (gate.class === "manuscript" && gate.findings.length === 0) {
+    ctx.addIssue({ code: "custom", path: ["findings"],
+      message: `manuscript gate ${gate.id} must declare at least one finding it can emit` });
+  }
+  if (gate.class !== "manuscript" && gate.findings.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["findings"],
+      message: `${gate.class} gate ${gate.id} must declare no findings; it is not repairable` });
+  }
+});
+
+export const ProducerDefinition = z.object({
+  module: z.string().min(1),
+  gates: z.array(GateDefinition).min(1),
+}).strict();
+export type ProducerDefinition = z.infer<typeof ProducerDefinition>;
+export type GateDefinition = z.infer<typeof GateDefinition>;
+export type FindingShape = z.infer<typeof FindingShape>;
+
+/** Declared beside the checks that emit these gates, so a reviewer sees the
+ * declaration and the code together. */
+export function defineProducer(definition: unknown): ProducerDefinition {
+  return ProducerDefinition.parse(definition);
+}
+```
+
+Create `packages/longwrite/src/lib/registry/routing.ts` exporting `registerProducers(definitions)` which returns `{ GATE_CLASS_TABLE, gateClass, gatesOfClass, legalTriples, routedTripleKeys, resolveCapability, producerOf }`, all derived by folding the definitions; plus a module-level `REGISTRY` built from the real producers in Task 3 and re-exported as bare functions for convenience. `resolveCapability` throws `UnroutedFindingError` carrying the key.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-routing`
+Expected: PASS, 10 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/longwrite/src/lib/registry/producer-types.ts packages/longwrite/src/lib/registry/routing.ts packages/longwrite/tests/registry-routing.test.ts
+git commit -m "feat(registry): derive routing from typed producer definitions"
+```
+
+---
+
+### Task 3: Declare all nine producers
+
+This is the judgment-heavy task: every gate's real repair semantics, declared beside the code that emits it. The routing review found six gates whose previous routes were semantically wrong; each is corrected here.
+
+**Files:**
+- Modify all nine producer modules to export `PRODUCER`:
+  `src/lib/validation/research.ts`, `figures.ts`, `latex.ts`, `longform.ts`,
+  `src/lib/research/corpus-gates.ts`, `survey-contract.ts`,
+  `src/lib/ops/visual-review.ts`, `src/lib/publication.ts`, `src/commands/preflight.ts`
 - Create: `packages/longwrite/src/lib/registry/producers.ts`
-- Modify: `packages/longwrite/src/lib/validation/research.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/validation/figures.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/validation/latex.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/validation/longform.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/research/corpus-gates.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/research/survey-contract.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/ops/visual-review.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/lib/publication.ts` (export `GATE_IDS`)
-- Modify: `packages/longwrite/src/commands/preflight.ts` (export `GATE_IDS`)
 - Test: `packages/longwrite/tests/registry-producers.test.ts`
 
 **Interfaces:**
-- Consumes: `GateId`, `gateId`, `gateFamily` (Task 1).
-- Produces: each producer module exports `export const GATE_IDS: readonly string[]`. `producers.ts` exports `PRODUCERS: ReadonlyMap<string, readonly GateId[]>` and `allEmittedGateFamilies(): Set<GateId>`.
+- Consumes: `defineProducer` (Task 2).
+- Produces: `PRODUCER: ProducerDefinition` from each module; `PRODUCERS: ProducerDefinition[]` and the built `REGISTRY` from `producers.ts`.
+
+**Corrections the review required.** Each is a semantic fix, not a coverage fix:
+
+| Gate | Was | Now |
+| --- | --- | --- |
+| `target_length` | `remove_redundant_prose` only | adds `expand_argument` on `chapter_prose`, so an under-length manuscript is repairable |
+| `research_artifacts_present` | routed to `figure_spec` | routes to `evidence_packet` + `acquire_additional_evidence` |
+| `manuscript_build` | figure placement only | adds `bibliography` and `toolchain` + `repair_toolchain` |
+| `publication_custom_template` | figure placement | `publication_template` + `repair_template` |
+| `citation_verification` | prose marker repair only | adds `source_record` + `repair_source_metadata` and `bibliography` + `repair_bibliography_consistency` |
+| `related_work_matrix` | outline only | adds `table_spec` + `repair_artifact_content` |
 
 - [ ] **Step 1: Write the failing test**
 
@@ -238,43 +432,79 @@ Create `packages/longwrite/tests/registry-producers.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { PRODUCERS, allEmittedGateFamilies } from "../src/lib/registry/producers.js";
+import { PRODUCERS, REGISTRY } from "../src/lib/registry/producers.js";
 import { gateId } from "../src/lib/registry/ids.js";
 
-describe("producer registration", () => {
-  it("registers every gate-producing module", () => {
-    expect([...PRODUCERS.keys()].sort()).toEqual([
+const effectsFor = (gate: string) => REGISTRY.legalTriples(gateId(gate)).map((t) => `${t.kind}/${t.effect}`).sort();
+
+describe("producer declarations", () => {
+  it("registers all nine gate-producing modules", () => {
+    expect(PRODUCERS.map((p) => p.module).sort()).toEqual([
       "corpus-gates", "figures", "latex", "longform", "preflight",
       "publication", "research", "survey-contract", "visual-review",
     ]);
   });
 
   it("captures the parameterized taxonomy family a text scan cannot see", () => {
-    expect(allEmittedGateFamilies().has(gateId("taxonomy"))).toBe(true);
+    expect(REGISTRY.gateClass(gateId("taxonomy"))).toBe("manuscript");
   });
 
-  it("captures the visual-review gates missed by a source scan", () => {
-    const families = allEmittedGateFamilies();
-    expect(families.has(gateId("rendered_visual_review"))).toBe(true);
-    expect(families.has(gateId("visual_review_contract"))).toBe(true);
+  it("makes an under-length manuscript repairable", () => {
+    expect(effectsFor("target_length")).toContain("chapter_prose/expand_argument");
+    expect(effectsFor("target_length")).toContain("chapter_prose/remove_redundant_prose");
   });
 
-  it("declares only the documented duplicate gate id", () => {
-    const seen = new Map<string, string>();
-    const duplicates: string[] = [];
-    for (const [module, ids] of PRODUCERS) {
-      for (const id of ids) {
-        if (seen.has(id) && seen.get(id) !== module) duplicates.push(`${id} (${seen.get(id)} and ${module})`);
-        seen.set(id, module);
+  it("routes missing research artifacts to evidence, not to a figure spec", () => {
+    expect(effectsFor("research_artifacts_present")).toEqual(["evidence_packet/acquire_additional_evidence"]);
+  });
+
+  it("lets a build failure reach the bibliography and the toolchain", () => {
+    const effects = effectsFor("manuscript_build");
+    expect(effects).toContain("bibliography/repair_bibliography_consistency");
+    expect(effects).toContain("toolchain/repair_toolchain");
+  });
+
+  it("routes a template defect to a template repair", () => {
+    expect(effectsFor("publication_custom_template")).toEqual(["publication_template/repair_template"]);
+  });
+
+  it("lets citation verification reach source metadata and the bibliography", () => {
+    const effects = effectsFor("citation_verification");
+    expect(effects).toContain("source_record/repair_source_metadata");
+    expect(effects).toContain("bibliography/repair_bibliography_consistency");
+  });
+
+  it("lets a related-work matrix defect reach the table spec", () => {
+    expect(effectsFor("related_work_matrix")).toContain("table_spec/repair_artifact_content");
+  });
+
+  it("classifies every preflight gate as environment with no findings", () => {
+    const preflight = PRODUCERS.find((p) => p.module === "preflight")!;
+    for (const gate of preflight.gates) {
+      expect(gate.class, String(gate.id)).toBe("environment");
+      expect(gate.findings).toEqual([]);
+    }
+  });
+
+  it("does not declare review_no_regressions, which must_preserve subsumes", () => {
+    expect(() => REGISTRY.gateClass(gateId("review_no_regressions"))).toThrow(/unclassified/);
+  });
+
+  it("classifies empirical_experiment as environment, outside LongWrite's reach", () => {
+    expect(REGISTRY.gateClass(gateId("empirical_experiment"))).toBe("environment");
+  });
+
+  it("routes every legal triple it declares", () => {
+    const routed = REGISTRY.routedTripleKeys();
+    const unrouted: string[] = [];
+    for (const gate of REGISTRY.gatesOfClass("manuscript")) {
+      for (const triple of REGISTRY.legalTriples(gate)) {
+        if (!routed.has(`${gate} ${triple.kind} ${triple.effect}`)) {
+          unrouted.push(`${gate}/${triple.kind}/${triple.effect}`);
+        }
       }
     }
-    expect(duplicates.sort()).toEqual(["target_length (research and longform)"]);
-  });
-
-  it("declares only well-formed gate ids", () => {
-    for (const ids of PRODUCERS.values()) {
-      for (const id of ids) expect(() => gateId(String(id))).not.toThrow();
-    }
+    expect(unrouted.sort(), `unrouted: ${unrouted.join(", ")}`).toEqual([]);
   });
 });
 ```
@@ -286,517 +516,89 @@ Expected: FAIL — cannot resolve `producers.js`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In each producer module, add an exported declaration adjacent to its checks. For `corpus-gates.ts`, the taxonomy family is declared once rather than per cell:
+First **delete** the `review_no_regressions` check from `src/lib/validation/research.ts` — Spec 1 retires it, and a weaker duplicate of `must_preserve` would let a regression pass one check while failing the other.
+
+Then, in each producer module, export a `PRODUCER` beside its checks. `figures.ts`:
 
 ```ts
-/** Gate ids this module emits. Declared rather than scanned: the taxonomy gate
- * id is built at runtime and no text scan can enumerate its instances. */
-export const GATE_IDS = [
-  "total_candidates", "core_sources", "freshness", "source_type_diversity", "taxonomy",
-] as const;
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Declared here so a reviewer sees the checks and their repair semantics
+ * together. Legal triples and routes are generated from this. */
+export const PRODUCER = defineProducer({
+  module: "figures",
+  gates: [
+    { id: "figure_manifest", class: "manuscript", observes: ["figures", "tables"], findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "figure_artifacts", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "figure_references", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+    ] },
+    { id: "diagram_connectivity", class: "manuscript", observes: ["diagram_connectivity"], findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "full_mode_visual_contract", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_layout", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+  ],
+});
 ```
 
-For `figures.ts`:
+Declare the equivalent in the other eight modules, applying every correction in the table above. `corpus-gates.ts` declares the `taxonomy` family once, not per cell, and lists `observes` for each numeric gate.
+
+Create `packages/longwrite/src/lib/registry/producers.ts`:
 
 ```ts
-export const GATE_IDS = [
-  "figure_manifest", "full_mode_visual_contract", "figure_artifacts",
-  "figure_references", "publication_layout", "diagram_connectivity",
-] as const;
-```
+import { registerProducers } from "./routing.js";
+import { PRODUCER as research } from "../validation/research.js";
+import { PRODUCER as figures } from "../validation/figures.js";
+import { PRODUCER as latex } from "../validation/latex.js";
+import { PRODUCER as longform } from "../validation/longform.js";
+import { PRODUCER as corpusGates } from "../research/corpus-gates.js";
+import { PRODUCER as surveyContract } from "../research/survey-contract.js";
+import { PRODUCER as visualReview } from "../ops/visual-review.js";
+import { PRODUCER as publication } from "../publication.js";
+import { PRODUCER as preflight } from "../../commands/preflight.js";
 
-Declare the equivalent constant in each of the other seven modules, listing exactly the ids that module returns. Then create `packages/longwrite/src/lib/registry/producers.ts`:
-
-```ts
-import { gateId, gateFamily, type GateId } from "./ids.js";
-import { GATE_IDS as research } from "../validation/research.js";
-import { GATE_IDS as figures } from "../validation/figures.js";
-import { GATE_IDS as latex } from "../validation/latex.js";
-import { GATE_IDS as longform } from "../validation/longform.js";
-import { GATE_IDS as corpusGates } from "../research/corpus-gates.js";
-import { GATE_IDS as surveyContract } from "../research/survey-contract.js";
-import { GATE_IDS as visualReview } from "../ops/visual-review.js";
-import { GATE_IDS as publication } from "../publication.js";
-import { GATE_IDS as preflight } from "../../commands/preflight.js";
-
-const MODULES: Array<[string, readonly string[]]> = [
-  ["research", research], ["figures", figures], ["latex", latex], ["longform", longform],
-  ["corpus-gates", corpusGates], ["survey-contract", surveyContract],
-  ["visual-review", visualReview], ["publication", publication], ["preflight", preflight],
+export const PRODUCERS = [
+  research, figures, latex, longform, corpusGates,
+  surveyContract, visualReview, publication, preflight,
 ];
-
-/** The authoritative inventory. A module that emits a gate without declaring it
- * here fails tests/routing-coverage.test.ts. Declaration is the only mechanism
- * a dynamically built id cannot defeat. */
-export const PRODUCERS: ReadonlyMap<string, readonly GateId[]> =
-  new Map(MODULES.map(([name, ids]) => [name, ids.map(gateId)]));
-
-export function allEmittedGateFamilies(): Set<GateId> {
-  const families = new Set<GateId>();
-  for (const ids of PRODUCERS.values()) for (const id of ids) families.add(gateFamily(id));
-  return families;
-}
+export const REGISTRY = registerProducers(PRODUCERS);
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-producers`
-Expected: PASS, 5 tests. If the duplicate assertion fails, the message names the real duplicates — declare them explicitly rather than relaxing the assertion.
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-producers registry-routing`
+Expected: PASS, 12 + 10 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/longwrite/src/lib/registry/producers.ts packages/longwrite/src/lib/validation/ packages/longwrite/src/lib/research/corpus-gates.ts packages/longwrite/src/lib/research/survey-contract.ts packages/longwrite/src/lib/ops/visual-review.ts packages/longwrite/src/lib/publication.ts packages/longwrite/src/commands/preflight.ts packages/longwrite/tests/registry-producers.test.ts
-git commit -m "feat(registry): register gate ids at their producers instead of scanning source text"
+git commit -m "feat(registry): declare all nine producers and correct six wrong routes"
 ```
 
 ---
 
-### Task 3: Gate classes
+### Task 4: Execution-based coverage
 
-**Files:**
-- Create: `packages/longwrite/src/lib/registry/gate-classes.ts`
-- Modify: `packages/longwrite/src/lib/validation/research.ts` (delete the `review_no_regressions` check and its `GATE_IDS` entry)
-- Test: `packages/longwrite/tests/registry-gate-classes.test.ts`
-
-**Interfaces:**
-- Consumes: `GateId`, `GateClass`, `gateId`, `gateFamily` (Task 1); `allEmittedGateFamilies` (Task 2).
-- Produces: `GATE_CLASS_TABLE: ReadonlyMap<GateId, GateClass>`; `gateClass(id: GateId): GateClass` (resolves the family, throws on unclassified); `gatesOfClass(cls): GateId[]`.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `packages/longwrite/tests/registry-gate-classes.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { gateId } from "../src/lib/registry/ids.js";
-import { gateClass, gatesOfClass, GATE_CLASS_TABLE } from "../src/lib/registry/gate-classes.js";
-import { allEmittedGateFamilies } from "../src/lib/registry/producers.js";
-
-describe("gate classes", () => {
-  it("classifies manuscript defect gates", () => {
-    expect(gateClass(gateId("figure_references"))).toBe("manuscript");
-    expect(gateClass(gateId("core_sources"))).toBe("manuscript");
-  });
-
-  it("resolves a parameterized gate through its family", () => {
-    expect(gateClass(gateId("taxonomy:agent_memory"))).toBe("manuscript");
-  });
-
-  it("classifies preflight preconditions as environment", () => {
-    for (const id of ["pdf_compiler", "worker_runtime", "token_guardrail"]) {
-      expect(gateClass(gateId(id))).toBe("environment");
-    }
-  });
-
-  it("classifies full_claim_double_review as a measurement to re-run", () => {
-    expect(gateClass(gateId("full_claim_double_review"))).toBe("measurement");
-  });
-
-  it("deletes review_no_regressions rather than reclassifying it", () => {
-    expect(GATE_CLASS_TABLE.has(gateId("review_no_regressions"))).toBe(false);
-    expect(allEmittedGateFamilies().has(gateId("review_no_regressions"))).toBe(false);
-  });
-
-  it("classifies empirical_experiment as environment, outside LongWrite's reach", () => {
-    expect(gateClass(gateId("empirical_experiment"))).toBe("environment");
-  });
-
-  it("throws rather than defaulting for an unknown gate", () => {
-    expect(() => gateClass(gateId("some_new_gate"))).toThrow(/unclassified gate/);
-  });
-
-  it("classifies every emitted family", () => {
-    const unclassified = [...allEmittedGateFamilies()]
-      .filter((id) => !GATE_CLASS_TABLE.has(id)).map(String).sort();
-    expect(unclassified, `unclassified: ${unclassified.join(", ")}`).toEqual([]);
-  });
-
-  it("has at least one gate in each class", () => {
-    for (const cls of ["manuscript", "environment", "measurement"] as const) {
-      expect(gatesOfClass(cls).length).toBeGreaterThan(0);
-    }
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-gate-classes`
-Expected: FAIL — cannot resolve `gate-classes.js`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-First **delete** the `review_no_regressions` check from `src/lib/validation/research.ts` and remove it from that module's `GATE_IDS`. Spec 1 retires it: the invariant it approximated is now `must_preserve` in the kernel, and keeping a weaker duplicate would let a regression pass one check while failing the other.
-
-Then create `packages/longwrite/src/lib/registry/gate-classes.ts`:
-
-```ts
-import { gateFamily, gateId, type GateClass, type GateId } from "./ids.js";
-
-/** Preconditions of the run, and work outside LongWrite's reach. Neither is a
- * defect in the manuscript, so neither routes to a repair capability: a missing
- * LaTeX compiler is not fixed by editing prose, and an absent experiment
- * manifest is not fixed by any capability this product owns. */
-const ENVIRONMENT = [
-  "article_front_matter", "direct_llm_drafting", "draft_concurrency", "pdf_compiler",
-  "public_release_urls", "publication_figure_renderer", "rendered_visual_review_tools",
-  "rendered_visual_review_topology", "review_topology", "token_guardrail", "worker_runtime",
-  "empirical_experiment",
-];
-
-/** Re-run, never repair. */
-const MEASUREMENT = ["full_claim_double_review", "visual_review_contract"];
-
-/** Defects in the artifact under construction. Every one needs complete
- * triple-level routing, enforced by tests/routing-coverage.test.ts. */
-const MANUSCRIPT = [
-  "bibliography_consistent", "chapter_outline_identity", "citation_evidence_ledger",
-  "citation_markers_present", "citation_url_liveness", "citation_verification",
-  "cited_literature_release_gates", "claim_contradictions", "claim_support",
-  "codebase_evidence", "core_sources", "diagram_connectivity", "evidence_coverage",
-  "figure_artifacts", "figure_manifest", "figure_references", "freshness",
-  "full_mode_visual_contract", "full_research_contracts", "full_source_identity",
-  "introduction_gap_contributions", "landmark_citation_coverage", "landmark_coverage",
-  "latex_build", "latex_outline_structure", "latex_sources", "limitations_future_work",
-  "literature_quality_score", "manuscript_build", "method_family_chapters",
-  "multi_axis_taxonomy", "prose_redundancy", "publication_article_layout",
-  "publication_artifact_contract", "publication_custom_template", "publication_figures",
-  "publication_latex", "publication_layout", "publication_min_pages",
-  "publication_page_limit", "publication_release_gates", "publication_required_sections",
-  "reader_facing_publication", "related_work_differentiation", "related_work_matrix",
-  "rendered_visual_review", "research_artifacts_present", "research_policy",
-  "review_target", "section_evidence_requirements", "source_coverage",
-  "source_type_diversity", "style_drift", "target_length", "taxonomy",
-  "taxonomy_direct_evidence", "total_candidates",
-];
-
-function build(): ReadonlyMap<GateId, GateClass> {
-  const table = new Map<GateId, GateClass>();
-  for (const id of MANUSCRIPT) table.set(gateId(id), "manuscript");
-  for (const id of ENVIRONMENT) table.set(gateId(id), "environment");
-  for (const id of MEASUREMENT) table.set(gateId(id), "measurement");
-  return table;
-}
-export const GATE_CLASS_TABLE = build();
-
-export function gateClass(id: GateId): GateClass {
-  const found = GATE_CLASS_TABLE.get(gateFamily(id));
-  if (!found) throw new Error(`unclassified gate: ${id}. Add it to src/lib/registry/gate-classes.ts.`);
-  return found;
-}
-
-export function gatesOfClass(cls: GateClass): GateId[] {
-  return [...GATE_CLASS_TABLE.entries()].filter(([, value]) => value === cls).map(([key]) => key);
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-gate-classes`
-Expected: PASS, 9 tests. The "classifies every emitted family" failure message names any gate still to add.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/longwrite/src/lib/registry/gate-classes.ts packages/longwrite/src/lib/validation/research.ts packages/longwrite/tests/registry-gate-classes.test.ts
-git commit -m "feat(registry): classify gates and delete review_no_regressions in favour of must_preserve"
-```
-
----
-
-### Task 4: Legal triples and the complete routing table
-
-Coverage at gate level proves nothing: a gate can have one route and still emit findings whose triples are unroutable. Each manuscript gate therefore declares **every legal (kind, effect) pair it can emit**, and every pair must have a route. The two tables are written as one structure so a gate cannot acquire a triple without acquiring a route.
-
-**Files:**
-- Create: `packages/longwrite/src/lib/registry/routing.ts`
-- Test: `packages/longwrite/tests/registry-routing.test.ts`
-
-**Interfaces:**
-- Consumes: Task 1 ids; `gatesOfClass` (Task 3).
-- Produces: `LEGAL_TRIPLES: ReadonlyMap<GateId, readonly Triple[]>`; `ROUTES: readonly RouteEntry[]`; `resolveCapability(key: RouteKey): CapabilityId` (throws `UnroutedFindingError`); `legalTriples(gate): readonly Triple[]`; `routedTripleKeys(): Set<string>`; `UnroutedFindingError`.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `packages/longwrite/tests/registry-routing.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { gateId } from "../src/lib/registry/ids.js";
-import {
-  resolveCapability, UnroutedFindingError, LEGAL_TRIPLES, legalTriples, routedTripleKeys,
-} from "../src/lib/registry/routing.js";
-import { gatesOfClass } from "../src/lib/registry/gate-classes.js";
-
-describe("fail-closed routing", () => {
-  it("routes a prose-reference defect on a visual gate to the section editor", () => {
-    expect(String(resolveCapability({
-      gate: gateId("rendered_visual_review"), kind: "chapter_prose",
-      effect: "add_explicit_artifact_reference",
-    }))).toBe("revise_sections");
-  });
-
-  it("routes a figure-content defect on the same gate to the visual planner", () => {
-    expect(String(resolveCapability({
-      gate: gateId("rendered_visual_review"), kind: "figure_spec",
-      effect: "repair_artifact_content",
-    }))).toBe("revise_visual_plan");
-  });
-
-  it("routes a retrieval gate to research expansion, never to prose", () => {
-    expect(String(resolveCapability({
-      gate: gateId("core_sources"), kind: "corpus", effect: "acquire_additional_evidence",
-    }))).toBe("targeted_research_expansion");
-  });
-
-  it("resolves a parameterized gate through its family", () => {
-    expect(String(resolveCapability({
-      gate: gateId("taxonomy:agent_memory"), kind: "corpus", effect: "acquire_additional_evidence",
-    }))).toBe("targeted_research_expansion");
-  });
-
-  it("throws instead of defaulting when the triple is unrouted", () => {
-    expect(() => resolveCapability({
-      gate: gateId("core_sources"), kind: "chapter_prose", effect: "remove_redundant_prose",
-    })).toThrow(UnroutedFindingError);
-  });
-
-  it("carries the unresolved key for the diagnosis unit", () => {
-    try {
-      resolveCapability({ gate: gateId("style_drift"), kind: "corpus", effect: "upgrade_source_quality" });
-      expect.unreachable("should have thrown");
-    } catch (error) {
-      expect((error as UnroutedFindingError).key.kind).toBe("corpus");
-    }
-  });
-
-  it("declares legal triples for every manuscript gate", () => {
-    const missing = gatesOfClass("manuscript").filter((gate) => !LEGAL_TRIPLES.has(gate)).map(String).sort();
-    expect(missing, `manuscript gates with no declared triples: ${missing.join(", ")}`).toEqual([]);
-  });
-
-  it("routes every legal triple, not merely every gate", () => {
-    const routed = routedTripleKeys();
-    const unrouted: string[] = [];
-    for (const gate of gatesOfClass("manuscript")) {
-      for (const triple of legalTriples(gate)) {
-        if (!routed.has(`${gate} ${triple.kind} ${triple.effect}`)) {
-          unrouted.push(`${gate}/${triple.kind}/${triple.effect}`);
-        }
-      }
-    }
-    expect(unrouted.sort(), `unrouted: ${unrouted.join(", ")}`).toEqual([]);
-  });
-
-  it("declares no route for a triple no gate can legally emit", () => {
-    const legal = new Set<string>();
-    for (const [gate, triples] of LEGAL_TRIPLES) {
-      for (const triple of triples) legal.add(`${gate} ${triple.kind} ${triple.effect}`);
-    }
-    const extra = [...routedTripleKeys()].filter((key) => !legal.has(key)).sort();
-    expect(extra, `routes for impossible triples: ${extra.join(", ")}`).toEqual([]);
-  });
-
-  it("declares no legal triple for a non-manuscript gate", () => {
-    for (const cls of ["environment", "measurement"] as const) {
-      for (const gate of gatesOfClass(cls)) expect(LEGAL_TRIPLES.has(gate)).toBe(false);
-    }
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-routing`
-Expected: FAIL — cannot resolve `routing.js`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-Create `packages/longwrite/src/lib/registry/routing.ts`. Every manuscript gate from Task 3 appears exactly once in `TABLE`:
-
-```ts
-import { capabilityId, gateFamily, gateId, type ArtifactKind, type CapabilityId, type GateId, type RequiredEffect } from "./ids.js";
-
-export type RouteKey = { gate: GateId; kind: ArtifactKind; effect: RequiredEffect };
-export type Triple = { kind: ArtifactKind; effect: RequiredEffect };
-export type RouteEntry = RouteKey & { capability: CapabilityId };
-
-export class UnroutedFindingError extends Error {
-  constructor(readonly key: RouteKey) {
-    super(`no capability owns (${key.gate}, ${key.kind}, ${key.effect}); add a route or reclassify the gate`);
-    this.name = "UnroutedFindingError";
-  }
-}
-
-const SECTIONS = "revise_sections";
-const VISUAL = "revise_visual_plan";
-const OUTLINE = "reopen_outline";
-const EXPANSION = "targeted_research_expansion";
-const SOURCE_META = "repair_source_metadata";
-const BIB = "repair_bibliography";
-
-/** gate -> legal (kind, effect) pairs -> owning capability.
- *
- * One table, so a legal triple cannot exist without a route. Several gates
- * legitimately emit findings owned by different capabilities; that is the case
- * gate-keyed routing could not express. */
-const TABLE: Array<[string, Array<[ArtifactKind, RequiredEffect, string]>]> = [
-  // Corpus and retrieval. A prose editor cannot acquire a source.
-  ["total_candidates", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["core_sources", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["freshness", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["source_type_diversity", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["taxonomy", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["source_coverage", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["landmark_coverage", [["corpus", "acquire_additional_evidence", EXPANSION]]],
-  ["literature_quality_score", [["corpus", "upgrade_source_quality", EXPANSION]]],
-  ["research_policy", [["corpus", "upgrade_source_quality", EXPANSION]]],
-  ["evidence_coverage", [
-    ["corpus", "acquire_additional_evidence", EXPANSION],
-    ["evidence_packet", "acquire_additional_evidence", EXPANSION],
-  ]],
-  ["taxonomy_direct_evidence", [
-    ["evidence_packet", "acquire_additional_evidence", EXPANSION],
-    ["chapter_prose", "add_supporting_citation", SECTIONS],
-  ]],
-  ["codebase_evidence", [["evidence_packet", "acquire_additional_evidence", EXPANSION]]],
-
-  // Source records and bibliography. Nothing owned these before.
-  ["citation_url_liveness", [["source_record", "repair_source_metadata", SOURCE_META]]],
-  ["full_source_identity", [["source_record", "repair_source_metadata", SOURCE_META]]],
-  ["bibliography_consistent", [["bibliography", "repair_bibliography_consistency", BIB]]],
-
-  // Prose.
-  ["landmark_citation_coverage", [["chapter_prose", "add_supporting_citation", SECTIONS]]],
-  ["cited_literature_release_gates", [
-    ["chapter_prose", "add_supporting_citation", SECTIONS],
-    ["chapter_prose", "remove_unsupported_claim", SECTIONS],
-    ["corpus", "upgrade_source_quality", EXPANSION],
-  ]],
-  ["citation_markers_present", [["chapter_prose", "repair_citation_marker", SECTIONS]]],
-  ["citation_evidence_ledger", [["chapter_prose", "repair_citation_marker", SECTIONS]]],
-  ["citation_verification", [["chapter_prose", "repair_citation_marker", SECTIONS]]],
-  ["claim_support", [["chapter_prose", "remove_unsupported_claim", SECTIONS]]],
-  ["claim_contradictions", [
-    ["chapter_prose", "resolve_contradiction", SECTIONS],
-    ["outline", "replace_organizing_claim", OUTLINE],
-  ]],
-  ["prose_redundancy", [["chapter_prose", "remove_redundant_prose", SECTIONS]]],
-  ["target_length", [["chapter_prose", "remove_redundant_prose", SECTIONS]]],
-  ["style_drift", [["chapter_prose", "remove_redundant_prose", SECTIONS]]],
-  ["review_target", [
-    ["chapter_prose", "remove_unsupported_claim", SECTIONS],
-    ["figure_spec", "repair_artifact_content", VISUAL],
-    ["outline", "replace_organizing_claim", OUTLINE],
-  ]],
-
-  // Structure.
-  ["chapter_outline_identity", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["multi_axis_taxonomy", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["related_work_matrix", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["related_work_differentiation", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["method_family_chapters", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["section_evidence_requirements", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["introduction_gap_contributions", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["limitations_future_work", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["full_research_contracts", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["latex_outline_structure", [["outline", "replace_organizing_claim", OUTLINE]]],
-  ["publication_required_sections", [["outline", "replace_organizing_claim", OUTLINE]]],
-
-  // Visual artifacts. `latex_layout` is generated and never directly editable,
-  // so these name the producing surface instead.
-  ["figure_manifest", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["figure_artifacts", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["diagram_connectivity", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["figure_references", [
-    ["figure_spec", "repair_artifact_placement", VISUAL],
-    ["chapter_prose", "add_explicit_artifact_reference", SECTIONS],
-  ]],
-  ["full_mode_visual_contract", [
-    ["figure_spec", "repair_artifact_content", VISUAL],
-    ["table_spec", "repair_artifact_content", VISUAL],
-  ]],
-  ["rendered_visual_review", [
-    ["chapter_prose", "add_explicit_artifact_reference", SECTIONS],
-    ["figure_spec", "repair_artifact_content", VISUAL],
-    ["figure_spec", "repair_artifact_placement", VISUAL],
-    ["table_spec", "repair_artifact_content", VISUAL],
-  ]],
-  ["publication_layout", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["publication_figures", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["publication_latex", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["publication_article_layout", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["publication_custom_template", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["publication_release_gates", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["publication_artifact_contract", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["reader_facing_publication", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["research_artifacts_present", [["figure_spec", "repair_artifact_content", VISUAL]]],
-  ["publication_min_pages", [["chapter_prose", "add_supporting_citation", SECTIONS]]],
-  ["publication_page_limit", [["chapter_prose", "remove_redundant_prose", SECTIONS]]],
-
-  // Build. Repaired through the producing surface, never by editing TeX.
-  ["latex_build", [
-    ["figure_spec", "repair_artifact_placement", VISUAL],
-    ["bibliography", "repair_bibliography_consistency", BIB],
-  ]],
-  ["latex_sources", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-  ["manuscript_build", [["figure_spec", "repair_artifact_placement", VISUAL]]],
-];
-
-export const LEGAL_TRIPLES: ReadonlyMap<GateId, readonly Triple[]> = new Map(
-  TABLE.map(([gate, rows]) => [gateId(gate), rows.map(([kind, effect]) => ({ kind, effect }))]),
-);
-
-export const ROUTES: readonly RouteEntry[] = TABLE.flatMap(([gate, rows]) =>
-  rows.map(([kind, effect, capability]) => ({
-    gate: gateId(gate), kind, effect, capability: capabilityId(capability),
-  })));
-
-function key(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): string {
-  return `${gate} ${kind} ${effect}`;
-}
-
-const INDEX = new Map<string, CapabilityId>(
-  ROUTES.map((entry) => [key(entry.gate, entry.kind, entry.effect), entry.capability]));
-
-export function legalTriples(gate: GateId): readonly Triple[] {
-  return LEGAL_TRIPLES.get(gateFamily(gate)) ?? [];
-}
-
-export function routedTripleKeys(): Set<string> {
-  return new Set(INDEX.keys());
-}
-
-/** No default. An unresolved triple escalates to diagnosis (Plan 3). */
-export function resolveCapability(input: RouteKey): CapabilityId {
-  const found = INDEX.get(key(gateFamily(input.gate), input.kind, input.effect));
-  if (!found) throw new UnroutedFindingError(input);
-  return found;
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-routing`
-Expected: PASS, 10 tests. Failures name the exact missing or impossible triples — fix the table, never the assertion.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/longwrite/src/lib/registry/routing.ts packages/longwrite/tests/registry-routing.test.ts
-git commit -m "feat(registry): declare legal triples and route every one of them, fail closed"
-```
-
----
-
-### Task 5: Triple-level coverage test in CI
+A declaration can still drift from the code beside it. This runs each producer against a fixture and asserts every finding it actually emits was declared.
 
 **Files:**
 - Create: `packages/longwrite/tests/routing-coverage.test.ts`
+- Create: `packages/longwrite/tests/fixtures/producer-probe/` (one minimal failing workspace per producer)
 
 **Interfaces:**
-- Consumes: `allEmittedGateFamilies` (Task 2); `GATE_CLASS_TABLE`, `gateClass`, `gatesOfClass` (Task 3); `LEGAL_TRIPLES`, `legalTriples`, `routedTripleKeys` (Task 4).
+- Consumes: `REGISTRY`, `PRODUCERS` (Task 3); the producer entry points.
 
 - [ ] **Step 1: Write the test**
 
@@ -804,29 +606,17 @@ Create `packages/longwrite/tests/routing-coverage.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { allEmittedGateFamilies } from "../src/lib/registry/producers.js";
-import { GATE_CLASS_TABLE, gateClass, gatesOfClass } from "../src/lib/registry/gate-classes.js";
-import { LEGAL_TRIPLES, legalTriples, routedTripleKeys } from "../src/lib/registry/routing.js";
+import { PRODUCERS, REGISTRY } from "../src/lib/registry/producers.js";
+import { gateId } from "../src/lib/registry/ids.js";
+import { probeProducer } from "./helpers/producer-probe.js";
 
 describe("routing coverage", () => {
-  it("classifies every emitted gate family", () => {
-    const unclassified = [...allEmittedGateFamilies()]
-      .filter((id) => !GATE_CLASS_TABLE.has(id)).map(String).sort();
-    expect(unclassified, `unclassified: ${unclassified.join(", ")}`).toEqual([]);
-  });
-
-  it("emits every classified manuscript gate from some producer", () => {
-    const emitted = allEmittedGateFamilies();
-    const orphans = gatesOfClass("manuscript").filter((gate) => !emitted.has(gate)).map(String).sort();
-    expect(orphans, `classified but never emitted: ${orphans.join(", ")}`).toEqual([]);
-  });
-
   it("routes every legal triple of every manuscript gate", () => {
-    const routed = routedTripleKeys();
+    const routed = REGISTRY.routedTripleKeys();
     const unrouted: string[] = [];
-    for (const gate of gatesOfClass("manuscript")) {
-      const triples = legalTriples(gate);
-      if (triples.length === 0) { unrouted.push(`${gate} (no legal triples declared)`); continue; }
+    for (const gate of REGISTRY.gatesOfClass("manuscript")) {
+      const triples = REGISTRY.legalTriples(gate);
+      if (triples.length === 0) { unrouted.push(`${gate} (no findings declared)`); continue; }
       for (const triple of triples) {
         if (!routed.has(`${gate} ${triple.kind} ${triple.effect}`)) {
           unrouted.push(`${gate}/${triple.kind}/${triple.effect}`);
@@ -836,54 +626,93 @@ describe("routing coverage", () => {
     expect(unrouted.sort(), `unrouted: ${unrouted.join(", ")}`).toEqual([]);
   });
 
-  it("declares no route or triple for a non-manuscript gate", () => {
+  it("declares no findings for a non-manuscript gate", () => {
     for (const cls of ["environment", "measurement"] as const) {
-      for (const gate of gatesOfClass(cls)) {
-        expect(LEGAL_TRIPLES.has(gate), `${gate} is ${cls} but declares triples`).toBe(false);
+      for (const gate of REGISTRY.gatesOfClass(cls)) {
+        expect(REGISTRY.legalTriples(gate), String(gate)).toEqual([]);
       }
     }
   });
 
-  it("resolves a manuscript class for every routed gate", () => {
-    for (const gate of LEGAL_TRIPLES.keys()) expect(gateClass(gate)).toBe("manuscript");
+  it("emits only gate ids its producer declared", async () => {
+    for (const producer of PRODUCERS) {
+      const emitted = await probeProducer(producer.module);
+      const declared = new Set(producer.gates.map((gate) => String(gate.id)));
+      const undeclared = emitted.gateIds
+        .map((id) => String(gateId(id)).split(":")[0])
+        .filter((family) => !declared.has(family)).sort();
+      expect(undeclared, `${producer.module} emits undeclared gates: ${undeclared.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("emits only findings its producer declared", async () => {
+    for (const producer of PRODUCERS) {
+      const emitted = await probeProducer(producer.module);
+      const undeclared: string[] = [];
+      for (const finding of emitted.findings) {
+        const legal = REGISTRY.legalTriples(finding.gate_id);
+        if (!legal.some((t) => t.kind === finding.artifact.kind && t.effect === finding.required_effect)) {
+          undeclared.push(`${finding.gate_id}/${finding.artifact.kind}/${finding.required_effect}`);
+        }
+      }
+      expect(undeclared.sort(), `${producer.module}: ${undeclared.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("resolves a capability for every finding a producer actually emits", async () => {
+    for (const producer of PRODUCERS) {
+      for (const finding of (await probeProducer(producer.module)).findings) {
+        expect(() => REGISTRY.resolveCapability({
+          gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+        }), `${producer.module}/${finding.id}`).not.toThrow();
+      }
+    }
   });
 });
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 2: Write the probe helper and fixtures**
+
+Create `packages/longwrite/tests/helpers/producer-probe.ts` exporting `probeProducer(module: string): Promise<{ gateIds: string[]; findings: Finding[] }>`. It builds a minimal workspace under `tests/fixtures/producer-probe/<module>/` designed to **fail every check in that module**, runs the module's entry point, and returns the emitted gate ids and structured findings.
+
+Until Task 12 onward converts a producer, its probe returns `findings: []` and only the gate-id assertions bite; each migration task extends its own probe fixture so the finding assertions become meaningful.
+
+- [ ] **Step 3: Run it**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- routing-coverage`
 Expected: PASS, 5 tests.
 
-- [ ] **Step 3: Prove the test bites at triple level**
+- [ ] **Step 4: Prove the test bites at triple level**
 
-Temporarily append `["chapter_prose", "remove_redundant_prose", SECTIONS]` to the `core_sources` row of `TABLE`, then delete only that generated entry from `INDEX` by filtering it out of `ROUTES` before the index is built. Run:
+Temporarily remove the `chapter_prose / add_explicit_artifact_reference` finding from `figure_references` in `figures.ts`'s `PRODUCER`, leaving the check that emits it in place. Run:
 
 Run: `npm test --workspace @mr-maliang/longwrite -- routing-coverage`
-Expected: FAIL, naming `core_sources/chapter_prose/remove_redundant_prose`.
+Expected: FAIL from the "emits only findings its producer declared" case, naming `figure_references/chapter_prose/add_explicit_artifact_reference`. Restore and confirm PASS.
 
-Revert both edits and confirm PASS. A gate-level check passes this mutation, because `core_sources` already has a route — which is precisely why coverage compares triples.
+A gate-level check passes this mutation, because `figure_references` still emits its other findings — which is precisely why coverage compares triples **and** runs the producer.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add packages/longwrite/tests/routing-coverage.test.ts
-git commit -m "test(registry): enforce triple-level routing coverage in CI"
+git add packages/longwrite/tests/routing-coverage.test.ts packages/longwrite/tests/helpers/producer-probe.ts packages/longwrite/tests/fixtures/producer-probe/
+git commit -m "test(registry): enforce routing coverage by executing every producer"
 ```
 
 ---
 
-### Task 6: Structured finding and observation records
+## M2 — Structured records
+
+### Task 5: Findings and measurement entries
 
 **Files:**
 - Create: `packages/longwrite/src/lib/registry/records.ts`
 - Test: `packages/longwrite/tests/registry-records.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 schemas and `EDITABLE_KIND_PATHS`; `legalTriples` (Task 4).
-- Produces: `FindingSchema`/`Finding`, `ObservationSchema`/`Observation`, `ModelJudgmentSchema`, `StructuredCheckSchema`/`StructuredCheck`.
+- Consumes: Task 1 schemas and `EDITABLE_KIND_PATHS`; `REGISTRY` (Task 3).
+- Produces: `FindingSchema`/`Finding`; `ModelJudgmentSchema`; `MeasurementEntrySchema`/`MeasurementEntry`; `MeasurementEnvelopeSchema`; `StructuredCheckSchema`/`StructuredCheck`.
 
-The finding schema enforces Spec 1's trust rule: a declared `artifact.kind` must match the path it names. The observation schema carries §A2's uncertainty contract for model pipelines.
+Two rules make a finding trustworthy without an LLM in the loop: the declared `kind` must match the path it names, and the triple must be one its gate declared. `measurement_kind` — not convention — decides whether `judgment` is required.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -891,26 +720,25 @@ Create `packages/longwrite/tests/registry-records.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { FindingSchema, ObservationSchema, StructuredCheckSchema } from "../src/lib/registry/records.js";
+import {
+  FindingSchema, MeasurementEntrySchema, MeasurementEnvelopeSchema, StructuredCheckSchema,
+} from "../src/lib/registry/records.js";
 
 const finding = {
   id: "figure-1-missing-reference",
-  gate_id: "rendered_visual_review",
+  gate_id: "figure_references",
   artifact: { kind: "chapter_prose", path: "chapters/section-03.md", artifact_id: "figure-1" },
-  location: "paragraph preceding the placement of figure-1 in paper/sections/section-03.tex",
+  location: "paragraph preceding the float generated at paper/sections/section-03.tex",
   required_effect: "add_explicit_artifact_reference",
   severity: "major",
   diagnostic: "Figure 1 is not named before its placement.",
 };
 
-const observation = {
-  metric: "landmark_coverage_ratio",
-  value: 0.083, target: 0.75, operator: "at_least",
-  evaluator: "landmark_coverage_ratio",
-  evaluator_digest: "a".repeat(64),
-  input_digest: "b".repeat(64),
-  sequence: 12,
-  measured_at: "2026-09-01T00:00:00.000Z",
+const entry = {
+  metric: "core_sources", scope_key: "", status: "measured", value: 2,
+  target: 5, operator: "at_least", tolerance: 0, direction: "maximize",
+  evaluator: "core_sources", evaluator_digest: "a".repeat(64), input_digest: "b".repeat(64),
+  measurement_kind: "script",
 };
 
 describe("structured records", () => {
@@ -924,61 +752,68 @@ describe("structured records", () => {
   });
 
   it("rejects a kind that does not match the path it names", () => {
-    // A generated TeX path is not a figure spec. The producing surface must be
-    // named instead, with the TeX location carried in `location`.
-    const mismatched = { ...finding, artifact: { kind: "figure_spec", path: "paper/sections/section-03.tex" } };
-    expect(FindingSchema.safeParse(mismatched).success).toBe(false);
+    // Generated TeX is not a figure spec. The producing surface must be named,
+    // with the TeX location carried in `location`.
+    expect(FindingSchema.safeParse({
+      ...finding, artifact: { kind: "figure_spec", path: "paper/sections/section-03.tex" },
+    }).success).toBe(false);
   });
 
-  it("rejects a finding whose triple its gate cannot legally emit", () => {
-    const illegal = { ...finding, gate_id: "core_sources" };
-    expect(FindingSchema.safeParse(illegal).success).toBe(false);
+  it("rejects a triple its gate never declared", () => {
+    expect(FindingSchema.safeParse({ ...finding, gate_id: "core_sources" }).success).toBe(false);
   });
 
-  it("accepts a script observation without judgment fields", () => {
-    expect(ObservationSchema.safeParse(observation).success).toBe(true);
+  it("accepts a script measurement entry with no judgment", () => {
+    expect(MeasurementEntrySchema.safeParse(entry).success).toBe(true);
   });
 
-  it("requires a sequence so freshness never resolves by clock", () => {
-    const { sequence, ...withoutSequence } = observation;
-    expect(ObservationSchema.safeParse(withoutSequence).success).toBe(false);
+  it("requires a value on a measured entry and forbids one otherwise", () => {
+    expect(MeasurementEntrySchema.safeParse({ ...entry, value: undefined }).success).toBe(false);
+    expect(MeasurementEntrySchema.safeParse({
+      ...entry, status: "unavailable", value: undefined, reason: "corpus missing",
+    }).success).toBe(true);
   });
 
-  it("carries the uncertainty contract on a model observation", () => {
-    const judged = {
-      ...observation, metric: "review_score", value: 7.8, evaluator: "review_score",
-      judgment: {
-        reasons: ["comparative synthesis is thin in section 4"],
-        confidence: 0.62,
-        rubric_version: "2",
-        evidence_refs: ["reviews/scorecard.json#persona/theorist"],
-        adjudicated: false,
-        disagreement: "none",
-      },
+  it("requires a reason on an unavailable entry", () => {
+    expect(MeasurementEntrySchema.safeParse({
+      ...entry, status: "unavailable", value: undefined,
+    }).success).toBe(false);
+  });
+
+  it("requires judgment on a model entry and forbids it on a script entry", () => {
+    const judgment = {
+      reasons: ["comparative synthesis is thin in section 4"], confidence: 0.62,
+      rubric_version: "2", evidence_refs: ["reviews/scorecard.json#persona/theorist"],
+      adjudicated: false, disagreement: "none",
     };
-    expect(ObservationSchema.safeParse(judged).success).toBe(true);
-  });
-
-  it("rejects a judgment missing its rubric version", () => {
-    const judged = {
-      ...observation, judgment: { reasons: ["x"], confidence: 0.5, evidence_refs: [], adjudicated: false, disagreement: "none" },
-    };
-    expect(ObservationSchema.safeParse(judged).success).toBe(false);
+    expect(MeasurementEntrySchema.safeParse({ ...entry, measurement_kind: "model" }).success).toBe(false);
+    expect(MeasurementEntrySchema.safeParse({
+      ...entry, metric: "review_score", measurement_kind: "model", judgment,
+    }).success).toBe(true);
+    expect(MeasurementEntrySchema.safeParse({ ...entry, judgment }).success).toBe(false);
   });
 
   it("rejects a confidence outside zero to one", () => {
-    const judged = {
-      ...observation,
-      judgment: { reasons: ["x"], confidence: 1.4, rubric_version: "2", evidence_refs: [], adjudicated: false, disagreement: "none" },
-    };
-    expect(ObservationSchema.safeParse(judged).success).toBe(false);
+    expect(MeasurementEntrySchema.safeParse({
+      ...entry, measurement_kind: "model",
+      judgment: { reasons: [], confidence: 1.4, rubric_version: "2", evidence_refs: [], adjudicated: false, disagreement: "none" },
+    }).success).toBe(false);
+  });
+
+  it("accepts an envelope of scoped entries", () => {
+    expect(MeasurementEnvelopeSchema.safeParse({
+      version: 1, as_of_date: "2026-09-01T00:00:00.000Z",
+      measurements: [
+        { ...entry, metric: "citation_depth_per_section", scope_key: "section-03", value: 2 },
+        { ...entry, metric: "citation_depth_per_section", scope_key: "section-06", value: 5 },
+      ],
+    }).success).toBe(true);
   });
 
   it("keeps prose only as an unparsed diagnostic on the check", () => {
     expect(StructuredCheckSchema.safeParse({
-      id: "rendered_visual_review", pass: false,
-      observations: [observation], findings: [finding],
-      diagnostic: "1 of 12 landmark works are cited.",
+      id: "figure_references", pass: false, measurements: [entry], findings: [finding],
+      diagnostic: "figure-1 is not embedded in paper/sections/section-03.tex",
     }).success).toBe(true);
   });
 });
@@ -999,18 +834,14 @@ import {
   ArtifactKindSchema, EDITABLE_KIND_PATHS, GateIdSchema, MetricIdSchema, RequiredEffectSchema,
   type ArtifactKind,
 } from "./ids.js";
-import { legalTriples } from "./routing.js";
+import { REGISTRY } from "./producers.js";
 
 function pathMatchesKind(kind: ArtifactKind, filePath: string): boolean {
   const prefixes = EDITABLE_KIND_PATHS[kind];
-  // A generated kind has no editable path; a finding may never claim one.
   if (prefixes.length === 0) return false;
   return prefixes.some((prefix) => prefix.endsWith("/") ? filePath.startsWith(prefix) : filePath === prefix);
 }
 
-/** A defect, carrying everything the router needs, emitted by the gate that
- * found it. Two rules make it trustworthy without an LLM in the loop: the kind
- * must match the path, and the triple must be one its gate can legally emit. */
 export const FindingSchema = z.object({
   id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   gate_id: GateIdSchema,
@@ -1020,8 +851,8 @@ export const FindingSchema = z.object({
     artifact_id: z.string().min(1).optional(),
   }).strict(),
   /** Where the defect shows, including a generated location such as a TeX
-   * line. This is the field a generated-artifact defect uses, because the
-   * artifact itself must name the producing surface. */
+   * line. A generated-artifact defect uses this field, because the artifact
+   * itself must name the producing surface. */
   location: z.string().min(1).max(400).optional(),
   required_effect: RequiredEffectSchema,
   severity: z.enum(["minor", "major", "critical"]),
@@ -1029,22 +860,18 @@ export const FindingSchema = z.object({
   diagnostic: z.string().min(1).max(8_000),
 }).strict().superRefine((finding, ctx) => {
   if (!pathMatchesKind(finding.artifact.kind, finding.artifact.path)) {
-    ctx.addIssue({
-      code: "custom", path: ["artifact", "path"],
-      message: `path ${finding.artifact.path} is not an editable ${finding.artifact.kind}; name the producing surface and put the generated location in \`location\``,
-    });
+    ctx.addIssue({ code: "custom", path: ["artifact", "path"],
+      message: `${finding.artifact.path} is not an editable ${finding.artifact.kind}; name the producing surface and put the generated location in \`location\`` });
   }
-  const legal = legalTriples(finding.gate_id);
-  if (!legal.some((triple) => triple.kind === finding.artifact.kind && triple.effect === finding.required_effect)) {
-    ctx.addIssue({
-      code: "custom", path: ["required_effect"],
-      message: `${finding.gate_id} cannot legally emit (${finding.artifact.kind}, ${finding.required_effect}); declare the triple in routing.ts or fix the finding`,
-    });
+  const legal = REGISTRY.legalTriples(finding.gate_id);
+  if (!legal.some((t) => t.kind === finding.artifact.kind && t.effect === finding.required_effect)) {
+    ctx.addIssue({ code: "custom", path: ["required_effect"],
+      message: `${finding.gate_id} never declared (${finding.artifact.kind}, ${finding.required_effect}); declare it on the producer or fix the finding` });
   }
 });
 export type Finding = z.infer<typeof FindingSchema>;
 
-/** Spec 1 §A2: a model measurement is trusted because its acquisition,
+/** Wire contract §3: a model measurement is trusted because its acquisition,
  * validation and reduction are recorded — not because it is deterministic. */
 export const ModelJudgmentSchema = z.object({
   reasons: z.array(z.string().min(1)).max(50),
@@ -1055,31 +882,53 @@ export const ModelJudgmentSchema = z.object({
   disagreement: z.enum(["none", "within_tolerance", "material", "unresolved"]),
 }).strict();
 
-export const ObservationSchema = z.object({
+export const MeasurementEntrySchema = z.object({
   metric: MetricIdSchema,
-  value: z.number().finite(),
+  scope_key: z.string().default(""),
+  status: z.enum(["measured", "unavailable", "deferred"]),
+  value: z.number().finite().optional(),
   target: z.number().finite().optional(),
   operator: z.enum(["at_least", "at_most", "equals"]).optional(),
+  tolerance: z.number().nonnegative().optional(),
+  direction: z.enum(["maximize", "minimize"]).optional(),
   evaluator: z.string().min(1).regex(/^[a-z][a-z0-9_]*$/),
-  /** Implementation plus configuration version. */
   evaluator_digest: z.string().regex(/^[0-9a-f]{64}$/),
-  /** Declared dependencies, registry config, and for model pipelines the
-   * prompt and model configuration. Never the producer's own output. */
   input_digest: z.string().regex(/^[0-9a-f]{64}$/),
-  /** Monotonic engine sequence. Freshness resolves on this after digests
-   * match, never on the clock. */
-  sequence: z.number().int().nonnegative(),
-  /** Provenance only. Never used for ordering. */
-  measured_at: z.string().datetime(),
-  /** Required for measurement_kind model; absent for script pipelines. */
+  measurement_kind: z.enum(["script", "model", "external"]),
   judgment: ModelJudgmentSchema.optional(),
+  reason: z.string().min(1).max(2_000).optional(),
+}).strict().superRefine((entry, ctx) => {
+  if (entry.status === "measured" && entry.value === undefined) {
+    ctx.addIssue({ code: "custom", path: ["value"], message: "a measured entry must carry a value" });
+  }
+  if (entry.status !== "measured" && entry.value !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["value"], message: "only a measured entry may carry a value" });
+  }
+  // An unavailable input is a failure the operator must be able to act on, so
+  // it names what was missing rather than reporting a bare absence.
+  if (entry.status === "unavailable" && !entry.reason) {
+    ctx.addIssue({ code: "custom", path: ["reason"], message: "an unavailable entry must state why" });
+  }
+  if (entry.measurement_kind === "model" && entry.status === "measured" && !entry.judgment) {
+    ctx.addIssue({ code: "custom", path: ["judgment"], message: "a model measurement must carry judgment" });
+  }
+  if (entry.measurement_kind === "script" && entry.judgment) {
+    ctx.addIssue({ code: "custom", path: ["judgment"], message: "a script measurement must not carry judgment" });
+  }
+});
+export type MeasurementEntry = z.infer<typeof MeasurementEntrySchema>;
+
+export const MeasurementEnvelopeSchema = z.object({
+  version: z.literal(1),
+  as_of_date: z.string().datetime().optional(),
+  measurements: z.array(MeasurementEntrySchema).max(2_000),
 }).strict();
-export type Observation = z.infer<typeof ObservationSchema>;
+export type MeasurementEnvelope = z.infer<typeof MeasurementEnvelopeSchema>;
 
 export const StructuredCheckSchema = z.object({
   id: GateIdSchema,
   pass: z.boolean(),
-  observations: z.array(ObservationSchema).default([]),
+  measurements: z.array(MeasurementEntrySchema).default([]),
   findings: z.array(FindingSchema).default([]),
   diagnostic: z.string().max(8_000).optional(),
 }).strict();
@@ -1089,20 +938,20 @@ export type StructuredCheck = z.infer<typeof StructuredCheckSchema>;
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- registry-records`
-Expected: PASS, 10 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/longwrite/src/lib/registry/records.ts packages/longwrite/tests/registry-records.test.ts
-git commit -m "feat(registry): add structured findings with kind/path validation and model-judgment fields"
+git commit -m "feat(registry): add structured findings and scoped measurement entries"
 ```
 
 ---
 
-### Task 7: Metric registry with dependencies separated from producer output
+## M3 — Metric registry and digests
 
-`requires` conflated two different things. A metric's *dependencies* determine its digest and invalidation; a model pipeline's *raw output* is what the producer writes, and including it in the digest would make the measurement's identity depend on its own result.
+### Task 6: Metric registry
 
 **Files:**
 - Create: `packages/longwrite/src/lib/registry/metrics.ts`
@@ -1110,9 +959,9 @@ git commit -m "feat(registry): add structured findings with kind/path validation
 
 **Interfaces:**
 - Consumes: Task 1 ids.
-- Produces: type `MetricDefinition`; `METRIC_REGISTRY: ReadonlyMap<MetricId, MetricDefinition>`; `PLANNER_SELECTABLE: ReadonlySet<MetricId>`; `metricDefinition(id): MetricDefinition` (throws); `metricsInvalidatedBy(changed: string[]): MetricId[]`; `metricsOfTier(tier): MetricId[]`.
+- Produces: `MetricDefinition`; `METRIC_REGISTRY`; `PLANNER_SELECTABLE`; `metricDefinition(id)`; `metricsOfTier(tier)`.
 
-`MetricDefinition` fields: `metric`, `direction`, `target_type`, `tolerance`, `measurement_tier`, `measurement_kind`, `evaluator`, `producer?`, `validator?`, `reducer`, `dependencies: string[]`, `raw_output: string[]`, `estimated_cost`.
+`MetricDefinition` fields: `metric`, `scope_kind: "global" | "section" | "taxonomy_cell"`, `direction`, `target_type`, `tolerance`, `time_dependent: boolean`, `measurement_tier`, `measurement_kind`, `evaluator`, `producer?`, `validator?`, `reducer`, `dependencies: string[]`, `raw_output: string[]`, `estimated_cost`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1122,47 +971,60 @@ Create `packages/longwrite/tests/registry-metrics.test.ts`:
 import { describe, expect, it } from "vitest";
 import { metricId } from "../src/lib/registry/ids.js";
 import {
-  METRIC_REGISTRY, PLANNER_SELECTABLE, metricDefinition, metricsInvalidatedBy, metricsOfTier,
+  METRIC_REGISTRY, PLANNER_SELECTABLE, metricDefinition, metricsOfTier,
 } from "../src/lib/registry/metrics.js";
 
 describe("metric registry", () => {
   it("registers every observable metric, not only planner-selectable ones", () => {
-    // Corpus gates observe candidate_count and friends; they are real metrics
-    // even though a planner may not name them in an acceptance criterion.
     for (const id of ["candidate_count", "recent_source_ratio", "source_type_diversity_count"]) {
       expect(METRIC_REGISTRY.has(metricId(id)), `${id} is unregistered`).toBe(true);
     }
     expect(METRIC_REGISTRY.size).toBeGreaterThan(22);
   });
 
+  it("registers a metric for every gate a capability may protect", () => {
+    // citation_verification is a GATE id; its protected form must exist as a
+    // registered metric under its own name.
+    expect(METRIC_REGISTRY.has(metricId("citation_verification_status"))).toBe(true);
+  });
+
   it("allows the planner to select exactly the 22 acceptance metrics", () => {
     expect(PLANNER_SELECTABLE.size).toBe(22);
     expect(PLANNER_SELECTABLE.has(metricId("core_sources"))).toBe(true);
     expect(PLANNER_SELECTABLE.has(metricId("candidate_count"))).toBe(false);
-  });
-
-  it("keeps every planner-selectable metric registered", () => {
     for (const id of PLANNER_SELECTABLE) expect(METRIC_REGISTRY.has(id)).toBe(true);
   });
 
+  it("declares a scope kind so scoped metrics emit one entry per scope", () => {
+    expect(metricDefinition(metricId("citation_depth_per_section")).scope_kind).toBe("section");
+    expect(metricDefinition(metricId("taxonomy_cell_ab_sources")).scope_kind).toBe("taxonomy_cell");
+    expect(metricDefinition(metricId("core_sources")).scope_kind).toBe("global");
+  });
+
+  it("marks only genuinely time-dependent metrics", () => {
+    // Folding a date into every digest would invalidate every static
+    // measurement daily and destroy reuse.
+    expect(metricDefinition(metricId("cited_within_one_year_ratio")).time_dependent).toBe(true);
+    expect(metricDefinition(metricId("recent_source_ratio")).time_dependent).toBe(true);
+    expect(metricDefinition(metricId("core_sources")).time_dependent).toBe(false);
+    expect(metricDefinition(metricId("prose_redundancy")).time_dependent).toBe(false);
+  });
+
   it("marks the three expensive metrics as release tier", () => {
-    for (const id of ["rendered_visual_review", "review_score", "claim_support"]) {
-      expect(metricDefinition(metricId(id)).measurement_tier).toBe("release");
-    }
+    expect(metricsOfTier("release").map(String).sort())
+      .toEqual(["claim_support", "rendered_visual_review", "review_score"]);
   });
 
   it("declares producer, validator and reducer for every model pipeline", () => {
     for (const definition of METRIC_REGISTRY.values()) {
       if (definition.measurement_kind !== "model") continue;
-      expect(definition.producer, `${definition.metric} has no producer`).toBeTruthy();
-      expect(definition.validator, `${definition.metric} has no validator`).toBeTruthy();
-      expect(definition.reducer, `${definition.metric} has no reducer`).toBeTruthy();
+      expect(definition.producer, `${definition.metric}`).toBeTruthy();
+      expect(definition.validator, `${definition.metric}`).toBeTruthy();
+      expect(definition.reducer, `${definition.metric}`).toBeTruthy();
     }
   });
 
   it("never lists a producer's own output as a dependency", () => {
-    // reviews/scorecard.json is what persona_review writes; including it in the
-    // digest would make the measurement's identity depend on its own result.
     for (const definition of METRIC_REGISTRY.values()) {
       for (const output of definition.raw_output) {
         expect(definition.dependencies, `${definition.metric} depends on its own output`)
@@ -1172,8 +1034,6 @@ describe("metric registry", () => {
   });
 
   it("includes chapters in the dependencies of every cited-source metric", () => {
-    // These count sources cited in chapter prose; a chapter edit must
-    // invalidate them, and only `dependencies` enters the digest.
     for (const id of ["cited_sources", "cited_within_one_year_ratio",
                       "accepted_cited_ratio", "cited_arxiv_only_ratio"]) {
       expect(metricDefinition(metricId(id)).dependencies.some((d) => d.startsWith("chapters/")),
@@ -1181,33 +1041,17 @@ describe("metric registry", () => {
     }
   });
 
-  it("includes validated evidence in landmark coverage dependencies", () => {
+  it("includes validated evidence and config where a metric reads them", () => {
     expect(metricDefinition(metricId("landmark_coverage_ratio")).dependencies)
       .toContain("evidence/active-validated-source-evidence.json");
-  });
-
-  it("includes the config file where a metric reads configured targets", () => {
     expect(metricDefinition(metricId("taxonomy_cell_ab_sources")).dependencies)
       .toContain("longwrite.yaml");
   });
 
   it("records direction and tolerance so progress can be normalized", () => {
     expect(metricDefinition(metricId("prose_redundancy")).direction).toBe("minimize");
-    expect(metricDefinition(metricId("core_sources")).direction).toBe("maximize");
     expect(metricDefinition(metricId("core_sources")).tolerance).toBe(0);
     expect(metricDefinition(metricId("landmark_coverage_ratio")).tolerance).toBeGreaterThan(0);
-  });
-
-  it("selects only the metrics a change invalidates", () => {
-    const invalidated = metricsInvalidatedBy(["chapters/section-03.md"]).map(String);
-    expect(invalidated).toContain("prose_redundancy");
-    expect(invalidated).toContain("cited_sources");
-    expect(invalidated).not.toContain("candidate_count");
-  });
-
-  it("lists metrics by tier", () => {
-    expect(metricsOfTier("release").map(String).sort())
-      .toEqual(["claim_support", "rendered_visual_review", "review_score"]);
   });
 
   it("throws rather than defaulting for an unknown metric", () => {
@@ -1223,788 +1067,223 @@ Expected: FAIL — cannot resolve `metrics.js`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/longwrite/src/lib/registry/metrics.ts`. Register every observable metric; mark the 22 planner-selectable ones. The full acceptance list is in `src/lib/ops/action-plan.ts`; `claim_support` is canonical and the written key `claim_support_rate` is retired.
+Create `packages/longwrite/src/lib/registry/metrics.ts`. Register every observable metric — the 22 planner-selectable acceptance metrics from `src/lib/ops/action-plan.ts`, the corpus observations (`candidate_count`, `recent_source_ratio`, `source_type_diversity_count`), and a metric for every gate a capability may protect (`citation_verification_status`, `latex_build_status`). `claim_support` is canonical; the written key `claim_support_rate` is retired.
 
 ```ts
-import { metricId, type MetricId } from "./ids.js";
-
 export type MetricDefinition = {
   metric: MetricId;
+  /** Emits one entry per scope. A `section` or `taxonomy_cell` metric must
+   * never report an aggregate: the previous taxonomy_cell_ab_sources reported
+   * the minimum across cells, which cannot tell a repair which cell to fix. */
+  scope_kind: "global" | "section" | "taxonomy_cell";
   direction: "maximize" | "minimize";
   target_type: "ratio" | "count" | "boolean" | "score";
-  /** Comparison tolerance. Zero for integer counts and booleans; small and
-   * positive for ratios and scores, where exact float equality is wrong. */
   tolerance: number;
+  /** Only a metric that genuinely depends on the current date. */
+  time_dependent: boolean;
   measurement_tier: "unit" | "round" | "release";
   measurement_kind: "script" | "model" | "external";
   evaluator: string;
   producer?: string;
   validator?: string;
   reducer: string;
-  /** Inputs whose change invalidates the measurement. Drives the input digest
-   * and reuse. Never contains a producer's own output. */
+  /** Inputs whose change invalidates the measurement. Never a producer's own
+   * output: that would make the measurement's identity depend on its result. */
   dependencies: string[];
-  /** What a model or external producer writes, validated and reduced. Excluded
-   * from the digest by construction. */
   raw_output: string[];
   estimated_cost: { model_calls: number; render_required: boolean };
 };
-
-const CHAPTERS = "chapters/";
-const SOURCES = "sources/classified_sources.jsonl";
-const CONFIG = "longwrite.yaml";
-const VALIDATED_EVIDENCE = "evidence/active-validated-source-evidence.json";
-const PACKETS = "evidence/";
-const FIGURE_MANIFEST = "figures/manifest.json";
-const PLACEMENT = "figures/placement-plan.json";
-const LANDMARKS = "research/landmark-candidates.json";
-
-function script(
-  metric: string,
-  direction: MetricDefinition["direction"],
-  target_type: MetricDefinition["target_type"],
-  tier: MetricDefinition["measurement_tier"],
-  dependencies: string[],
-): MetricDefinition {
-  return {
-    metric: metricId(metric), direction, target_type,
-    tolerance: target_type === "count" || target_type === "boolean" ? 0 : 1e-6,
-    measurement_tier: tier, measurement_kind: "script",
-    evaluator: metric, reducer: `deterministic_${metric}`,
-    dependencies, raw_output: [],
-    estimated_cost: { model_calls: 0, render_required: false },
-  };
-}
-
-const DEFINITIONS: MetricDefinition[] = [
-  // --- Corpus observations. Registered normally; not planner-selectable.
-  script("candidate_count", "maximize", "count", "unit", [SOURCES, CONFIG]),
-  script("recent_source_ratio", "maximize", "ratio", "unit", [SOURCES, CONFIG]),
-  script("source_type_diversity_count", "maximize", "count", "unit", [SOURCES, CONFIG]),
-
-  // --- Corpus and citation acceptance metrics.
-  script("core_sources", "maximize", "count", "unit", [SOURCES, CONFIG]),
-  script("cited_sources", "maximize", "count", "unit", [CHAPTERS, SOURCES, PACKETS]),
-  script("cited_within_one_year_ratio", "maximize", "ratio", "unit", [CHAPTERS, SOURCES, CONFIG]),
-  script("accepted_cited_ratio", "maximize", "ratio", "unit", [CHAPTERS, SOURCES]),
-  script("cited_arxiv_only_ratio", "minimize", "ratio", "unit", [CHAPTERS, SOURCES]),
-  script("citation_depth_per_section", "maximize", "count", "unit", [CHAPTERS, SOURCES, PACKETS]),
-  script("taxonomy_cell_ab_sources", "maximize", "count", "unit", [SOURCES, CONFIG]),
-  script("landmark_coverage_ratio", "maximize", "ratio", "unit", [LANDMARKS, SOURCES, VALIDATED_EVIDENCE]),
-  script("landmark_citation_coverage_ratio", "maximize", "ratio", "unit", [LANDMARKS, CHAPTERS]),
-
-  // --- Manuscript metrics.
-  script("prose_redundancy", "minimize", "count", "unit", [CHAPTERS, CONFIG]),
-  script("claim_contradictions", "minimize", "count", "round", [CHAPTERS, "reviews/claim-judgments.jsonl"]),
-  script("outline_readiness", "maximize", "boolean", "unit", ["outline.json", "outline.md"]),
-
-  // --- Artifact metrics.
-  script("figures", "maximize", "count", "unit", [FIGURE_MANIFEST]),
-  script("tables", "maximize", "count", "unit", [FIGURE_MANIFEST]),
-  script("comparative_tables", "maximize", "count", "unit", [FIGURE_MANIFEST]),
-  script("verified_metadata_plots", "maximize", "count", "unit", [FIGURE_MANIFEST]),
-  script("diagram_connectivity", "minimize", "count", "unit", [PLACEMENT]),
-  script("empirical_trials", "maximize", "count", "unit", ["experiments/results.json"]),
-
-  // --- Page-dependent: needs a build, so it defers to the round boundary.
-  {
-    ...script("citations_per_page", "maximize", "ratio", "round", [CHAPTERS, "paper/", "build/manuscript.pdf"]),
-    estimated_cost: { model_calls: 0, render_required: true },
-  },
-
-  // --- Model pipelines. `dependencies` are the manuscript inputs; `raw_output`
-  //     is what the producer writes and is deliberately not a dependency.
-  {
-    metric: metricId("review_score"), direction: "maximize", target_type: "score", tolerance: 0.05,
-    measurement_tier: "release", measurement_kind: "model",
-    evaluator: "review_score", producer: "persona_review", validator: "scorecard_schema",
-    reducer: "deterministic_review_score",
-    dependencies: [CHAPTERS, "paper/", PLACEMENT],
-    raw_output: ["reviews/scorecard.json"],
-    estimated_cost: { model_calls: 5, render_required: false },
-  },
-  {
-    metric: metricId("claim_support"), direction: "maximize", target_type: "ratio", tolerance: 1e-6,
-    measurement_tier: "release", measurement_kind: "model",
-    evaluator: "claim_support", producer: "claim_double_review", validator: "claim_judgment_schema",
-    reducer: "deterministic_claim_support_rate",
-    dependencies: [CHAPTERS, PACKETS],
-    raw_output: ["reviews/claim-judgments.jsonl"],
-    estimated_cost: { model_calls: 2, render_required: false },
-  },
-  {
-    metric: metricId("rendered_visual_review"), direction: "maximize", target_type: "boolean", tolerance: 0,
-    measurement_tier: "release", measurement_kind: "model",
-    evaluator: "rendered_visual_review", producer: "multimodal_page_review", validator: "visual_qa_schema",
-    reducer: "deterministic_visual_verdict",
-    dependencies: [CHAPTERS, PLACEMENT, "paper/", "build/manuscript.pdf"],
-    raw_output: ["reviews/visual-qa.json"],
-    estimated_cost: { model_calls: 1, render_required: true },
-  },
-];
-
-export const METRIC_REGISTRY: ReadonlyMap<MetricId, MetricDefinition> =
-  new Map(DEFINITIONS.map((definition) => [definition.metric, definition]));
-
-/** The metrics a planner may name in an acceptance criterion. A narrower set
- * than the registry: corpus observations are measurable but are not a
- * scholarly objective anyone should be asked to optimize directly. */
-export const PLANNER_SELECTABLE: ReadonlySet<MetricId> = new Set([
-  "cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio",
-  "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources",
-  "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review",
-  "empirical_trials", "outline_readiness", "review_score", "claim_support",
-  "landmark_coverage_ratio", "landmark_citation_coverage_ratio", "claim_contradictions",
-  "prose_redundancy", "diagram_connectivity",
-].map(metricId));
-
-export function metricDefinition(id: MetricId): MetricDefinition {
-  const found = METRIC_REGISTRY.get(id);
-  if (!found) throw new Error(`unknown metric: ${id}. Add it to src/lib/registry/metrics.ts.`);
-  return found;
-}
-
-function matches(dependency: string, filePath: string): boolean {
-  return dependency.endsWith("/") ? filePath.startsWith(dependency) : dependency === filePath;
-}
-
-/** Invalidation is derived from dependencies rather than declared separately,
- * so the two can never disagree. */
-export function metricsInvalidatedBy(changed: string[]): MetricId[] {
-  return [...METRIC_REGISTRY.values()]
-    .filter((definition) => definition.dependencies.some((dep) => changed.some((file) => matches(dep, file))))
-    .map((definition) => definition.metric);
-}
-
-export function metricsOfTier(tier: MetricDefinition["measurement_tier"]): MetricId[] {
-  return [...METRIC_REGISTRY.values()]
-    .filter((definition) => definition.measurement_tier === tier).map((definition) => definition.metric);
-}
 ```
+
+Populate the table following the field semantics above, with `PLANNER_SELECTABLE` holding exactly the 22 acceptance metric ids, `metricDefinition` throwing on an unknown id, and `metricsOfTier` filtering.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- registry-metrics`
-Expected: PASS, 13 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/longwrite/src/lib/registry/metrics.ts packages/longwrite/tests/registry-metrics.test.ts
-git commit -m "feat(registry): register every observable metric, separating dependencies from producer output"
+git commit -m "feat(registry): register every observable metric with scope, tier and dependencies"
 ```
 
 ---
 
-### Task 8: Canonical hashing and the observation store
+### Task 7: Canonical hashing and digests
+
+No store, no sequences, no reuse lookup — the kernel owns all three.
 
 **Files:**
 - Create: `packages/longwrite/src/lib/registry/canonical.ts`
-- Create: `packages/longwrite/src/lib/registry/observations.ts`
-- Test: `packages/longwrite/tests/registry-canonical.test.ts`
-- Test: `packages/longwrite/tests/registry-observations.test.ts`
+- Create: `packages/longwrite/src/lib/registry/digests.ts`
+- Test: `packages/longwrite/tests/registry-digests.test.ts`
 
 **Interfaces:**
-- Consumes: `ObservationSchema`, `Observation` (Task 6); `MetricDefinition` (Task 7).
-- Produces: `canonicalJson(value: unknown): string`; `computeInputDigest(workspaceDir, definition, extra?)`; `evaluatorDigest(name, version)`; `reserveSequence(workspaceDir, storePath)`; `appendObservation(workspaceDir, storePath, observation)`; `currentObservation(workspaceDir, storePath, metric, inputDigest, evaluatorDigest)`; `readAllObservations(workspaceDir, storePath)`.
+- Consumes: `MetricDefinition` (Task 6).
+- Produces: `canonicalJson(value)`; `computeInputDigest(workspaceDir, definition, context)`; `evaluatorDigest(name, version)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test**
 
-Create `packages/longwrite/tests/registry-canonical.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { canonicalJson } from "../src/lib/registry/canonical.js";
-
-describe("canonical json", () => {
-  it("sorts keys at every depth", () => {
-    expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } }))
-      .toBe(canonicalJson({ a: { c: 3, d: 2 }, b: 1 }));
-  });
-
-  it("preserves nested values rather than dropping them", () => {
-    // JSON.stringify(value, keyArray) filters keys at EVERY depth, silently
-    // discarding nested model configuration. This must not.
-    const rendered = canonicalJson({ model: { name: "opus", params: { effort: "high" } } });
-    expect(rendered).toContain("effort");
-    expect(rendered).toContain("high");
-  });
-
-  it("preserves array order", () => {
-    expect(canonicalJson([2, 1])).not.toBe(canonicalJson([1, 2]));
-  });
-
-  it("distinguishes null, missing and empty", () => {
-    expect(canonicalJson({ a: null })).not.toBe(canonicalJson({}));
-    expect(canonicalJson({ a: "" })).not.toBe(canonicalJson({ a: null }));
-  });
-});
-```
-
-Create `packages/longwrite/tests/registry-observations.test.ts`:
+Create `packages/longwrite/tests/registry-digests.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { metricId } from "../src/lib/registry/ids.js";
+import { canonicalJson } from "../src/lib/registry/canonical.js";
+import { computeInputDigest, evaluatorDigest } from "../src/lib/registry/digests.js";
 import { metricDefinition } from "../src/lib/registry/metrics.js";
-import {
-  appendObservation, computeInputDigest, currentObservation,
-  readAllObservations, reserveSequence, STORE,
-} from "../src/lib/registry/observations.js";
+import { metricId } from "../src/lib/registry/ids.js";
 
 const roots: string[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
 });
 async function workspace(): Promise<string> {
-  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-observations-"));
+  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-digests-"));
   roots.push(ws);
   await fs.mkdir(path.join(ws, "chapters"), { recursive: true });
   await fs.writeFile(path.join(ws, "chapters", "section-01.md"), "# One\n", "utf-8");
   await fs.writeFile(path.join(ws, "longwrite.yaml"), "version: 1\n", "utf-8");
+  await fs.mkdir(path.join(ws, "sources"), { recursive: true });
+  await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"), "", "utf-8");
   return ws;
 }
-function record(overrides: Record<string, unknown> = {}) {
-  return {
-    metric: "prose_redundancy", value: 0, evaluator: "prose_redundancy",
-    evaluator_digest: "a".repeat(64), input_digest: "b".repeat(64),
-    sequence: 1, measured_at: new Date().toISOString(), ...overrides,
-  } as never;
-}
+const AS_OF = "2026-09-01T00:00:00.000Z";
+const LATER = "2027-06-01T00:00:00.000Z";
 
-describe("observation store", () => {
-  it("writes an immutable content-addressed record", async () => {
-    const ws = await workspace();
-    const written = await appendObservation(ws, STORE, record());
-    expect(written).toContain(path.join(STORE, "prose_redundancy", "b".repeat(64), "a".repeat(64)));
-    expect(path.basename(written)).toMatch(/^[0-9a-f]{64}\.json$/);
+describe("canonical json", () => {
+  it("sorts keys at every depth and preserves nested values", () => {
+    expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe(canonicalJson({ a: { c: 3, d: 2 }, b: 1 }));
+    // JSON.stringify(value, keyArray) filters keys at EVERY depth and would
+    // silently discard nested model configuration.
+    expect(canonicalJson({ model: { name: "opus", params: { effort: "high" } } })).toContain("effort");
   });
 
-  it("refuses to overwrite a different record at the same address", async () => {
-    const ws = await workspace();
-    await appendObservation(ws, STORE, record({ value: 1 }));
-    // Same metric, digests and sequence but a different value is a contradiction,
-    // not an update: an immutable store must reject it rather than clobber.
-    await expect(appendObservation(ws, STORE, record({ value: 2 }))).rejects.toThrow(/conflicting observation/);
+  it("preserves array order and distinguishes null from missing", () => {
+    expect(canonicalJson([2, 1])).not.toBe(canonicalJson([1, 2]));
+    expect(canonicalJson({ a: null })).not.toBe(canonicalJson({}));
   });
+});
 
-  it("accepts a byte-identical rewrite idempotently", async () => {
-    const ws = await workspace();
-    const first = await appendObservation(ws, STORE, record({ value: 1 }));
-    const second = await appendObservation(ws, STORE, record({ value: 1 }));
-    expect(second).toBe(first);
-  });
-
-  it("selects the current value only among matching digests", async () => {
-    const ws = await workspace();
-    // A -> B -> A. The stale B record has the higher sequence; selecting by
-    // sequence alone would return it.
-    await appendObservation(ws, STORE, record({ value: 3, input_digest: "b".repeat(64), sequence: 1 }));
-    await appendObservation(ws, STORE, record({ value: 9, input_digest: "c".repeat(64), sequence: 2 }));
-    const current = await currentObservation(ws, STORE, metricId("prose_redundancy"), "b".repeat(64), "a".repeat(64));
-    expect(current?.value).toBe(3);
-  });
-
-  it("returns null when no observation matches the current digests", async () => {
-    const ws = await workspace();
-    await appendObservation(ws, STORE, record());
-    expect(await currentObservation(ws, STORE, metricId("prose_redundancy"), "d".repeat(64), "a".repeat(64)))
-      .toBeNull();
-    expect(await currentObservation(ws, STORE, metricId("prose_redundancy"), "b".repeat(64), "e".repeat(64)))
-      .toBeNull();
-  });
-
-  it("breaks ties by sequence among matching digests", async () => {
-    const ws = await workspace();
-    await appendObservation(ws, STORE, record({ value: 5, sequence: 4 }));
-    await appendObservation(ws, STORE, record({ value: 6, sequence: 9 }));
-    const current = await currentObservation(ws, STORE, metricId("prose_redundancy"), "b".repeat(64), "a".repeat(64));
-    expect(current?.value).toBe(6);
-  });
-
-  it("throws on a malformed stored record rather than skipping it", async () => {
-    const ws = await workspace();
-    await appendObservation(ws, STORE, record());
-    const dir = path.join(ws, STORE, "prose_redundancy", "b".repeat(64), "a".repeat(64));
-    await fs.writeFile(path.join(dir, `${"f".repeat(64)}.json`), "{ not json", "utf-8");
-    // A skipped record becomes a trusted wrong number.
-    await expect(readAllObservations(ws, STORE)).rejects.toThrow(/malformed observation/);
-  });
-
-  it("changes the input digest when a declared dependency changes", async () => {
+describe("input digests", () => {
+  it("changes when a declared dependency changes", async () => {
     const ws = await workspace();
     const definition = metricDefinition(metricId("prose_redundancy"));
-    const before = await computeInputDigest(ws, definition);
+    const before = await computeInputDigest(ws, definition, { asOfDate: AS_OF });
     await fs.writeFile(path.join(ws, "chapters", "section-01.md"), "# One, revised\n", "utf-8");
-    expect(await computeInputDigest(ws, definition)).not.toBe(before);
+    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF })).not.toBe(before);
   });
 
   it("distinguishes a missing dependency from an empty one", async () => {
     const ws = await workspace();
     const definition = metricDefinition(metricId("prose_redundancy"));
     await fs.rm(path.join(ws, "longwrite.yaml"));
-    const missing = await computeInputDigest(ws, definition);
+    const missing = await computeInputDigest(ws, definition, { asOfDate: AS_OF });
     await fs.writeFile(path.join(ws, "longwrite.yaml"), "", "utf-8");
-    expect(await computeInputDigest(ws, definition)).not.toBe(missing);
+    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF })).not.toBe(missing);
   });
 
-  it("includes nested model configuration in the digest", async () => {
+  it("includes the date only for a time-dependent metric", async () => {
+    const ws = await workspace();
+    const dated = metricDefinition(metricId("recent_source_ratio"));
+    const static_ = metricDefinition(metricId("core_sources"));
+    expect(await computeInputDigest(ws, dated, { asOfDate: AS_OF }))
+      .not.toBe(await computeInputDigest(ws, dated, { asOfDate: LATER }));
+    // A static metric must not invalidate merely because a day passed.
+    expect(await computeInputDigest(ws, static_, { asOfDate: AS_OF }))
+      .toBe(await computeInputDigest(ws, static_, { asOfDate: LATER }));
+  });
+
+  it("includes nested model configuration for a model pipeline", async () => {
     const ws = await workspace();
     const definition = metricDefinition(metricId("review_score"));
-    const a = await computeInputDigest(ws, definition, { model: { name: "opus", effort: "high" } });
-    const b = await computeInputDigest(ws, definition, { model: { name: "opus", effort: "low" } });
-    expect(a).not.toBe(b);
+    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "high" } }))
+      .not.toBe(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "low" } }));
   });
 
-  it("allocates unique sequences under concurrency", async () => {
+  it("does not include the producer's raw output", async () => {
     const ws = await workspace();
-    const claimed = await Promise.all(Array.from({ length: 25 }, () => reserveSequence(ws, STORE)));
-    expect(new Set(claimed).size).toBe(25);
-  });
-});
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-canonical registry-observations`
-Expected: FAIL — cannot resolve `canonical.js` and `observations.js`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-Create `packages/longwrite/src/lib/registry/canonical.ts`:
-
-```ts
-/** Recursive canonical JSON: object keys sorted at every depth, array order
- * preserved.
- *
- * `JSON.stringify(value, keyArray)` is not this. Its second argument is a
- * replacer that filters keys at EVERY depth against one flat list, so a nested
- * model configuration silently loses fields the top level never mentioned — a
- * digest that ignores the very thing it is meant to bind. */
-export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, nested]) => nested !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`).join(",")}}`;
-}
-```
-
-Create `packages/longwrite/src/lib/registry/observations.ts`:
-
-```ts
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { canonicalJson } from "./canonical.js";
-import { ObservationSchema, type Observation } from "./records.js";
-import type { MetricDefinition } from "./metrics.js";
-import type { MetricId } from "./ids.js";
-
-export const STORE = path.join(".malaclaw", "observations");
-const SAFE_SEGMENT = /^[a-z][a-z0-9_]*$/;
-const DIGEST = /^[0-9a-f]{64}$/;
-
-function sha256(value: string | Buffer): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function assertSegment(label: string, value: string, pattern: RegExp): void {
-  if (!pattern.test(value)) throw new Error(`unsafe ${label} for a store path: ${value}`);
-}
-
-async function filesUnder(dir: string): Promise<string[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  const found: string[] = [];
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...await filesUnder(full));
-    else found.push(full);
-  }
-  return found.sort();
-}
-
-/** Hashes a dependency, distinguishing missing from empty. Two states that
- * hash identically make an absent input look like a measured zero. */
-async function digestOfDependency(workspaceDir: string, dependency: string): Promise<string> {
-  const hash = crypto.createHash("sha256").update(dependency);
-  const targets = dependency.endsWith("/")
-    ? await filesUnder(path.join(workspaceDir, dependency))
-    : [path.join(workspaceDir, dependency)];
-  if (dependency.endsWith("/") && targets.length === 0) return hash.update("\x01absent-directory").digest("hex");
-  for (const target of targets) {
-    const bytes = await fs.readFile(target).catch(() => null);
-    hash.update(path.relative(workspaceDir, target).split(path.sep).join("/"));
-    if (bytes === null) hash.update("\x01absent");
-    else hash.update("\x02present").update(bytes);
-  }
-  return hash.digest("hex");
-}
-
-/** Covers declared dependencies, the registry configuration, and — for a model
- * pipeline — the prompt and model configuration passed as `extra`. Never the
- * producer's `raw_output`: that would make the measurement's identity depend
- * on its own result. */
-export async function computeInputDigest(
-  workspaceDir: string, definition: MetricDefinition, extra?: Record<string, unknown>,
-): Promise<string> {
-  const parts = [
-    definition.metric, definition.evaluator, definition.reducer,
-    canonicalJson(definition.dependencies), canonicalJson(definition.producer ?? null),
-    canonicalJson(definition.validator ?? null),
-  ];
-  for (const dependency of [...definition.dependencies].sort()) {
-    parts.push(dependency, await digestOfDependency(workspaceDir, dependency));
-  }
-  if (extra) parts.push(canonicalJson(extra));
-  return sha256(parts.join("\u0001"));
-}
-
-export function evaluatorDigest(name: string, version: string): string {
-  return sha256(canonicalJson({ name, version }));
-}
-
-/** Atomic sequence allocation. A read-then-increment over the store races when
- * two evaluators run concurrently; an exclusive create cannot. */
-export async function reserveSequence(workspaceDir: string, storePath: string): Promise<number> {
-  const dir = path.join(workspaceDir, storePath, ".sequence");
-  await fs.mkdir(dir, { recursive: true });
-  const claimed = (await fs.readdir(dir)).map(Number).filter(Number.isInteger);
-  let next = claimed.length === 0 ? 1 : Math.max(...claimed) + 1;
-  for (;;) {
-    try {
-      const handle = await fs.open(path.join(dir, String(next)), "wx");
-      await handle.close();
-      return next;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      next += 1;
-    }
-  }
-}
-
-/** Immutable and content-addressed: the filename is the digest of the record,
- * and writes use an exclusive create. A rename would silently replace an
- * existing record at the same address. */
-export async function appendObservation(
-  workspaceDir: string, storePath: string, observation: Observation,
-): Promise<string> {
-  const parsed = ObservationSchema.parse(observation);
-  assertSegment("metric", parsed.metric, SAFE_SEGMENT);
-  assertSegment("evaluator", parsed.evaluator, SAFE_SEGMENT);
-  assertSegment("input digest", parsed.input_digest, DIGEST);
-  assertSegment("evaluator digest", parsed.evaluator_digest, DIGEST);
-
-  const body = `${canonicalJson(parsed)}\n`;
-  const dir = path.join(workspaceDir, storePath, parsed.metric, parsed.input_digest, parsed.evaluator_digest);
-  await fs.mkdir(dir, { recursive: true });
-  const rel = path.join(storePath, parsed.metric, parsed.input_digest, parsed.evaluator_digest, `${sha256(body)}.json`);
-  const target = path.join(workspaceDir, rel);
-  try {
-    const handle = await fs.open(target, "wx");
-    try { await handle.writeFile(body, "utf-8"); } finally { await handle.close(); }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const existing = await fs.readFile(target, "utf-8");
-    if (existing !== body) throw new Error(`conflicting observation at ${rel}`);
-  }
-  // Two records that differ only in value land at different addresses, so a
-  // contradiction at the same (metric, digests, sequence) is detectable.
-  const siblings = await fs.readdir(dir);
-  const conflicting: string[] = [];
-  for (const name of siblings) {
-    if (!name.endsWith(".json")) continue;
-    const other = ObservationSchema.parse(JSON.parse(await fs.readFile(path.join(dir, name), "utf-8")));
-    if (other.sequence === parsed.sequence && other.value !== parsed.value) conflicting.push(name);
-  }
-  if (conflicting.length > 0) throw new Error(`conflicting observation at sequence ${parsed.sequence} in ${rel}`);
-  return rel;
-}
-
-export async function readAllObservations(workspaceDir: string, storePath: string): Promise<Observation[]> {
-  const records: Observation[] = [];
-  for (const file of await filesUnder(path.join(workspaceDir, storePath))) {
-    if (!file.endsWith(".json")) continue;
-    let parsed: unknown;
-    try { parsed = JSON.parse(await fs.readFile(file, "utf-8")); }
-    catch { throw new Error(`malformed observation: ${path.relative(workspaceDir, file)} is not valid JSON`); }
-    const result = ObservationSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error(`malformed observation: ${path.relative(workspaceDir, file)} — ${result.error.issues[0]?.message}`);
-    }
-    records.push(result.data);
-  }
-  return records;
-}
-
-/** Digests first, sequence second.
- *
- * Selecting by sequence alone is wrong whenever a workspace goes A -> B -> A:
- * the valid, reusable A observation has a LOWER sequence than the now-stale B
- * one, so the stale value would win. */
-export async function currentObservation(
-  workspaceDir: string, storePath: string,
-  metric: MetricId, inputDigest: string, evaluatorDigestValue: string,
-): Promise<Observation | null> {
-  const matching = (await readAllObservations(workspaceDir, storePath)).filter((record) =>
-    record.metric === metric
-    && record.input_digest === inputDigest
-    && record.evaluator_digest === evaluatorDigestValue);
-  if (matching.length === 0) return null;
-  return matching.reduce((best, record) => (record.sequence > best.sequence ? record : best));
-}
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-canonical registry-observations`
-Expected: PASS, 4 + 11 tests.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/longwrite/src/lib/registry/canonical.ts packages/longwrite/src/lib/registry/observations.ts packages/longwrite/tests/registry-canonical.test.ts packages/longwrite/tests/registry-observations.test.ts
-git commit -m "feat(registry): add canonical hashing and a content-addressed observation store"
-```
-
----
-
-### Task 9: Acceptance arithmetic with correct equals semantics
-
-**Files:**
-- Create: `packages/longwrite/src/lib/registry/acceptance.ts`
-- Test: `packages/longwrite/tests/registry-acceptance.test.ts`
-
-**Interfaces:**
-- Consumes: `metricDefinition` (Task 7).
-- Produces: `Criterion`; `ProgressPolicy`; `satisfies(criterion, value)`; `closedGapFraction(criterion, before, after)`; `evaluateProgress(criterion, policy, before, after)`; `objectiveKey(criterion, findingIds, artifactIds)`; `assertOperatorCompatible(criterion)`.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `packages/longwrite/tests/registry-acceptance.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { metricId } from "../src/lib/registry/ids.js";
-import {
-  closedGapFraction, evaluateProgress, objectiveKey, satisfies, assertOperatorCompatible,
-} from "../src/lib/registry/acceptance.js";
-
-const coverage = { metric: metricId("landmark_coverage_ratio"), operator: "at_least" as const, target: 0.75 };
-const redundancy = { metric: metricId("prose_redundancy"), operator: "at_most" as const, target: 0 };
-const exactFigures = { metric: metricId("figures"), operator: "equals" as const, target: 4 };
-const exactRatio = { metric: metricId("accepted_cited_ratio"), operator: "equals" as const, target: 0.5 };
-const policy = { min_absolute_delta: 0.01, min_gap_fraction: 0.2, max_attempts: 2 };
-
-describe("acceptance arithmetic", () => {
-  it("satisfies at_least at or above target and at_most at or below", () => {
-    expect(satisfies(coverage, 0.75)).toBe(true);
-    expect(satisfies(coverage, 0.74)).toBe(false);
-    expect(satisfies(redundancy, 0)).toBe(true);
-    expect(satisfies(redundancy, 1)).toBe(false);
+    const definition = metricDefinition(metricId("review_score"));
+    const before = await computeInputDigest(ws, definition, { asOfDate: AS_OF });
+    await fs.mkdir(path.join(ws, "reviews"), { recursive: true });
+    await fs.writeFile(path.join(ws, "reviews", "scorecard.json"), "{}", "utf-8");
+    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF })).toBe(before);
   });
 
-  it("satisfies equals within the metric's tolerance, not by float identity", () => {
-    // 0.1 + 0.2 !== 0.3 in IEEE 754; exact equality is the wrong test.
-    expect(satisfies(exactRatio, 0.1 + 0.2 + 0.2)).toBe(true);
-    expect(satisfies(exactFigures, 4)).toBe(true);
-    expect(satisfies(exactFigures, 5)).toBe(false);
-  });
-
-  it("measures at_least progress against the remaining gap", () => {
-    expect(closedGapFraction(coverage, 0.083, 0.25)).toBeCloseTo(0.25, 2);
-  });
-
-  it("inverts the gap calculation for at_most", () => {
-    expect(closedGapFraction(redundancy, 10, 5)).toBeCloseTo(0.5, 5);
-  });
-
-  it("measures equals progress as closed distance when starting below target", () => {
-    expect(closedGapFraction(exactFigures, 0, 2)).toBeCloseTo(0.5, 5);
-  });
-
-  it("measures equals progress as closed distance when starting above target", () => {
-    // Treating equals like at_least reports this as negative progress, which
-    // is backwards: moving 8 -> 6 against a target of 4 closes half the gap.
-    expect(closedGapFraction(exactFigures, 8, 6)).toBeCloseTo(0.5, 5);
-  });
-
-  it("reports negative progress when an equals metric moves away from target", () => {
-    expect(closedGapFraction(exactFigures, 3, 1)).toBeLessThan(0);
-  });
-
-  it("accepts when the target is reached", () => {
-    expect(evaluateProgress(coverage, policy, 0.5, 0.8)).toBe("accepted");
-    expect(evaluateProgress(exactFigures, policy, 2, 4)).toBe("accepted");
-  });
-
-  it("reports improved when both thresholds are met short of target", () => {
-    expect(evaluateProgress(coverage, policy, 0.083, 0.25)).toBe("improved");
-  });
-
-  it("rejects a slow crawl that clears the absolute delta but not the gap fraction", () => {
-    expect(evaluateProgress(coverage, policy, 0.083, 0.103)).toBe("unmet");
-  });
-
-  it("rejects movement below the absolute delta", () => {
-    expect(evaluateProgress(coverage, policy, 0.745, 0.7455)).toBe("unmet");
-  });
-
-  it("rejects an equals metric that moved away from the target", () => {
-    expect(evaluateProgress(exactFigures, policy, 3, 1)).toBe("unmet");
-  });
-
-  it("validates the operator against the metric's declared direction", () => {
-    expect(() => assertOperatorCompatible(coverage)).not.toThrow();
-    expect(() => assertOperatorCompatible(redundancy)).not.toThrow();
-    // prose_redundancy minimizes; at_least would ask for more defects.
-    expect(() => assertOperatorCompatible({
-      metric: metricId("prose_redundancy"), operator: "at_least", target: 1,
-    })).toThrow(/minimize/);
-  });
-
-  it("keys an objective by scope so one section cannot reset another", () => {
-    const a = objectiveKey({ metric: metricId("citation_depth_per_section"), operator: "at_least", target: 1, scope: "section-03" }, ["f1"], ["chapters/section-03.md"]);
-    const b = objectiveKey({ metric: metricId("citation_depth_per_section"), operator: "at_least", target: 1, scope: "section-06" }, ["f1"], ["chapters/section-06.md"]);
-    expect(a).not.toBe(b);
+  it("changes the evaluator digest when its version changes", () => {
+    expect(evaluatorDigest("core_sources", "1")).not.toBe(evaluatorDigest("core_sources", "2"));
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-acceptance`
-Expected: FAIL — cannot resolve `acceptance.js`.
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-digests`
+Expected: FAIL — cannot resolve `canonical.js` and `digests.js`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/longwrite/src/lib/registry/acceptance.ts`:
+Create `canonical.ts` with the recursive canonicaliser, and `digests.ts`:
 
 ```ts
-import crypto from "node:crypto";
-import { canonicalJson } from "./canonical.js";
-import { metricDefinition } from "./metrics.js";
-import type { MetricId } from "./ids.js";
-
-export type Criterion = {
-  metric: MetricId;
-  operator: "at_least" | "at_most" | "equals";
-  target: number;
-  scope?: string;
-};
-
-export type ProgressPolicy = {
-  min_absolute_delta: number;
-  min_gap_fraction: number;
-  max_attempts: number;
-};
-
-/** An operator that fights the metric's direction is a contract error, caught
- * here rather than by a hand-maintained list of special cases. */
-export function assertOperatorCompatible(criterion: Criterion): void {
-  const direction = metricDefinition(criterion.metric).direction;
-  if (direction === "maximize" && criterion.operator === "at_most") {
-    throw new Error(`${criterion.metric} is maximize; at_most would cap an objective it should raise`);
+/** Covers declared dependencies, the registry configuration, and — for a model
+ * pipeline — the prompt and model configuration. It includes the evaluation
+ * date ONLY when the metric declares itself time-dependent; otherwise every
+ * static measurement would invalidate daily. It never covers `raw_output`. */
+export async function computeInputDigest(
+  workspaceDir: string, definition: MetricDefinition,
+  context: { asOfDate: string; model?: Record<string, unknown> },
+): Promise<string> {
+  const parts: unknown[] = [
+    definition.metric, definition.evaluator, definition.reducer, definition.scope_kind,
+    definition.dependencies, definition.producer ?? null, definition.validator ?? null,
+  ];
+  for (const dependency of [...definition.dependencies].sort()) {
+    parts.push(dependency, await digestOfDependency(workspaceDir, dependency));
   }
-  if (direction === "minimize" && criterion.operator === "at_least") {
-    throw new Error(`${criterion.metric} is minimize; at_least would demand more of a defect count`);
-  }
-}
-
-export function satisfies(criterion: Criterion, value: number): boolean {
-  const tolerance = metricDefinition(criterion.metric).tolerance;
-  if (criterion.operator === "at_least") return value >= criterion.target - tolerance;
-  if (criterion.operator === "at_most") return value <= criterion.target + tolerance;
-  // Exact float equality is never the right test for a ratio or a score.
-  return Math.abs(value - criterion.target) <= tolerance;
-}
-
-/** Fraction of the remaining distance to target that this attempt closed.
- *
- * A raw delta is the wrong unit: a small absolute threshold on a ratio metric
- * is satisfiable many times over, which is a legal slow crawl.
- *
- * `equals` is two-sided. Treating it like `at_least` reports movement in the
- * wrong direction whenever the value starts above the target, so it is
- * measured as closed *distance* instead. */
-export function closedGapFraction(criterion: Criterion, before: number, after: number): number {
-  if (criterion.operator === "equals") {
-    const gap = Math.abs(criterion.target - before);
-    if (gap === 0) return 1;
-    return (gap - Math.abs(criterion.target - after)) / gap;
-  }
-  const gap = criterion.operator === "at_most" ? before - criterion.target : criterion.target - before;
-  if (gap <= 0) return 1;
-  const moved = criterion.operator === "at_most" ? before - after : after - before;
-  return moved / gap;
-}
-
-function absoluteProgress(criterion: Criterion, before: number, after: number): number {
-  if (criterion.operator === "equals") {
-    return Math.abs(criterion.target - before) - Math.abs(criterion.target - after);
-  }
-  return criterion.operator === "at_most" ? before - after : after - before;
-}
-
-export function evaluateProgress(
-  criterion: Criterion, policy: ProgressPolicy, before: number, after: number,
-): "accepted" | "improved" | "unmet" {
-  if (satisfies(criterion, after)) return "accepted";
-  if (absoluteProgress(criterion, before, after) < policy.min_absolute_delta) return "unmet";
-  if (closedGapFraction(criterion, before, after) < policy.min_gap_fraction) return "unmet";
-  return "improved";
-}
-
-/** Objective identity includes scope, target and the artifacts involved.
- * Keyed on the metric alone, progress at one scope resets the stagnation
- * counter for every other scope. */
-export function objectiveKey(criterion: Criterion, findingIds: string[], artifactIds: string[]): string {
-  return crypto.createHash("sha256").update(canonicalJson({
-    metric: criterion.metric, operator: criterion.operator, target: criterion.target,
-    scope: criterion.scope ?? "", findings: [...findingIds].sort(), artifacts: [...artifactIds].sort(),
-  })).digest("hex").slice(0, 32);
+  if (definition.time_dependent) parts.push({ as_of_date: context.asOfDate });
+  if (definition.measurement_kind !== "script") parts.push({ model: context.model ?? null });
+  return sha256(canonicalJson(parts));
 }
 ```
 
+`digestOfDependency` hashes each file with an explicit present/absent marker so a missing input never hashes like an empty one.
+
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-acceptance`
-Expected: PASS, 14 tests.
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-digests`
+Expected: PASS, 2 + 6 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/longwrite/src/lib/registry/acceptance.ts packages/longwrite/tests/registry-acceptance.test.ts
-git commit -m "feat(registry): correct equals progress and validate operators against metric direction"
+git add packages/longwrite/src/lib/registry/canonical.ts packages/longwrite/src/lib/registry/digests.ts packages/longwrite/tests/registry-digests.test.ts
+git commit -m "feat(registry): add canonical hashing and dependency-scoped input digests"
 ```
 
 ---
 
-### Task 10: Deterministic evaluators reusing the canonical helpers
+## M4 — Scoped evaluators
+
+### Task 8: Evaluator protocol and corpus evaluators
 
 **Files:**
-- Modify: `packages/longwrite/src/lib/validation/research.ts` (export `citedSourceIds`, `isAcceptedSource`, `isArxivOnlySource`, `isWithinOneCalendarYear`)
+- Modify: `packages/longwrite/src/lib/validation/research.ts` (export the four canonical helpers; give `isWithinOneCalendarYear` an explicit `asOf` parameter)
 - Create: `packages/longwrite/src/lib/registry/evaluators/corpus.ts`
 - Test: `packages/longwrite/tests/registry-evaluators-corpus.test.ts`
 
 **Interfaces:**
-- Consumes: the four helpers above; `loadProjectConfig`; `sourceMatchesTaxonomy`.
-- Produces: `type EvaluatorContext = { workspaceDir: string; asOfDate: string }`; `type EvaluatorFn = (ctx: EvaluatorContext) => Promise<number>`; `MeasurementUnavailable` error class; `CORPUS_EVALUATORS: Record<string, EvaluatorFn>` covering `candidate_count`, `core_sources`, `recent_source_ratio`, `source_type_diversity_count`, `cited_sources`, `cited_within_one_year_ratio`, `accepted_cited_ratio`, `cited_arxiv_only_ratio`, `taxonomy_cell_ab_sources`.
+- Consumes: the canonical helpers; `loadProjectConfig`; `sourceMatchesTaxonomy`.
+- Produces: `EvaluatorContext = { workspaceDir: string; asOfDate: string }`; `ScopedValue = { scope_key: string; value: number }`; `EvaluatorFn = (ctx) => Promise<ScopedValue[]>`; `MeasurementUnavailable`; `CORPUS_EVALUATORS`.
 
-Formulas, all over `sources/classified_sources.jsonl` and `chapters/*.md`:
-- `candidate_count` — total classified records.
-- `core_sources` — records whose `citation_depth` is `A` or `B`.
-- `recent_source_ratio` — records passing `isWithinOneCalendarYear` relative to `asOfDate`, over all records.
-- `source_type_diversity_count` — distinct provider/identifier types.
-- `cited_sources` — records whose id appears in `citedSourceIds(chapters)`.
-- `cited_within_one_year_ratio` — of cited records, those passing `isWithinOneCalendarYear`.
-- `accepted_cited_ratio` — of cited records, those passing `isAcceptedSource`.
-- `cited_arxiv_only_ratio` — of cited records, those passing `isArxivOnlySource`. **Not** the complement of accepted.
-- `taxonomy_cell_ab_sources` — minimum over configured cells of A/B-depth records matching that cell.
+An evaluator returns **an array of scoped values**, so a scoped metric cannot accidentally aggregate.
+
+Formulas over `sources/classified_sources.jsonl` and `chapters/*.md`:
+`candidate_count` total records · `core_sources` A/B depth · `recent_source_ratio` records passing `isWithinOneCalendarYear(record, asOfDate)` over all · `source_type_diversity_count` distinct `source` values · `cited_sources` records in `citedSourceIds(chapters)` · `cited_within_one_year_ratio`, `accepted_cited_ratio` (via `isAcceptedSource`) and `cited_arxiv_only_ratio` (via `isArxivOnlySource`) over cited records · `taxonomy_cell_ab_sources` **one entry per configured cell**.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2015,18 +1294,27 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { stringify } from "yaml";
 import { CORPUS_EVALUATORS, MeasurementUnavailable } from "../src/lib/registry/evaluators/corpus.js";
 
 const roots: string[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
 });
+const AS_OF = "2026-09-01T00:00:00.000Z";
+const ctx = (workspaceDir: string) => ({ workspaceDir, asOfDate: AS_OF });
 
-async function workspace(sources: unknown[] | string, chapters: Record<string, string> = {}): Promise<string> {
+async function workspace(
+  sources: unknown[] | string, chapters: Record<string, string> = {}, taxonomy: string[] = [],
+): Promise<string> {
   const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-eval-corpus-"));
   roots.push(ws);
   await fs.mkdir(path.join(ws, "sources"), { recursive: true });
   await fs.mkdir(path.join(ws, "chapters"), { recursive: true });
+  await fs.writeFile(path.join(ws, "longwrite.yaml"), stringify({
+    version: 1, project: { id: "s", artifact_type: "research_paper", mode: "auto_research_agentic" },
+    research: { provider: "seed", topic: "t", taxonomy },
+  }), "utf-8");
   await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"),
     typeof sources === "string" ? sources : sources.map((s) => JSON.stringify(s)).join("\n"), "utf-8");
   for (const [name, body] of Object.entries(chapters)) {
@@ -2034,18 +1322,21 @@ async function workspace(sources: unknown[] | string, chapters: Record<string, s
   }
   return ws;
 }
-const AS_OF = "2026-09-01T00:00:00.000Z";
-const ctx = (workspaceDir: string) => ({ workspaceDir, asOfDate: AS_OF });
+const only = (values: Array<{ scope_key: string; value: number }>) => {
+  expect(values).toHaveLength(1);
+  expect(values[0].scope_key).toBe("");
+  return values[0].value;
+};
 
 describe("corpus evaluators", () => {
-  it("counts A and B depth sources as core", async () => {
+  it("counts A and B depth sources as core, globally scoped", async () => {
     const ws = await workspace([
       { id: "s1", citation_depth: "A" }, { id: "s2", citation_depth: "B" }, { id: "s3", citation_depth: "C" },
     ]);
-    expect(await CORPUS_EVALUATORS.core_sources(ctx(ws))).toBe(2);
+    expect(only(await CORPUS_EVALUATORS.core_sources(ctx(ws)))).toBe(2);
   });
 
-  it("fails the measurement when the corpus is missing, rather than reporting zero", async () => {
+  it("fails the measurement when the corpus is missing rather than reporting zero", async () => {
     const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-eval-empty-"));
     roots.push(ws);
     // A measured zero is a claim about the corpus. An absent corpus is not.
@@ -2061,27 +1352,18 @@ describe("corpus evaluators", () => {
     const ws = await workspace(
       [{ id: "paper-a", citation_depth: "A" }, { id: "paper-b", citation_depth: "A" }],
       { "section-01.md": "Whole [source:paper-a] and located [source:paper-b:p3].\n" });
-    expect(await CORPUS_EVALUATORS.cited_sources(ctx(ws))).toBe(2);
-  });
-
-  it("measures the accepted ratio over cited sources only", async () => {
-    const ws = await workspace([
-      { id: "s1", citation_depth: "A", identity: { publication_status: "published" }, identifiers: { doi: "10.1/x" }, venue: "ICML" },
-      { id: "s2", citation_depth: "A", identity: { publication_status: "preprint" }, identifiers: { arxiv_id: "2401.1" }, venue: "arXiv" },
-      { id: "s3", citation_depth: "A", identity: { publication_status: "published" }, identifiers: { doi: "10.1/y" }, venue: "NeurIPS" },
-    ], { "section-01.md": "[source:s1:p1] [source:s2:p2]\n" });
-    expect(await CORPUS_EVALUATORS.accepted_cited_ratio(ctx(ws))).toBeCloseTo(0.5, 5);
+    expect(only(await CORPUS_EVALUATORS.cited_sources(ctx(ws)))).toBe(2);
   });
 
   it("does not treat arxiv-only as the complement of accepted", async () => {
-    // A DOI-less, arXiv-id-less workshop page is neither accepted nor arXiv-only.
+    // A DOI-less, arXiv-id-less workshop page is neither.
     const ws = await workspace([
       { id: "s1", citation_depth: "A", identity: { publication_status: "published" }, identifiers: { doi: "10.1/x" }, venue: "ICML" },
       { id: "s2", citation_depth: "A", identity: { publication_status: "unknown" }, identifiers: {}, venue: "Workshop" },
       { id: "s3", citation_depth: "A", identity: { publication_status: "preprint" }, identifiers: { arxiv_id: "2401.1" }, venue: "arXiv" },
     ], { "section-01.md": "[source:s1:p1] [source:s2:p2] [source:s3:p3]\n" });
-    const accepted = await CORPUS_EVALUATORS.accepted_cited_ratio(ctx(ws));
-    const arxivOnly = await CORPUS_EVALUATORS.cited_arxiv_only_ratio(ctx(ws));
+    const accepted = only(await CORPUS_EVALUATORS.accepted_cited_ratio(ctx(ws)));
+    const arxivOnly = only(await CORPUS_EVALUATORS.cited_arxiv_only_ratio(ctx(ws)));
     expect(accepted).toBeCloseTo(1 / 3, 5);
     expect(arxivOnly).toBeCloseTo(1 / 3, 5);
     expect(accepted + arxivOnly).toBeLessThan(1);
@@ -2089,16 +1371,26 @@ describe("corpus evaluators", () => {
 
   it("returns a zero ratio rather than NaN when nothing is cited", async () => {
     const ws = await workspace([{ id: "s1", citation_depth: "A" }], { "section-01.md": "No markers.\n" });
-    expect(await CORPUS_EVALUATORS.accepted_cited_ratio(ctx(ws))).toBe(0);
+    expect(only(await CORPUS_EVALUATORS.accepted_cited_ratio(ctx(ws)))).toBe(0);
+  });
+
+  it("emits one entry per taxonomy cell, never an aggregate minimum", async () => {
+    const ws = await workspace([
+      { id: "s1", citation_depth: "A", topics: ["memory"] },
+      { id: "s2", citation_depth: "A", topics: ["memory"] },
+      { id: "s3", citation_depth: "B", topics: ["planning"] },
+    ], {}, ["memory", "planning"]);
+    const values = await CORPUS_EVALUATORS.taxonomy_cell_ab_sources(ctx(ws));
+    // The previous design reported min(2, 1) = 1, which cannot tell a repair
+    // which cell is short.
+    expect(values.map((v) => `${v.scope_key}=${v.value}`).sort()).toEqual(["memory=2", "planning=1"]);
   });
 
   it("is reproducible across a year boundary because the as-of date is explicit", async () => {
     const ws = await workspace([{ id: "s1", citation_depth: "A", year: 2025 }],
       { "section-01.md": "[source:s1:p1]\n" });
-    const inYear = await CORPUS_EVALUATORS.cited_within_one_year_ratio({ workspaceDir: ws, asOfDate: "2026-06-01T00:00:00.000Z" });
-    const nextYear = await CORPUS_EVALUATORS.cited_within_one_year_ratio({ workspaceDir: ws, asOfDate: "2027-06-01T00:00:00.000Z" });
-    expect(inYear).toBe(1);
-    expect(nextYear).toBe(0);
+    expect(only(await CORPUS_EVALUATORS.cited_within_one_year_ratio({ workspaceDir: ws, asOfDate: "2026-06-01T00:00:00.000Z" }))).toBe(1);
+    expect(only(await CORPUS_EVALUATORS.cited_within_one_year_ratio({ workspaceDir: ws, asOfDate: "2027-06-01T00:00:00.000Z" }))).toBe(0);
   });
 });
 ```
@@ -2110,112 +1402,7 @@ Expected: FAIL — cannot resolve `evaluators/corpus.js`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-First export the canonical helpers from `src/lib/validation/research.ts` — change `citedSourceIds`, `isAcceptedSource`, `isArxivOnlySource` and `isWithinOneCalendarYear` to `export function`, and give `isWithinOneCalendarYear` an explicit `asOf: string` parameter so it stops reading the wall clock. Update its existing call sites to pass the release run's as-of date.
-
-Then create `packages/longwrite/src/lib/registry/evaluators/corpus.ts`:
-
-```ts
-import fs from "node:fs/promises";
-import path from "node:path";
-import {
-  citedSourceIds, isAcceptedSource, isArxivOnlySource, isWithinOneCalendarYear,
-} from "../../validation/research.js";
-import { sourceMatchesTaxonomy } from "../../research/taxonomy.js";
-import { loadProjectConfig } from "../../project-config.js";
-import type { ClassifiedSource } from "../../research/types.js";
-
-export type EvaluatorContext = { workspaceDir: string; asOfDate: string };
-export type EvaluatorFn = (ctx: EvaluatorContext) => Promise<number>;
-
-/** A required input is absent. This is `measurement_failed`, never a measured
- * zero: a zero is a claim about the corpus, and an absent corpus supports no
- * claim at all. */
-export class MeasurementUnavailable extends Error {
-  constructor(readonly dependency: string) {
-    super(`required input ${dependency} is unavailable; the measurement failed rather than measuring zero`);
-    this.name = "MeasurementUnavailable";
-  }
-}
-
-async function readSources(workspaceDir: string): Promise<ClassifiedSource[]> {
-  const rel = "sources/classified_sources.jsonl";
-  const raw = await fs.readFile(path.join(workspaceDir, rel), "utf-8").catch(() => null);
-  if (raw === null) throw new MeasurementUnavailable(rel);
-  return raw.split("\n").filter(Boolean).map((line, index) => {
-    try { return JSON.parse(line) as ClassifiedSource; }
-    catch { throw new Error(`malformed source record at ${rel}:${index + 1}`); }
-  });
-}
-
-async function readChapters(workspaceDir: string): Promise<Array<{ rel: string; content: string }>> {
-  const dir = path.join(workspaceDir, "chapters");
-  const names = await fs.readdir(dir).catch(() => null);
-  if (names === null) throw new MeasurementUnavailable("chapters/");
-  const chapters: Array<{ rel: string; content: string }> = [];
-  for (const name of names.sort()) {
-    if (!name.endsWith(".md")) continue;
-    chapters.push({ rel: `chapters/${name}`, content: await fs.readFile(path.join(dir, name), "utf-8") });
-  }
-  return chapters;
-}
-
-/** An empty denominator is 0, never NaN: a NaN fails schema validation and
- * would surface as a broken evaluator rather than as "nothing is cited yet". */
-function ratio(numerator: number, denominator: number): number {
-  return denominator === 0 ? 0 : numerator / denominator;
-}
-
-async function citedRecords(ctx: EvaluatorContext): Promise<ClassifiedSource[]> {
-  const sources = await readSources(ctx.workspaceDir);
-  const cited = citedSourceIds(await readChapters(ctx.workspaceDir));
-  return sources.filter((source) => cited.has(source.id));
-}
-
-export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
-  candidate_count: async (ctx) => (await readSources(ctx.workspaceDir)).length,
-
-  core_sources: async (ctx) => (await readSources(ctx.workspaceDir))
-    .filter((source) => source.citation_depth === "A" || source.citation_depth === "B").length,
-
-  recent_source_ratio: async (ctx) => {
-    const sources = await readSources(ctx.workspaceDir);
-    return ratio(sources.filter((source) => isWithinOneCalendarYear(source, ctx.asOfDate)).length, sources.length);
-  },
-
-  source_type_diversity_count: async (ctx) => {
-    const sources = await readSources(ctx.workspaceDir);
-    return new Set(sources.map((source) => source.source)).size;
-  },
-
-  cited_sources: async (ctx) => (await citedRecords(ctx)).length,
-
-  cited_within_one_year_ratio: async (ctx) => {
-    const cited = await citedRecords(ctx);
-    return ratio(cited.filter((source) => isWithinOneCalendarYear(source, ctx.asOfDate)).length, cited.length);
-  },
-
-  accepted_cited_ratio: async (ctx) => {
-    const cited = await citedRecords(ctx);
-    return ratio(cited.filter(isAcceptedSource).length, cited.length);
-  },
-
-  /** Deliberately the canonical arXiv-only rule, not `!isAcceptedSource`. A
-   * workshop page with no DOI and no arXiv id is neither. */
-  cited_arxiv_only_ratio: async (ctx) => {
-    const cited = await citedRecords(ctx);
-    return ratio(cited.filter(isArxivOnlySource).length, cited.length);
-  },
-
-  taxonomy_cell_ab_sources: async (ctx) => {
-    const config = await loadProjectConfig(ctx.workspaceDir).catch(() => { throw new MeasurementUnavailable("longwrite.yaml"); });
-    const cells = config.research.taxonomy;
-    if (cells.length === 0) return 0;
-    const sources = (await readSources(ctx.workspaceDir))
-      .filter((source) => source.citation_depth === "A" || source.citation_depth === "B");
-    return Math.min(...cells.map((cell) => sources.filter((source) => sourceMatchesTaxonomy(source, cell)).length));
-  },
-};
-```
+Export `citedSourceIds`, `isAcceptedSource`, `isArxivOnlySource` and `isWithinOneCalendarYear` from `src/lib/validation/research.ts`, changing the last to take `asOf: string` and updating its existing call sites to pass the run's date rather than reading the wall clock. Then create `evaluators/corpus.ts` implementing the formulas above, with `MeasurementUnavailable` for a missing required input, a throw for a malformed row, `ratio()` returning 0 on an empty denominator, and `taxonomy_cell_ab_sources` returning one `ScopedValue` per configured cell.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2225,36 +1412,87 @@ Expected: PASS, 8 tests.
 - [ ] **Step 5: Run the existing research validation suite**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- research`
-Expected: PASS. `isWithinOneCalendarYear` gained a parameter; update its call sites to pass the run's as-of date rather than reinstating the wall clock.
+Expected: PASS after updating `isWithinOneCalendarYear` call sites.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/longwrite/src/lib/validation/research.ts packages/longwrite/src/lib/registry/evaluators/corpus.ts packages/longwrite/tests/registry-evaluators-corpus.test.ts
-git commit -m "feat(registry): add corpus evaluators reusing the canonical citation and venue helpers"
+git commit -m "feat(registry): add scoped corpus evaluators reusing the canonical helpers"
 ```
 
 ---
 
-### Task 11: Evaluator registry and generated evaluator coverage
-
-The registry declares roughly twenty script metrics. Reporting an unimplemented one as "produced by its own measurement unit" is false and hides the gap.
+### Task 9: Manuscript and artifact evaluators
 
 **Files:**
-- Create: `packages/longwrite/src/lib/registry/evaluators/index.ts`
 - Create: `packages/longwrite/src/lib/registry/evaluators/manuscript.ts`
 - Create: `packages/longwrite/src/lib/registry/evaluators/artifacts.ts`
-- Test: `packages/longwrite/tests/registry-evaluator-coverage.test.ts`
+- Test: `packages/longwrite/tests/registry-evaluators-manuscript.test.ts`
 
 **Interfaces:**
-- Consumes: `CORPUS_EVALUATORS` (Task 10); `METRIC_REGISTRY` (Task 7).
-- Produces: `SCRIPT_EVALUATORS: Record<string, EvaluatorFn>` merging corpus, manuscript and artifact groups; `EVALUATOR_VERSION: string`.
-
-`manuscript.ts` implements `prose_redundancy`, `claim_contradictions`, `outline_readiness`, `citation_depth_per_section`, `landmark_coverage_ratio`, `landmark_citation_coverage_ratio`, `citations_per_page` by delegating to the existing checks in `src/lib/ops/` and `src/lib/research/`, returning their numeric results. `artifacts.ts` implements `figures`, `tables`, `comparative_tables`, `verified_metadata_plots`, `diagram_connectivity`, `empirical_trials` from `figures/manifest.json`, `figures/placement-plan.json` and `experiments/results.json`.
+- Consumes: `EvaluatorFn`, `MeasurementUnavailable` (Task 8); the existing checks in `src/lib/ops/` and `src/lib/research/`.
+- Produces: `MANUSCRIPT_EVALUATORS` covering `prose_redundancy`, `claim_contradictions`, `outline_readiness`, `citation_depth_per_section` (**one entry per section**), `landmark_coverage_ratio`, `landmark_citation_coverage_ratio`, `citations_per_page`, `citation_verification_status`, `latex_build_status`; `ARTIFACT_EVALUATORS` covering `figures`, `tables`, `comparative_tables`, `verified_metadata_plots`, `diagram_connectivity`, `empirical_trials`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/longwrite/tests/registry-evaluator-coverage.test.ts`:
+Create `packages/longwrite/tests/registry-evaluators-manuscript.test.ts` asserting at minimum:
+
+```ts
+it("emits one citation-depth entry per section, never an aggregate", async () => {
+  const ws = await workspaceWithSections({ "section-03.md": "[source:a:p1]\n", "section-06.md": "" });
+  const values = await MANUSCRIPT_EVALUATORS.citation_depth_per_section(ctx(ws));
+  // Aggregating hides which section is short, and lets a repair in one
+  // section appear to satisfy another.
+  expect(values.map((v) => v.scope_key).sort()).toEqual(["section-03", "section-06"]);
+});
+
+it("fails the measurement when a required build artifact is absent", async () => {
+  const ws = await workspaceWithoutPdf();
+  await expect(MANUSCRIPT_EVALUATORS.citations_per_page(ctx(ws))).rejects.toThrow(MeasurementUnavailable);
+});
+
+it("reports a boolean gate status as zero or one", async () => {
+  const ws = await workspaceWithBrokenLedger();
+  expect(only(await MANUSCRIPT_EVALUATORS.citation_verification_status(ctx(ws)))).toBe(0);
+});
+```
+
+plus one behavioural case per artifact evaluator.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluators-manuscript`
+Expected: FAIL — cannot resolve `evaluators/manuscript.js`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Implement both modules by delegating to the existing deterministic checks and returning their numeric results as `ScopedValue[]`. A section-scoped evaluator enumerates `chapters/*.md` and emits one entry per section id. A metric requiring a build artifact that is absent throws `MeasurementUnavailable` rather than returning zero.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluators-manuscript`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/longwrite/src/lib/registry/evaluators/ packages/longwrite/tests/registry-evaluators-manuscript.test.ts
+git commit -m "feat(registry): add scoped manuscript and artifact evaluators"
+```
+
+---
+
+### Task 10: Evaluator coverage
+
+**Files:**
+- Create: `packages/longwrite/src/lib/registry/evaluators/index.ts`
+- Test: `packages/longwrite/tests/registry-evaluator-coverage.test.ts`
+
+**Interfaces:**
+- Produces: `SCRIPT_EVALUATORS` merging all three groups; `EVALUATOR_VERSION`.
+
+- [ ] **Step 1: Write the test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -2264,17 +1502,17 @@ import { SCRIPT_EVALUATORS } from "../src/lib/registry/evaluators/index.js";
 describe("evaluator coverage", () => {
   it("registers exactly one evaluator for every script metric", () => {
     const missing = [...METRIC_REGISTRY.values()]
-      .filter((definition) => definition.measurement_kind === "script")
-      .filter((definition) => typeof SCRIPT_EVALUATORS[String(definition.metric)] !== "function")
-      .map((definition) => String(definition.metric)).sort();
+      .filter((d) => d.measurement_kind === "script")
+      .filter((d) => typeof SCRIPT_EVALUATORS[String(d.metric)] !== "function")
+      .map((d) => String(d.metric)).sort();
     expect(missing, `script metrics with no evaluator: ${missing.join(", ")}`).toEqual([]);
   });
 
   it("registers no evaluator for a model or external metric", () => {
     const extra = [...METRIC_REGISTRY.values()]
-      .filter((definition) => definition.measurement_kind !== "script")
-      .filter((definition) => typeof SCRIPT_EVALUATORS[String(definition.metric)] === "function")
-      .map((definition) => String(definition.metric)).sort();
+      .filter((d) => d.measurement_kind !== "script")
+      .filter((d) => typeof SCRIPT_EVALUATORS[String(d.metric)] === "function")
+      .map((d) => String(d.metric)).sort();
     expect(extra, `non-script metrics with a script evaluator: ${extra.join(", ")}`).toEqual([]);
   });
 
@@ -2283,70 +1521,36 @@ describe("evaluator coverage", () => {
       .filter((name) => ![...METRIC_REGISTRY.keys()].map(String).includes(name)).sort();
     expect(orphans, `evaluators with no registered metric: ${orphans.join(", ")}`).toEqual([]);
   });
-
-  it("declares producer, validator and reducer for every model metric", () => {
-    for (const definition of METRIC_REGISTRY.values()) {
-      if (definition.measurement_kind !== "model") continue;
-      expect(definition.producer).toBeTruthy();
-      expect(definition.validator).toBeTruthy();
-      expect(definition.reducer).toBeTruthy();
-    }
-  });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it, then implement until it passes**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluator-coverage`
-Expected: FAIL — cannot resolve `evaluators/index.js`, then FAIL listing the unimplemented script metrics.
+Expected: FAIL listing unimplemented script metrics, then PASS. If a metric turns out to need a build or a model, change its `measurement_kind` and tier in the registry rather than leaving it unimplemented — this test exists to force that decision to be explicit.
 
-- [ ] **Step 3: Write minimal implementation**
-
-Create the two evaluator groups, then `packages/longwrite/src/lib/registry/evaluators/index.ts`:
-
-```ts
-import { CORPUS_EVALUATORS, type EvaluatorFn } from "./corpus.js";
-import { MANUSCRIPT_EVALUATORS } from "./manuscript.js";
-import { ARTIFACT_EVALUATORS } from "./artifacts.js";
-
-/** Bump when any evaluator's formula changes. Prior observations must not be
- * reused across a semantic change to how a number is produced. */
-export const EVALUATOR_VERSION = "1";
-
-export const SCRIPT_EVALUATORS: Record<string, EvaluatorFn> = {
-  ...CORPUS_EVALUATORS, ...MANUSCRIPT_EVALUATORS, ...ARTIFACT_EVALUATORS,
-};
-export type { EvaluatorFn, EvaluatorContext } from "./corpus.js";
-export { MeasurementUnavailable } from "./corpus.js";
-```
-
-Iterate until the coverage test passes. If a script metric turns out to need a build or a model, change its `measurement_kind` and tier in the registry rather than leaving it unimplemented — the test exists to force that decision to be explicit.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluator-coverage`
-Expected: PASS, 4 tests.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add packages/longwrite/src/lib/registry/evaluators/ packages/longwrite/tests/registry-evaluator-coverage.test.ts
-git commit -m "feat(registry): implement every script evaluator and enforce evaluator coverage"
+git add packages/longwrite/src/lib/registry/evaluators/index.ts packages/longwrite/tests/registry-evaluator-coverage.test.ts
+git commit -m "feat(registry): enforce one evaluator per script metric"
 ```
 
 ---
 
-### Task 12: `longwrite metrics evaluate`
+## M5 — Envelope emission
+
+### Task 11: `longwrite metrics evaluate`
 
 **Files:**
 - Create: `packages/longwrite/src/lib/registry/evaluate.ts`
 - Modify: `packages/longwrite/src/commands/metrics.ts`
-- Modify: `packages/longwrite/src/cli.ts` (register under the existing `metrics` group)
+- Modify: `packages/longwrite/src/cli.ts`
 - Test: `packages/longwrite/tests/registry-evaluate.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 7, 8, 10, 11.
-- Produces: `evaluateMetrics(workspaceDir, options): Promise<EvaluationResult>` where `options = { metrics?: MetricId[]; tier?: "unit" | "round" | "release"; asOfDate: string; modelConfig?: Record<string, unknown> }` and `EvaluationResult = { measured: Observation[]; reused: Observation[]; deferred: string[]; failed: Array<{ metric: string; reason: string }> }`; `runMetricsEvaluate(workspaceDir, options)`.
+- Consumes: Tasks 5–10.
+- Produces: `buildEnvelope(workspaceDir, options): Promise<MeasurementEnvelope>` with `options = { metrics?: MetricId[]; tier?: "unit"|"round"|"release"; asOfDate: string; modelConfig?: Record<string, unknown> }`; `runMetricsEvaluate(workspaceDir, options)` writing `reports/measurements.json`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2358,90 +1562,71 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { metricId } from "../src/lib/registry/ids.js";
-import { evaluateMetrics } from "../src/lib/registry/evaluate.js";
-import { currentObservation, computeInputDigest, evaluatorDigest, STORE } from "../src/lib/registry/observations.js";
-import { metricDefinition } from "../src/lib/registry/metrics.js";
-import { EVALUATOR_VERSION } from "../src/lib/registry/evaluators/index.js";
+import { buildEnvelope } from "../src/lib/registry/evaluate.js";
+import { MeasurementEnvelopeSchema } from "../src/lib/registry/records.js";
 
 const roots: string[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
 });
 const AS_OF = "2026-09-01T00:00:00.000Z";
-
-async function workspace(): Promise<string> {
-  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-evaluate-"));
-  roots.push(ws);
-  await fs.mkdir(path.join(ws, "sources"), { recursive: true });
-  await fs.mkdir(path.join(ws, "chapters"), { recursive: true });
-  await fs.writeFile(path.join(ws, "chapters", "section-01.md"), "text\n", "utf-8");
-  await fs.writeFile(path.join(ws, "longwrite.yaml"), "version: 1\n", "utf-8");
-  await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"),
-    [{ id: "s1", citation_depth: "A" }, { id: "s2", citation_depth: "B" }]
-      .map((s) => JSON.stringify(s)).join("\n"), "utf-8");
-  return ws;
-}
+// workspace() as in the corpus evaluator tests.
 
 describe("metrics evaluate", () => {
-  it("measures a requested metric and stores the observation", async () => {
+  it("emits a schema-valid envelope", async () => {
     const ws = await workspace();
-    const result = await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    expect(result.measured).toHaveLength(1);
-    expect(result.measured[0].value).toBe(2);
-    const definition = metricDefinition(metricId("core_sources"));
-    const current = await currentObservation(ws, STORE, metricId("core_sources"),
-      await computeInputDigest(ws, definition), evaluatorDigest(definition.evaluator, EVALUATOR_VERSION));
-    expect(current?.value).toBe(2);
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
+    expect(MeasurementEnvelopeSchema.safeParse(envelope).success).toBe(true);
+    expect(envelope.measurements[0].value).toBe(2);
   });
 
-  it("reuses an unchanged observation instead of re-measuring", async () => {
+  it("never writes to the observation store", async () => {
     const ws = await workspace();
-    await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    const second = await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    expect(second.measured).toHaveLength(0);
-    expect(second.reused).toHaveLength(1);
+    await buildEnvelope(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
+    // The kernel owns storage and sequencing; MrMaLiang emits and stops.
+    await expect(fs.access(path.join(ws, ".malaclaw"))).rejects.toThrow();
   });
 
-  it("re-measures once a declared dependency changes", async () => {
+  it("emits no sequence, because the kernel allocates them", async () => {
     const ws = await workspace();
-    await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    await fs.appendFile(path.join(ws, "sources", "classified_sources.jsonl"),
-      `\n${JSON.stringify({ id: "s3", citation_depth: "A" })}`, "utf-8");
-    const third = await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    expect(third.measured).toHaveLength(1);
-    expect(third.measured[0].value).toBe(3);
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
+    expect("sequence" in envelope.measurements[0]).toBe(false);
   });
 
-  it("defers a model metric to its own measurement unit", async () => {
-    const ws = await workspace();
-    const result = await evaluateMetrics(ws, { metrics: [metricId("review_score")], asOfDate: AS_OF });
-    expect(result.deferred).toContain("review_score");
-    expect(result.failed).toEqual([]);
+  it("emits one entry per scope for a scoped metric", async () => {
+    const ws = await workspace(undefined, undefined, ["memory", "planning"]);
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("taxonomy_cell_ab_sources")], asOfDate: AS_OF });
+    expect(envelope.measurements.map((m) => m.scope_key).sort()).toEqual(["memory", "planning"]);
   });
 
-  it("reports an unavailable required input as failed, never as deferred", async () => {
-    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-evaluate-bare-"));
-    roots.push(ws);
-    const result = await evaluateMetrics(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
-    expect(result.deferred).toEqual([]);
-    expect(result.failed[0].metric).toBe("core_sources");
-    expect(result.failed[0].reason).toMatch(/unavailable/);
+  it("marks a model metric deferred, not failed", async () => {
+    const ws = await workspace();
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("review_score")], asOfDate: AS_OF });
+    expect(envelope.measurements[0].status).toBe("deferred");
+  });
+
+  it("marks an unavailable required input failed, with a reason", async () => {
+    const bare = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-evaluate-bare-"));
+    roots.push(bare);
+    const envelope = await buildEnvelope(bare, { metrics: [metricId("core_sources")], asOfDate: AS_OF });
+    expect(envelope.measurements[0].status).toBe("unavailable");
+    expect(envelope.measurements[0].reason).toMatch(/unavailable/);
+  });
+
+  it("reports an unimplemented script evaluator as unavailable, never deferred", async () => {
+    // "Produced by its own measurement unit" is false for a missing evaluator
+    // and would hide the gap.
+    const ws = await workspace();
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("core_sources")], asOfDate: AS_OF, forceMissingEvaluator: true });
+    expect(envelope.measurements[0].status).toBe("unavailable");
   });
 
   it("selects only the metrics on the requested tier", async () => {
     const ws = await workspace();
-    const result = await evaluateMetrics(ws, { tier: "release", asOfDate: AS_OF });
-    expect(result.measured).toHaveLength(0);
-    expect(result.deferred.sort()).toEqual(["claim_support", "rendered_visual_review", "review_score"]);
-  });
-
-  it("allocates a distinct sequence per measured observation", async () => {
-    const ws = await workspace();
-    const result = await evaluateMetrics(ws, {
-      metrics: [metricId("core_sources"), metricId("candidate_count")], asOfDate: AS_OF,
-    });
-    const sequences = result.measured.map((observation) => observation.sequence);
-    expect(new Set(sequences).size).toBe(sequences.length);
+    const envelope = await buildEnvelope(ws, { tier: "release", asOfDate: AS_OF });
+    expect(envelope.measurements.map((m) => String(m.metric)).sort())
+      .toEqual(["claim_support", "rendered_visual_review", "review_score"]);
+    expect(envelope.measurements.every((m) => m.status === "deferred")).toBe(true);
   });
 });
 ```
@@ -2453,117 +1638,12 @@ Expected: FAIL — cannot resolve `evaluate.js`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `packages/longwrite/src/lib/registry/evaluate.ts`:
-
-```ts
-import { METRIC_REGISTRY, metricDefinition } from "./metrics.js";
-import {
-  STORE, appendObservation, computeInputDigest, currentObservation, evaluatorDigest, reserveSequence,
-} from "./observations.js";
-import { ObservationSchema, type Observation } from "./records.js";
-import { EVALUATOR_VERSION, SCRIPT_EVALUATORS, MeasurementUnavailable } from "./evaluators/index.js";
-import type { MetricId } from "./ids.js";
-
-export type EvaluationResult = {
-  measured: Observation[];
-  reused: Observation[];
-  /** Model or external pipelines, produced by their own measurement unit. */
-  deferred: string[];
-  /** A required input was unavailable, or the evaluator threw. */
-  failed: Array<{ metric: string; reason: string }>;
-};
-
-export async function evaluateMetrics(
-  workspaceDir: string,
-  options: {
-    metrics?: MetricId[];
-    tier?: "unit" | "round" | "release";
-    asOfDate: string;
-    modelConfig?: Record<string, unknown>;
-  },
-): Promise<EvaluationResult> {
-  const selected = options.metrics
-    ?? [...METRIC_REGISTRY.values()]
-      .filter((definition) => !options.tier || definition.measurement_tier === options.tier)
-      .map((definition) => definition.metric);
-
-  const result: EvaluationResult = { measured: [], reused: [], deferred: [], failed: [] };
-
-  for (const metric of selected) {
-    const definition = metricDefinition(metric);
-    if (definition.measurement_kind !== "script") {
-      // Genuinely produced elsewhere. Distinct from an unimplemented evaluator,
-      // which must never be reported as an expected deferral.
-      result.deferred.push(String(metric));
-      continue;
-    }
-    const evaluator = SCRIPT_EVALUATORS[String(metric)];
-    if (!evaluator) {
-      result.failed.push({ metric: String(metric), reason: "no script evaluator is registered for this metric" });
-      continue;
-    }
-
-    const extra = definition.measurement_kind === "script"
-      ? { as_of_date: options.asOfDate }
-      : { as_of_date: options.asOfDate, model: options.modelConfig ?? null };
-    const inputDigest = await computeInputDigest(workspaceDir, definition, extra);
-    const digest = evaluatorDigest(definition.evaluator, EVALUATOR_VERSION);
-    const hit = await currentObservation(workspaceDir, STORE, metric, inputDigest, digest);
-    if (hit) { result.reused.push(hit); continue; }
-
-    let value: number;
-    try {
-      value = await evaluator({ workspaceDir, asOfDate: options.asOfDate });
-    } catch (error) {
-      const reason = error instanceof MeasurementUnavailable
-        ? error.message
-        : `evaluator threw: ${error instanceof Error ? error.message : String(error)}`;
-      result.failed.push({ metric: String(metric), reason });
-      continue;
-    }
-
-    const observation = ObservationSchema.parse({
-      metric: String(metric), value,
-      evaluator: definition.evaluator, evaluator_digest: digest, input_digest: inputDigest,
-      sequence: await reserveSequence(workspaceDir, STORE),
-      measured_at: new Date().toISOString(),
-    });
-    await appendObservation(workspaceDir, STORE, observation);
-    result.measured.push(observation);
-  }
-  return result;
-}
-```
-
-Add to `packages/longwrite/src/commands/metrics.ts`:
-
-```ts
-import { evaluateMetrics } from "../lib/registry/evaluate.js";
-
-export async function runMetricsEvaluate(
-  workspaceDir: string,
-  options: { tier?: "unit" | "round" | "release"; asOf?: string },
-): Promise<void> {
-  const resolved = path.resolve(workspaceDir);
-  const result = await evaluateMetrics(resolved, {
-    tier: options.tier,
-    asOfDate: options.asOf ?? new Date().toISOString(),
-  });
-  console.log(`Measured ${result.measured.length}, reused ${result.reused.length}, deferred ${result.deferred.length}, failed ${result.failed.length}`);
-  for (const observation of result.measured) console.log(`  = ${observation.metric}: ${observation.value}`);
-  for (const observation of result.reused) console.log(`  ~ ${observation.metric}: ${observation.value} (unchanged)`);
-  for (const metric of result.deferred) console.log(`  . ${metric}: produced by its own measurement unit`);
-  for (const failure of result.failed) console.log(`  ! ${failure.metric}: ${failure.reason}`);
-  if (result.failed.length > 0) process.exitCode = 1;
-}
-```
-
-Register in `src/cli.ts` under the existing `metrics` group:
+Create `evaluate.ts` producing one `MeasurementEntry` per `ScopedValue`, with `status: "deferred"` for a non-script `measurement_kind`, `status: "unavailable"` plus a `reason` for a `MeasurementUnavailable` or a missing evaluator, and the compiled `target`/`operator`/`tolerance`/`direction` from the metric registry and project config. Add `runMetricsEvaluate` writing `reports/measurements.json`, and register:
 
 ```ts
 metrics
   .command("evaluate <workspace>")
-  .description("Measure acceptance metrics and append immutable observations")
+  .description("Measure metrics and write reports/measurements.json for the engine to ingest")
   .option("--tier <tier>", "only measure metrics on this tier (unit, round, release)")
   .option("--as-of <iso>", "evaluation date for time-dependent metrics (defaults to now)")
   .action(async (workspace, options) => {
@@ -2575,7 +1655,7 @@ metrics
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluate`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Build and run the full suite**
 
@@ -2586,65 +1666,44 @@ Expected: build succeeds, all tests pass.
 
 ```bash
 git add packages/longwrite/src/lib/registry/evaluate.ts packages/longwrite/src/commands/metrics.ts packages/longwrite/src/cli.ts packages/longwrite/tests/registry-evaluate.test.ts
-git commit -m "feat(cli): add longwrite metrics evaluate with digest reuse and typed measurement failure"
+git commit -m "feat(cli): emit a measurement envelope for the engine to ingest"
 ```
 
 ---
 
-### Task 13: Migrate the figures validator to structured output
+## M6 — Producer migration
 
-All six checks in the module migrate together — a half-migrated module cannot be typed coherently.
+Six tasks, one per producer group. Each converts that module's checks to return `StructuredCheck`, extends its probe fixture so Task 4's execution-based coverage becomes meaningful for it, and updates every caller that read findings as `string[]` to read `.diagnostic` **for display only**.
+
+### Task 12: Figures
 
 **Files:**
 - Modify: `packages/longwrite/src/lib/validation/figures.ts` (export and convert all six checks)
-- Modify: `packages/longwrite/src/lib/validation/research.ts` (adapt the caller that flattens figure findings)
-- Modify: `packages/longwrite/src/commands/validate.ts` (render `.diagnostic` for display)
-- Modify: `packages/longwrite/tests/figures.test.ts` (assert on `.diagnostic`)
-- Test: `packages/longwrite/tests/figures-structured-findings.test.ts`
+- Modify: `packages/longwrite/tests/figures.test.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/figures/`
+- Test: `packages/longwrite/tests/figures-structured.test.ts`
 
-**Interfaces:**
-- Consumes: `FindingSchema`, `StructuredCheck` (Task 6); `resolveCapability` (Task 4).
-- Produces: `checkManuscriptReferences` becomes **exported** and returns `StructuredCheck`; the other five checks in the module likewise; `validateFigureWorkspace` returns `{ pass: boolean; checks: StructuredCheck[] }`.
+`checkManuscriptReferences` is currently **not exported** (`figures.ts:229`); export it. Its findings name `figures/placement-plan.json` as the producing surface with the generated TeX path in `location`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/longwrite/tests/figures-structured-findings.test.ts`:
+Create `packages/longwrite/tests/figures-structured.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { checkManuscriptReferences } from "../src/lib/validation/figures.js";
-import { resolveCapability } from "../src/lib/registry/routing.js";
+import { checkManuscriptReferences, validateFigureWorkspace } from "../src/lib/validation/figures.js";
 import { FindingSchema } from "../src/lib/registry/records.js";
+import { REGISTRY } from "../src/lib/registry/producers.js";
 
-const roots: string[] = [];
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
-});
+// workspace() builds a manifest whose figure-1 is neither labeled nor embedded.
 
-async function workspace(): Promise<string> {
-  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-figures-structured-"));
-  roots.push(ws);
-  await fs.mkdir(path.join(ws, "paper", "sections"), { recursive: true });
-  await fs.mkdir(path.join(ws, "figures"), { recursive: true });
-  await fs.writeFile(path.join(ws, "paper", "main.tex"), "\\documentclass{article}\n", "utf-8");
-  await fs.writeFile(path.join(ws, "paper", "sections", "section-03.tex"), "Some prose.\n", "utf-8");
-  await fs.writeFile(path.join(ws, "figures", "manifest.json"), JSON.stringify({
-    version: 1,
-    figures: [{ id: "figure-1", latex_path: "paper/figures/figure-1.tex", placement: { section_id: "section-03" } }],
-    tables: [],
-  }), "utf-8");
-  await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({ version: 1, placements: [] }), "utf-8");
-  return ws;
-}
-
-describe("figures validator structured findings", () => {
+describe("figures structured output", () => {
   it("is exported and emits schema-valid findings", async () => {
     const check = await checkManuscriptReferences(await workspace());
     expect(check.pass).toBe(false);
-    expect(check.findings.length).toBeGreaterThan(0);
     for (const finding of check.findings) expect(FindingSchema.safeParse(finding).success).toBe(true);
   });
 
@@ -2654,20 +1713,22 @@ describe("figures validator structured findings", () => {
     expect(finding?.artifact.kind).toBe("figure_spec");
     expect(finding?.artifact.path).toBe("figures/placement-plan.json");
     expect(finding?.artifact.artifact_id).toBe("figure-1");
-  });
-
-  it("carries the generated TeX location in `location`", async () => {
-    const check = await checkManuscriptReferences(await workspace());
-    const finding = check.findings.find((f) => f.required_effect === "repair_artifact_placement");
     expect(finding?.location).toContain("paper/sections/section-03.tex");
   });
 
   it("emits findings that all resolve to a capability", async () => {
-    const check = await checkManuscriptReferences(await workspace());
-    for (const finding of check.findings) {
-      expect(() => resolveCapability({
+    for (const finding of (await checkManuscriptReferences(await workspace())).findings) {
+      expect(() => REGISTRY.resolveCapability({
         gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
       })).not.toThrow();
+    }
+  });
+
+  it("converts every check in the module, not only one", async () => {
+    const report = await validateFigureWorkspace(await workspace());
+    for (const check of report.checks) {
+      expect(Array.isArray(check.findings)).toBe(true);
+      for (const finding of check.findings) expect(typeof finding).toBe("object");
     }
   });
 
@@ -2680,81 +1741,40 @@ describe("figures validator structured findings", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npm test --workspace @mr-maliang/longwrite -- figures-structured-findings`
-Expected: FAIL — `checkManuscriptReferences` is not exported (`figures.ts:229`).
+Run: `npm test --workspace @mr-maliang/longwrite -- figures-structured`
+Expected: FAIL — `checkManuscriptReferences` is not exported.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Convert the module**
 
-In `src/lib/validation/figures.ts`: export all six check functions, and convert each to return `StructuredCheck`. For `checkManuscriptReferences`, replace each string push with a structured finding whose artifact is the **producing surface**:
+Export all six checks and return `StructuredCheck` from each, replacing every string push with a `FindingSchema.parse(...)` whose `diagnostic` is the original message. Type `validateFigureWorkspace`'s `checks` as `StructuredCheck[]`. Extend the probe fixture so each of the module's six gates fails.
 
-```ts
-import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
-import { gateId } from "../registry/ids.js";
+- [ ] **Step 4: Run the figures and coverage suites**
 
-const FIGURE_REFERENCES = gateId("figure_references");
-const PLACEMENT_PLAN = "figures/placement-plan.json";
+Run: `npm test --workspace @mr-maliang/longwrite -- figures routing-coverage`
+Expected: PASS. Update `tests/figures.test.ts` assertions that read finding strings to read `.diagnostic`; never weaken an assertion to make it pass.
 
-/** A defect in generated TeX names the artifact that PRODUCES the TeX, with the
- * generated location carried in `location`. Naming the .tex path with kind
- * figure_spec is rejected by FindingSchema: the kind must match the path. */
-function placementFinding(
-  artifactId: string, generatedPath: string,
-  effect: "repair_artifact_placement" | "repair_artifact_content", diagnostic: string,
-): Finding {
-  return FindingSchema.parse({
-    id: `${artifactId}-${effect}`,
-    gate_id: FIGURE_REFERENCES,
-    artifact: { kind: "figure_spec", path: PLACEMENT_PLAN, artifact_id: artifactId },
-    location: `generated at ${generatedPath}`,
-    required_effect: effect,
-    severity: "major",
-    diagnostic,
-  });
-}
-```
-
-Inside `embedded()`, replace each `findings.push("figure_references: …")` with the matching `placementFinding(...)` call, keeping the original message as `diagnostic`. Return:
-
-```ts
-return { id: FIGURE_REFERENCES, pass: findings.length === 0, observations: [], findings } satisfies StructuredCheck;
-```
-
-Convert the other five checks the same way, then type `validateFigureWorkspace`'s `checks` array as `StructuredCheck[]`. Finally update the two consumers: in `src/lib/validation/research.ts` and `src/commands/validate.ts`, replace any use of a check's findings as `string[]` with `check.findings.map((finding) => finding.diagnostic)` **for display only**.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- figures-structured-findings`
-Expected: PASS, 5 tests.
-
-- [ ] **Step 5: Run the figures and validation suites**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- figures validate research`
-Expected: PASS. Update assertions that read finding strings to read `.diagnostic`. Never weaken an assertion to make it pass.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add packages/longwrite/src/lib/validation/figures.ts packages/longwrite/src/lib/validation/research.ts packages/longwrite/src/commands/validate.ts packages/longwrite/tests/figures.test.ts packages/longwrite/tests/figures-structured-findings.test.ts
-git commit -m "feat(validation): emit structured findings naming the producing surface from the figures gates"
+git add packages/longwrite/src/lib/validation/figures.ts packages/longwrite/tests/figures.test.ts packages/longwrite/tests/figures-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/figures/
+git commit -m "feat(validation): convert the figures producer to structured findings"
 ```
 
 ---
 
-### Task 14: Emit observations from the corpus gates
+### Task 13: Corpus gates
 
 **Files:**
 - Modify: `packages/longwrite/src/lib/research/corpus-gates.ts`
-- Test: `packages/longwrite/tests/corpus-gates-observations.test.ts`
+- Modify: `packages/longwrite/tests/corpus-gates.test.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/corpus-gates/`
+- Test: `packages/longwrite/tests/corpus-gates-structured.test.ts`
 
-**Interfaces:**
-- Consumes: `ObservationSchema` (Task 6); `metricDefinition` (Task 7); `computeInputDigest`, `evaluatorDigest`, `reserveSequence` (Task 8); `CORPUS_EVALUATORS` (Task 10).
-- Produces: `evaluateCorpusGates(workspaceDir, options: { asOfDate: string })` gains `observations: Observation[]` on its report.
-
-Gate ids map to registered metrics: `total_candidates` observes `candidate_count`; `core_sources` observes `core_sources`; `freshness` observes `recent_source_ratio`; `source_type_diversity` observes `source_type_diversity_count`. Each gate calls the shared evaluator once and uses its value for both the pass decision and the observation, so the two can never disagree.
+Gate-to-metric mapping: `total_candidates → candidate_count`, `core_sources → core_sources`, `freshness → recent_source_ratio`, `source_type_diversity → source_type_diversity_count`, `taxonomy:<cell> → taxonomy_cell_ab_sources` scoped to that cell.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/longwrite/tests/corpus-gates-observations.test.ts`:
+Create `packages/longwrite/tests/corpus-gates-structured.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it } from "vitest";
@@ -2763,238 +1783,597 @@ import os from "node:os";
 import path from "node:path";
 import { stringify } from "yaml";
 import { evaluateCorpusGates } from "../src/lib/research/corpus-gates.js";
-import { ObservationSchema } from "../src/lib/registry/records.js";
+import { MeasurementEntrySchema } from "../src/lib/registry/records.js";
 import { METRIC_REGISTRY } from "../src/lib/registry/metrics.js";
 import { metricId } from "../src/lib/registry/ids.js";
 
 const roots: string[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
 });
 const AS_OF = "2026-09-01T00:00:00.000Z";
 
 async function workspace(): Promise<string> {
-  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-corpus-obs-"));
+  const ws = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-corpus-structured-"));
   roots.push(ws);
   await fs.mkdir(path.join(ws, "sources"), { recursive: true });
   await fs.writeFile(path.join(ws, "longwrite.yaml"), stringify({
-    version: 1,
-    project: { id: "s", artifact_type: "research_paper", mode: "auto_research_agentic" },
+    version: 1, project: { id: "s", artifact_type: "research_paper", mode: "auto_research_agentic" },
     research: {
-      provider: "multi", topic: "agent memory", taxonomy: ["memory"],
+      provider: "multi", topic: "agent memory", taxonomy: ["memory", "planning"],
       corpus_gates: {
-        min_candidates: 1, min_sources_per_taxonomy_cell: 0, min_core_sources: 5,
+        min_candidates: 1, min_sources_per_taxonomy_cell: 2, min_core_sources: 5,
         min_recent_ratio: 0, min_source_type_diversity: 1,
       },
     },
   }), "utf-8");
   await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"),
     [{ id: "s1", citation_depth: "A", source: "arxiv", topics: ["memory"] },
-     { id: "s2", citation_depth: "B", source: "arxiv", topics: ["memory"] }]
+     { id: "s2", citation_depth: "B", source: "arxiv", topics: ["memory"] },
+     { id: "s3", citation_depth: "B", source: "arxiv", topics: ["planning"] }]
       .map((s) => JSON.stringify(s)).join("\n"), "utf-8");
   return ws;
 }
 
-describe("corpus gate observations", () => {
-  it("emits observations only for registered metrics", async () => {
+describe("corpus gate structured output", () => {
+  it("emits entries only for registered metrics", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    expect(report.observations.length).toBeGreaterThan(0);
-    for (const observation of report.observations) {
-      expect(ObservationSchema.safeParse(observation).success).toBe(true);
-      expect(METRIC_REGISTRY.has(metricId(observation.metric)), `${observation.metric} unregistered`).toBe(true);
+    expect(report.measurements.length).toBeGreaterThan(0);
+    for (const entry of report.measurements) {
+      expect(MeasurementEntrySchema.safeParse(entry).success).toBe(true);
+      expect(METRIC_REGISTRY.has(metricId(entry.metric)), `${entry.metric} unregistered`).toBe(true);
     }
   });
 
-  it("maps the core_sources gate to its metric with value and target", async () => {
+  it("maps the core_sources gate to its metric with value, target and operator", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    const core = report.observations.find((o) => o.metric === "core_sources");
-    expect(core?.value).toBe(2);
+    const core = report.measurements.find((entry) => entry.metric === "core_sources");
+    expect(core?.value).toBe(3);
     expect(core?.target).toBe(5);
     expect(core?.operator).toBe("at_least");
   });
 
   it("maps the total_candidates gate to candidate_count", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    expect(report.observations.find((o) => o.metric === "candidate_count")?.value).toBe(2);
+    expect(report.measurements.find((entry) => entry.metric === "candidate_count")?.value).toBe(3);
   });
 
-  it("allocates a distinct sequence per observation", async () => {
+  it("emits one taxonomy entry per cell, never an aggregate", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    const sequences = report.observations.map((o) => o.sequence);
-    expect(new Set(sequences).size).toBe(sequences.length);
+    const cells = report.measurements.filter((entry) => entry.metric === "taxonomy_cell_ab_sources");
+    expect(cells.map((entry) => `${entry.scope_key}=${entry.value}`).sort())
+      .toEqual(["memory=2", "planning=1"]);
+  });
+
+  it("emits no sequence, because the kernel allocates them", async () => {
+    const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
+    for (const entry of report.measurements) expect("sequence" in entry).toBe(false);
   });
 
   it("agrees with the gate decision because both read one evaluator result", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    const core = report.observations.find((o) => o.metric === "core_sources")!;
-    const finding = report.findings.find((f) => f.id === "core_sources")!;
-    expect(finding.pass).toBe(core.value >= (core.target ?? 0));
-    expect(finding.detail).toContain("required 5");
+    const core = report.measurements.find((entry) => entry.metric === "core_sources")!;
+    const finding = report.findings.find((entry) => entry.id === "core_sources")!;
+    expect(finding.pass).toBe(core.value! >= core.target!);
+  });
+
+  it("keeps the existing prose detail for operators", async () => {
+    const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
+    expect(report.findings.find((entry) => entry.id === "core_sources")?.detail).toContain("required 5");
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npm test --workspace @mr-maliang/longwrite -- corpus-gates-observations`
-Expected: FAIL — `evaluateCorpusGates` takes no options and returns no `observations`.
+Run: `npm test --workspace @mr-maliang/longwrite -- corpus-gates-structured`
+Expected: FAIL — `evaluateCorpusGates` takes no options and returns no `measurements`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Convert the module**
 
-In `src/lib/research/corpus-gates.ts`, add an observation helper and thread an `asOfDate` through:
+Give `evaluateCorpusGates` a second parameter `{ asOfDate: string }`. For each numeric gate, call the matching evaluator from `CORPUS_EVALUATORS` **once** and use its `ScopedValue[]` for both the `pass` decision and the emitted entries, so the two can never disagree. Build each entry with `MeasurementEntrySchema.parse`, taking `target` and `operator` from `config.research.corpus_gates` and `tolerance`/`direction` from `metricDefinition`. Add `measurements: MeasurementEntry[]` to `CorpusGateReport`. Leave every existing `detail` string exactly as it is.
 
-```ts
-import { ObservationSchema, type Observation } from "../registry/records.js";
-import { metricDefinition } from "../registry/metrics.js";
-import { computeInputDigest, evaluatorDigest, reserveSequence, STORE } from "../registry/observations.js";
-import { EVALUATOR_VERSION } from "../registry/evaluators/index.js";
-import { metricId } from "../registry/ids.js";
+- [ ] **Step 4: Update callers and the probe fixture**
 
-async function observe(
-  workspaceDir: string, asOfDate: string, metric: string,
-  value: number, target: number, operator: "at_least" | "at_most",
-): Promise<Observation> {
-  const definition = metricDefinition(metricId(metric));
-  return ObservationSchema.parse({
-    metric, value, target, operator,
-    evaluator: definition.evaluator,
-    evaluator_digest: evaluatorDigest(definition.evaluator, EVALUATOR_VERSION),
-    input_digest: await computeInputDigest(workspaceDir, definition, { as_of_date: asOfDate }),
-    sequence: await reserveSequence(workspaceDir, STORE),
-    measured_at: new Date().toISOString(),
-  });
-}
-```
+Pass the run's as-of date from every `evaluateCorpusGates` and `writeCorpusGateReport` call site. Extend `tests/fixtures/producer-probe/corpus-gates/` so all five gates fail.
 
-Compute each gate's value by calling the shared evaluator from `CORPUS_EVALUATORS` once, use that value for both the `pass` decision and the observation, and collect the observations into the returned report. Add `observations: Observation[]` to `CorpusGateReport`. Leave every existing `detail` string exactly as it is: prose stays, it just stops being the only representation. Update the callers of `evaluateCorpusGates` and `writeCorpusGateReport` to pass the run's as-of date.
+- [ ] **Step 5: Run the corpus and coverage suites**
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- corpus-gates-observations`
-Expected: PASS, 5 tests.
-
-- [ ] **Step 5: Run the existing corpus-gates suite**
-
-Run: `npm test --workspace @mr-maliang/longwrite -- corpus-gates`
-Expected: PASS — the additions are additive apart from the new required option.
+Run: `npm test --workspace @mr-maliang/longwrite -- corpus-gates routing-coverage`
+Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/longwrite/src/lib/research/corpus-gates.ts packages/longwrite/tests/corpus-gates-observations.test.ts
-git commit -m "feat(research): emit registered metric observations from the corpus gates"
+git add packages/longwrite/src/lib/research/corpus-gates.ts packages/longwrite/tests/corpus-gates.test.ts packages/longwrite/tests/corpus-gates-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/corpus-gates/
+git commit -m "feat(research): emit registered scoped measurements from the corpus gates"
 ```
 
 ---
 
-### Task 15: Full verification and documentation
+### Task 14: Research validator
+
+**Files:**
+- Modify: `packages/longwrite/src/lib/validation/research.ts`
+- Modify: `packages/longwrite/src/commands/validate.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/research/`
+- Test: `packages/longwrite/tests/research-structured.test.ts`
+
+The largest producer, and the one whose routes changed most.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/research-structured.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { validateResearchWorkspace } from "../src/lib/validation/research.js";
+import { FindingSchema } from "../src/lib/registry/records.js";
+import { REGISTRY } from "../src/lib/registry/producers.js";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
+});
+// workspace(overrides) builds a research workspace whose specific defect is
+// chosen per test: a dead citation URL, an under-length manuscript, and so on.
+
+const findingsFor = async (ws: string, gate: string) =>
+  (await validateResearchWorkspace(ws)).checks.find((check) => check.id === gate)?.findings ?? [];
+
+describe("research validator structured output", () => {
+  it("emits schema-valid findings from every check", async () => {
+    const report = await validateResearchWorkspace(await workspace({ brokenEverything: true }));
+    for (const check of report.checks) {
+      for (const finding of check.findings) expect(FindingSchema.safeParse(finding).success).toBe(true);
+    }
+  });
+
+  it("routes a dead citation URL to source-record metadata, not prose", async () => {
+    const findings = await findingsFor(await workspace({ deadUrl: true }), "citation_verification");
+    const metadata = findings.find((f) => f.artifact.kind === "source_record");
+    expect(metadata?.required_effect).toBe("repair_source_metadata");
+  });
+
+  it("routes an unresolved bibliography entry to bibliography repair", async () => {
+    const findings = await findingsFor(await workspace({ danglingBibEntry: true }), "citation_verification");
+    expect(findings.some((f) => f.artifact.kind === "bibliography"
+      && f.required_effect === "repair_bibliography_consistency")).toBe(true);
+  });
+
+  it("asks to expand an under-length manuscript rather than trim it", async () => {
+    // The previous table offered only remove_redundant_prose, leaving an
+    // under-length manuscript unrepairable.
+    const findings = await findingsFor(await workspace({ words: 500, targetWords: 5_000 }), "target_length");
+    expect(findings[0].required_effect).toBe("expand_argument");
+  });
+
+  it("asks to trim an over-length manuscript", async () => {
+    const findings = await findingsFor(await workspace({ words: 9_000, targetWords: 5_000 }), "target_length");
+    expect(findings[0].required_effect).toBe("remove_redundant_prose");
+  });
+
+  it("routes missing research artifacts to evidence acquisition, not a figure spec", async () => {
+    const findings = await findingsFor(await workspace({ noArtifacts: true }), "research_artifacts_present");
+    expect(findings[0].artifact.kind).toBe("evidence_packet");
+    expect(findings[0].required_effect).toBe("acquire_additional_evidence");
+  });
+
+  it("emits findings that all resolve to a capability", async () => {
+    const report = await validateResearchWorkspace(await workspace({ brokenEverything: true }));
+    for (const check of report.checks) {
+      for (const finding of check.findings) {
+        expect(() => REGISTRY.resolveCapability({
+          gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+        }), finding.id).not.toThrow();
+      }
+    }
+  });
+
+  it("no longer emits review_no_regressions", async () => {
+    const report = await validateResearchWorkspace(await workspace({ brokenEverything: true }));
+    expect(report.checks.map((check) => String(check.id))).not.toContain("review_no_regressions");
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- research-structured`
+Expected: FAIL — checks return `findings: string[]`.
+
+- [ ] **Step 3: Convert the module**
+
+Return `StructuredCheck` from every check. `citation_verification` selects its finding shape from the failure it actually found: an unresolvable marker gives `chapter_prose / repair_citation_marker`, a dead or missing URL gives `source_record / repair_source_metadata`, a dangling bib entry gives `bibliography / repair_bibliography_consistency`. `target_length` compares the word count to the target and emits `expand_argument` or `remove_redundant_prose` accordingly. `research_artifacts_present` emits `evidence_packet / acquire_additional_evidence`.
+
+- [ ] **Step 4: Update the display caller and probe fixture**
+
+In `src/commands/validate.ts`, render `check.findings.map((finding) => finding.diagnostic)` for display only. Extend `tests/fixtures/producer-probe/research/` so every gate in the module fails.
+
+- [ ] **Step 5: Run the research and coverage suites**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- research validate routing-coverage`
+Expected: PASS. Update assertions that read finding strings to read `.diagnostic`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/longwrite/src/lib/validation/research.ts packages/longwrite/src/commands/validate.ts packages/longwrite/tests/research-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/research/
+git commit -m "feat(validation): convert the research producer and correct three wrong routes"
+```
+
+---
+
+### Task 15: LaTeX and long-form
+
+**Files:**
+- Modify: `packages/longwrite/src/lib/validation/latex.ts`
+- Modify: `packages/longwrite/src/lib/validation/longform.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/latex/`, `.../longform/`
+- Test: `packages/longwrite/tests/latex-longform-structured.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/latex-longform-structured.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { validateLatexWorkspace } from "../src/lib/validation/latex.js";
+import { validateLongformWorkspace } from "../src/lib/validation/longform.js";
+import { FindingSchema } from "../src/lib/registry/records.js";
+import { REGISTRY } from "../src/lib/registry/producers.js";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
+});
+// latexWorkspace(kind) seeds a build log containing either an undefined
+// citation warning, a missing-package fatal, or a float placement error.
+
+describe("latex and longform structured output", () => {
+  it("routes a missing package to a toolchain repair", async () => {
+    const report = await validateLatexWorkspace(await latexWorkspace("missing_package"));
+    const build = report.checks.find((check) => check.id === "latex_build")!;
+    expect(build.findings.some((f) => f.artifact.kind === "toolchain"
+      && f.required_effect === "repair_toolchain")).toBe(true);
+  });
+
+  it("routes an undefined citation to bibliography repair", async () => {
+    const report = await validateLatexWorkspace(await latexWorkspace("undefined_citation"));
+    const build = report.checks.find((check) => check.id === "latex_build")!;
+    expect(build.findings.some((f) => f.artifact.kind === "bibliography"
+      && f.required_effect === "repair_bibliography_consistency")).toBe(true);
+  });
+
+  it("routes a float placement failure to the placement plan", async () => {
+    const report = await validateLatexWorkspace(await latexWorkspace("float_placement"));
+    const build = report.checks.find((check) => check.id === "latex_build")!;
+    const placement = build.findings.find((f) => f.artifact.kind === "figure_spec");
+    expect(placement?.artifact.path).toBe("figures/placement-plan.json");
+    expect(placement?.required_effect).toBe("repair_artifact_placement");
+  });
+
+  it("asks to expand an under-length long-form manuscript", async () => {
+    const report = await validateLongformWorkspace(await longformWorkspace({ words: 500, target: 5_000 }));
+    const length = report.checks.find((check) => check.id === "target_length")!;
+    expect(length.findings[0].required_effect).toBe("expand_argument");
+  });
+
+  it("routes style drift to prose revision", async () => {
+    const report = await validateLongformWorkspace(await longformWorkspace({ drift: true }));
+    const drift = report.checks.find((check) => check.id === "style_drift")!;
+    expect(drift.findings[0].artifact.kind).toBe("chapter_prose");
+  });
+
+  it("emits schema-valid findings that all resolve to a capability", async () => {
+    for (const report of [
+      await validateLatexWorkspace(await latexWorkspace("missing_package")),
+      await validateLongformWorkspace(await longformWorkspace({ drift: true })),
+    ]) {
+      for (const check of report.checks) {
+        for (const finding of check.findings) {
+          expect(FindingSchema.safeParse(finding).success).toBe(true);
+          expect(() => REGISTRY.resolveCapability({
+            gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+          })).not.toThrow();
+        }
+      }
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- latex-longform-structured`
+Expected: FAIL — both modules return `findings: string[]`.
+
+- [ ] **Step 3: Convert both modules**
+
+Return `StructuredCheck` from every check. `latex_build` and `manuscript_build` classify the build log: a missing package or compiler fault gives `toolchain / repair_toolchain`, an undefined citation gives `bibliography / repair_bibliography_consistency`, and anything else gives `figure_spec / repair_artifact_placement` naming `figures/placement-plan.json` with the TeX location in `location`. `target_length` chooses by direction; `style_drift` emits a prose finding.
+
+- [ ] **Step 4: Extend the probe fixtures**
+
+Seed `tests/fixtures/producer-probe/latex/` and `.../longform/` so every gate in each module fails.
+
+- [ ] **Step 5: Run the suites**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- latex longform routing-coverage`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/longwrite/src/lib/validation/latex.ts packages/longwrite/src/lib/validation/longform.ts packages/longwrite/tests/latex-longform-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/
+git commit -m "feat(validation): convert the latex and longform producers to structured findings"
+```
+
+---
+
+### Task 16: Publication, survey contract and visual review
+
+**Files:**
+- Modify: `packages/longwrite/src/lib/publication.ts`
+- Modify: `packages/longwrite/src/lib/research/survey-contract.ts`
+- Modify: `packages/longwrite/src/lib/ops/visual-review.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/publication/`, `.../survey-contract/`, `.../visual-review/`
+- Test: `packages/longwrite/tests/publication-survey-visual-structured.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/publication-survey-visual-structured.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { validatePublication } from "../src/lib/publication.js";
+import { evaluateSurveyContract } from "../src/lib/research/survey-contract.js";
+import { checkVisualReviewReleaseGate } from "../src/lib/ops/visual-review.js";
+import { FindingSchema } from "../src/lib/registry/records.js";
+import { REGISTRY } from "../src/lib/registry/producers.js";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
+});
+// visualWorkspace(defect) seeds reviews/visual-qa.json with a failing page
+// whose remediation is either a missing prose reference, unreadable figure
+// content, or a float that ran off the page.
+
+describe("publication, survey and visual-review structured output", () => {
+  it("routes a broken publication template to a template repair", async () => {
+    const report = await validatePublication(await publicationWorkspace({ badTemplate: true }));
+    const check = report.checks.find((entry) => entry.id === "publication_custom_template")!;
+    expect(check.findings[0].artifact.kind).toBe("publication_template");
+    expect(check.findings[0].required_effect).toBe("repair_template");
+  });
+
+  it("routes an over-length submission to prose trimming", async () => {
+    const report = await validatePublication(await publicationWorkspace({ pages: 20, limit: 9 }));
+    const check = report.checks.find((entry) => entry.id === "publication_page_limit")!;
+    expect(check.findings[0].required_effect).toBe("remove_redundant_prose");
+  });
+
+  it("lets a related-work matrix defect reach the table spec", async () => {
+    const { report } = await evaluateSurveyContract(await surveyWorkspace({ thinMatrix: true }));
+    const check = report.checks.find((entry) => entry.id === "related_work_matrix")!;
+    expect(check.findings.some((f) => f.artifact.kind === "table_spec")).toBe(true);
+  });
+
+  it("routes a missing prose reference on the visual gate to the section editor", async () => {
+    // The case that motivated this whole design: a rendered-visual defect whose
+    // repair is prose, not a figure.
+    const check = await checkVisualReviewReleaseGate(await visualWorkspace("missing_prose_reference"), true);
+    const finding = check.findings.find((f) => f.artifact.kind === "chapter_prose")!;
+    expect(finding.required_effect).toBe("add_explicit_artifact_reference");
+    expect(String(REGISTRY.resolveCapability({
+      gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+    }))).toBe("revise_sections");
+  });
+
+  it("routes unreadable figure content on the same gate to the visual planner", async () => {
+    const check = await checkVisualReviewReleaseGate(await visualWorkspace("unreadable_figure"), true);
+    const finding = check.findings.find((f) => f.artifact.kind === "figure_spec")!;
+    expect(String(REGISTRY.resolveCapability({
+      gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+    }))).toBe("revise_visual_plan");
+  });
+
+  it("emits schema-valid findings across all three modules", async () => {
+    const checks = [
+      ...(await validatePublication(await publicationWorkspace({ badTemplate: true }))).checks,
+      ...(await evaluateSurveyContract(await surveyWorkspace({ thinMatrix: true }))).report.checks,
+      await checkVisualReviewReleaseGate(await visualWorkspace("unreadable_figure"), true),
+    ];
+    for (const check of checks) {
+      for (const finding of check.findings) expect(FindingSchema.safeParse(finding).success).toBe(true);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- publication-survey-visual-structured`
+Expected: FAIL — all three modules return `findings: string[]`.
+
+- [ ] **Step 3: Convert the three modules**
+
+Return `StructuredCheck` from every check. `publication_custom_template` emits `publication_template / repair_template`; `publication_page_limit` and `publication_min_pages` choose trimming or expansion by direction; `related_work_matrix` emits a `table_spec` finding alongside its outline finding. `checkVisualReviewReleaseGate` maps each failing page's recorded remediation to one of the four shapes its producer declares.
+
+- [ ] **Step 4: Extend the probe fixtures** for all three modules so every gate fails.
+
+- [ ] **Step 5: Run the suites**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- publication survey visual routing-coverage`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/longwrite/src/lib/publication.ts packages/longwrite/src/lib/research/survey-contract.ts packages/longwrite/src/lib/ops/visual-review.ts packages/longwrite/tests/publication-survey-visual-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/
+git commit -m "feat(validation): convert the publication, survey and visual-review producers"
+```
+
+---
+
+### Task 17: Preflight
+
+**Files:**
+- Modify: `packages/longwrite/src/commands/preflight.ts`
+- Modify: `packages/longwrite/tests/fixtures/producer-probe/preflight/`
+- Test: `packages/longwrite/tests/preflight-structured.test.ts`
+
+Every preflight gate is `environment`. It may emit measurements, but **no findings**: a missing LaTeX compiler is not repaired by editing prose, and routing it to a capability is the category error this class exists to prevent.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/preflight-structured.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { runPreflightChecks } from "../src/commands/preflight.js";
+import { PRODUCERS, REGISTRY } from "../src/lib/registry/producers.js";
+import { gateId } from "../src/lib/registry/ids.js";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.rm(r, { recursive: true, force: true })));
+});
+// bareWorkspace() has no LaTeX compiler, no figure renderer and no worker
+// runtime configured, so every preflight check fails.
+
+describe("preflight structured output", () => {
+  it("emits no findings, because an environment gate is not repairable", async () => {
+    const report = await runPreflightChecks(await bareWorkspace());
+    for (const check of report.checks) {
+      expect(check.findings, `${check.id} emitted a finding`).toEqual([]);
+    }
+  });
+
+  it("still reports failure with an operator diagnostic", async () => {
+    const report = await runPreflightChecks(await bareWorkspace());
+    const compiler = report.checks.find((check) => check.id === "pdf_compiler")!;
+    expect(compiler.pass).toBe(false);
+    expect(compiler.diagnostic).toMatch(/compiler/i);
+  });
+
+  it("declares every one of its gates as environment class", () => {
+    const preflight = PRODUCERS.find((producer) => producer.module === "preflight")!;
+    for (const gate of preflight.gates) expect(REGISTRY.gateClass(gate.id)).toBe("environment");
+  });
+
+  it("has no legal triples, so nothing can route to a repair", () => {
+    const preflight = PRODUCERS.find((producer) => producer.module === "preflight")!;
+    for (const gate of preflight.gates) {
+      expect(REGISTRY.legalTriples(gate.id), String(gate.id)).toEqual([]);
+    }
+  });
+
+  it("routes a missing compiler nowhere at all", () => {
+    expect(REGISTRY.legalTriples(gateId("pdf_compiler"))).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- preflight-structured`
+Expected: FAIL — preflight checks return `findings: string[]`, which the first case reads as non-empty.
+
+- [ ] **Step 3: Convert the module**
+
+Return `StructuredCheck` from every preflight check with `findings: []` and the original message moved to `diagnostic`. Emit measurements where a check already computes a number (for example a token budget), naming registered metrics only.
+
+- [ ] **Step 4: Extend the probe fixture** so every preflight gate fails.
+
+- [ ] **Step 5: Run the suites**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- preflight routing-coverage`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/longwrite/src/commands/preflight.ts packages/longwrite/tests/preflight-structured.test.ts packages/longwrite/tests/fixtures/producer-probe/preflight/
+git commit -m "feat(preflight): emit environment-class checks with no findings"
+```
+
+---
+
+## M7 — Verification
+
+### Task 18: Full verification and documentation
 
 **Files:**
 - Modify: `packages/longwrite/README.md`
-- Modify: `AGENTS.md` (sources-of-truth list)
+- Modify: `AGENTS.md`
 
-- [ ] **Step 1: Run the full workspace gate**
+- [ ] **Step 1: Run the full gate**
 
 Run:
 ```bash
 npm run build --workspace @mr-maliang/longwrite
 npm test --workspace @mr-maliang/longwrite
 ```
-Expected: build succeeds; all tests pass, including `routing-coverage` and `registry-evaluator-coverage`.
+Expected: PASS, including `routing-coverage` with every producer's finding assertions now meaningful.
 
 - [ ] **Step 2: Confirm both coverage tests bite**
 
-Already exercised for routing in Task 5 Step 3. For evaluators, temporarily add a `script` metric to `METRIC_REGISTRY` with no evaluator:
+Routing coverage was exercised in Task 4 Step 4. For evaluator coverage, temporarily add a `script` metric with no evaluator and confirm `registry-evaluator-coverage` fails naming it, then remove it.
 
-Run: `npm test --workspace @mr-maliang/longwrite -- registry-evaluator-coverage`
-Expected: FAIL, naming the new metric. Remove it and confirm PASS. A coverage test that cannot fail is not protecting anything.
+- [ ] **Step 3: Document**
 
-- [ ] **Step 3: Document the new surface**
-
-Add to `packages/longwrite/README.md`:
+In `packages/longwrite/README.md`:
 
 ```markdown
-### Acceptance metrics
+### Measurement
 
 `longwrite metrics evaluate <workspace> [--tier unit|round|release] [--as-of <iso>]`
-measures metrics and appends immutable observations under
-`.malaclaw/observations/`. An observation is reused only when its dependency
-digest AND evaluator digest both match, so a workspace that changes and reverts
-reuses the correct earlier measurement rather than the newest one.
+writes `reports/measurements.json`, a measurement envelope the MalaClaw engine
+ingests. MrMaLiang measures; the engine stores, sequences and evaluates.
 
-Metrics whose pipeline is `model` or `external` are produced by their own
-measurement unit and reported as deferred. A metric whose required input is
-missing is reported as **failed**, never as a measured zero and never as a
+A scoped metric emits one entry per scope. A metric whose pipeline is `model`
+or `external` is reported **deferred**; one whose required input is missing is
+reported **unavailable** with a reason — never a measured zero, and never a
 deferral.
 ```
 
-Add `src/lib/registry/` to the sources-of-truth list in `AGENTS.md`, noting that gate ids are declared by their producers and that routing resolves `(gate, artifact kind, required effect)` with no default.
+In `AGENTS.md`, add `src/lib/registry/` to the sources-of-truth list, noting that gate ids and their legal findings are declared by typed producer definitions beside the checks, that routing resolves `(gate, artifact kind, required effect)` with no default, and that MrMaLiang never writes `.malaclaw/`.
 
 - [ ] **Step 4: Repository release check**
 
 Run: `npm run build && npm test && git diff --check`
-Expected: all pass.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/longwrite/README.md AGENTS.md
-git commit -m "docs(longwrite): document the metric registry and metrics evaluate command"
+git commit -m "docs(longwrite): document producer definitions and measurement envelopes"
 ```
 
 ---
 
 ## Plan Self-Review
 
-**Spec coverage.**
-- §A1 structured observations and findings replacing prose: Tasks 6, 13, 14.
-- §A2 metric registry, measurement pipelines, tiers, invalidation, and the model-judgment uncertainty contract: Tasks 6 (judgment fields), 7, 8, 12.
-- §A3 structured findings, artifact kinds, required effects, and the kind/path trust rule: Tasks 1, 6, 13.
-- §A3a producer map for generated artifacts: Task 1 (`EDITABLE_KIND_PATHS`), enforced in Task 6, applied in Task 13.
-- §A3b gate classes and generated coverage: Tasks 2, 3, 5.
-- §A4 fail-closed routing over complete legal triples: Tasks 4, 5.
+**Spec coverage.** §A1 structured observations and findings → Tasks 5, 12–17. §A2 metric registry, pipelines, tiers, dependency-driven invalidation and the model-judgment contract → Tasks 5, 6, 7. §A3 findings, artifact kinds, effects and the kind/path trust rule → Tasks 1, 5. §A3a producer map for generated artifacts → Task 1's `EDITABLE_KIND_PATHS`, enforced in Task 5, applied in Tasks 12–17. §A3b gate classes and generated coverage → Tasks 2, 3, 4. §A4 fail-closed routing over declared triples → Tasks 2, 3.
 
-**Deliberately excluded and assigned onward.** §A9 model tiering is a compiler concern and lands in Plan 3 Task 8; the header states this rather than claiming coverage. §B4 is partial by design: dependency-driven invalidation and reuse are here, while deferred measurement, `pending_verification` and round scheduling are kernel behavior in Plan 2. §A5 to §A8 are Plan 3.
+**Wire contract coverage.** §2 ownership — this plan emits envelopes and writes nothing under `.malaclaw/` (asserted in Task 11). §3 envelope, including `measured`/`unavailable`/`deferred` and the judgment rule → Tasks 5, 11. §4 identity — `scope_key` is carried on every entry; storage is the kernel's. §5 compiled criteria — `target`, `operator`, `tolerance` and `direction` come from the metric registry and project config in Task 11.
 
-**Type consistency.** `EvaluatorFn` and `EvaluatorContext` are defined in Task 10 and re-exported by Task 11's index, which Tasks 12 and 14 import. `evaluatorDigest(name, version)` takes two arguments everywhere, with `EVALUATOR_VERSION` from Task 11. `STORE` is exported by Task 8 and used by Tasks 12 and 14. `MetricDefinition.dependencies` (not `requires`) is the field `computeInputDigest` reads. `StructuredCheck` from Task 6 is the return type adopted across all six checks in Task 13. `Criterion` in Task 9 uses `MetricId` from Task 1 and reads `tolerance` and `direction` from Task 7.
+**Deliberately excluded.** Observation storage, sequence allocation, acceptance arithmetic and reuse scheduling are the kernel's (Plan 2). §A9 model tiering and §A5–A8 are Plan 3.
 
-**Ordering constraints.** Task 4 must precede Task 6, because `FindingSchema` validates triples against `legalTriples`. Task 7 must precede Task 8 (`computeInputDigest` takes a `MetricDefinition`) and Task 9 (`satisfies` reads `tolerance`). Task 10 must precede Task 11, and Task 11 before Tasks 12 and 14. Task 3 deletes `review_no_regressions`, so it must precede Task 5's coverage assertions.
+**Type consistency.** `ProducerDefinition` (Task 2) is what each module exports in Task 3 and what `producers.ts` folds into `REGISTRY`. `REGISTRY.legalTriples` is consumed by `FindingSchema` (Task 5) and by the coverage test (Task 4). `EvaluatorContext`, `ScopedValue`, `EvaluatorFn` and `MeasurementUnavailable` are defined in Task 8 and re-exported by Task 10's index for Tasks 9 and 11. `evaluatorDigest(name, version)` takes two arguments everywhere, with `EVALUATOR_VERSION` from Task 10. `MetricDefinition.dependencies` — never `requires` — is what `computeInputDigest` reads.
 
----
-
-## Pending Amendments
-
-Blocking. Apply before executing any task.
-
-1. **Delete the durable observation store.** Tasks 8 and 12 must not write
-   `.malaclaw/observations`, allocate sequences, or define store paths. MalaClaw
-   owns storage (wire contract §2). Evaluators return envelope entries; keep
-   `canonicalJson` and the digest helpers, which the envelope carries.
-2. **Add `scope_key` to every measurement.** `citation_depth_per_section` emits
-   one entry per section and `taxonomy_cell_ab_sources` one per cell, never an
-   aggregate minimum. Observation identity and objective identity share scope
-   semantics (§4).
-3. **Migrate every gate producer, not two.** Tasks 13 and 14 cover figures and
-   corpus gates only; research, latex, longform, publication, survey-contract,
-   visual-review and preflight still emit strings, so Plan 3's repair packets
-   have no `Finding[]` to consume. Add one migration task per producer. No
-   adapters that parse `diagnostic` prose.
-4. **Correct semantically wrong routes.** A complete table can still be wrong.
-   Known defects: `target_length` supports only `remove_redundant_prose`, so an
-   under-length manuscript is unrepairable; `research_artifacts_present` and
-   `manuscript_build` route to figure specs; `publication_custom_template`
-   routes to placement rather than a template repair; `citation_verification`
-   cannot route a metadata or bibliography defect; `related_work_matrix` cannot
-   route a `table_spec` defect. Derive legal triples from typed producer
-   definitions rather than hand-listing them, and add the missing effects
-   (`expand_argument`, `repair_template`, `repair_toolchain`).
-5. **Add `time_dependent` to the metric registry.** Include `as_of_date` in the
-   input digest only for metrics that declare it; otherwise every date change
-   invalidates every static measurement.
-6. **Enforce model-judgment requirements from `measurement_kind`**, not by
-   convention: reject a `model` entry without `judgment` and a `script` entry
-   with one.
-7. **Replace hand-synchronized `GATE_IDS` declarations** with typed producer
-   construction, or add execution-based coverage that runs each producer against
-   a fixture and compares emitted ids. A declaration list drifts the same way a
-   scanner missed dynamic ids.
+**Ordering constraints.** Task 3 must precede Task 5, because `FindingSchema` validates triples against `REGISTRY`. Task 6 precedes Task 7 (`computeInputDigest` takes a `MetricDefinition`). Task 8 precedes Tasks 9, 10, 11. Task 4's probe helper is created before Tasks 12–17, each of which extends its own fixture. Task 3 deletes `review_no_regressions`, so it precedes Task 4's assertions.
