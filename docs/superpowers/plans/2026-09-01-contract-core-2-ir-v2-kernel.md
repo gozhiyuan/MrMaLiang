@@ -563,7 +563,7 @@ Post-hoc hashing of the live workspace cannot observe what a worker *read*, and 
 
 **Interfaces:**
 - Consumes: `matchesEnvelope` (Task 2).
-- Produces: `TaskWorkspace` type (`root`, `unitKey`, `invocationId`, `snapshotId`, `materialized: string[]`); `createTaskWorkspace(canonicalDir, unit, opts): Promise<TaskWorkspace>`; `destroyTaskWorkspace(ws)`.
+- Produces: `TaskWorkspace` type (`root`, `unitKey`, `invocationId`, `snapshotId`, `baseline: Map<string, string>`); `createTaskWorkspace(canonicalDir, unit, opts): Promise<TaskWorkspace>`; `destroyTaskWorkspace(ws)`; `newSnapshotId()`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -617,12 +617,12 @@ describe("task workspace", () => {
     await expect(fs.access(path.join(ws.root, ".malaclaw"))).rejects.toThrow();
   });
 
-  it("records what it materialized for the diff baseline", async () => {
+  it("records the canonical digest of what it materialized", async () => {
     const dir = await canonical({ "src/a.ts": "one", "src/b.ts": "two" });
     const ws = await createTaskWorkspace(dir, unit, { invocationId: "i1", snapshotId: "s1" });
     dirs.push(ws.root);
-    expect(ws.materialized.map((entry) => entry.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
-    expect(ws.materialized[0].digest).toMatch(/^[0-9a-f]{64}$/);
+    expect([...ws.baseline.keys()].sort()).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(ws.baseline.get("src/a.ts")).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("materializes a declared read that does not yet exist as absent", async () => {
@@ -630,7 +630,7 @@ describe("task workspace", () => {
     const ws = await createTaskWorkspace(dir, { ...unit, reads: ["src/**", "src/new.ts"] },
       { invocationId: "i1", snapshotId: "s1" });
     dirs.push(ws.root);
-    expect(ws.materialized.map((entry) => entry.path)).not.toContain("src/new.ts");
+    expect([...ws.baseline.keys()]).not.toContain("src/new.ts");
     await expect(fs.access(path.join(ws.root, "src/new.ts"))).rejects.toThrow();
   });
 
@@ -671,10 +671,11 @@ export type TaskWorkspace = {
   unitKey: string;
   invocationId: string;
   snapshotId: string;
-  /** Paths copied in WITH their digests at materialization time. The digest is
-   * the diff baseline; recomputing it from the task copy after the run would
-   * compare the copy against itself. */
-  materialized: Array<{ path: string; digest: string }>;
+  /** Path -> digest AT MATERIALIZATION. The baseline for the commit diff;
+   * recomputing it from the task copy after the run would compare the copy
+   * against itself. A Map, not an array, because every consumer looks a path
+   * up rather than iterating. */
+  baseline: Map<string, string>;
 };
 
 const ENGINE_STATE = ".malaclaw";
@@ -700,15 +701,17 @@ export async function createTaskWorkspace(
 ): Promise<TaskWorkspace> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `malaclaw-task-${unit.unitKey}-`));
   const available = await walk(canonicalDir, canonicalDir);
-  const materialized: string[] = [];
+  const baseline = new Map<string, string>();
   for (const rel of available.sort()) {
     if (!unit.reads.some((pattern) => matchesEnvelope(pattern, rel))) continue;
+    const source = path.join(canonicalDir, rel);
     const target = path.join(root, rel);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.copyFile(path.join(canonicalDir, rel), target);
-    materialized.push(rel);
+    await fs.copyFile(source, target);
+    // Digest the CANONICAL bytes at copy time; this is the diff baseline.
+    baseline.set(rel, crypto.createHash("sha256").update(await fs.readFile(source)).digest("hex"));
   }
-  return { root, unitKey: unit.unitKey, invocationId: opts.invocationId, snapshotId: opts.snapshotId, materialized };
+  return { root, unitKey: unit.unitKey, invocationId: opts.invocationId, snapshotId: opts.snapshotId, baseline };
 }
 
 export async function destroyTaskWorkspace(workspace: TaskWorkspace): Promise<void> {
@@ -835,13 +838,58 @@ describe("effect commit", () => {
     await expect(fs.access(path.join(dir, "docs/new.md"))).rejects.toThrow();
   });
 
-  it("records a commit manifest so an interrupted commit is recoverable", async () => {
+  it("clears the commit manifest on success", async () => {
     const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
     await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
-    const diff = await diffTaskWorkspace(ws, unit);
-    await commitEffects(dir, ws, diff);
-    // Cleared on success; present means the commit was interrupted.
-    expect(await pendingCommit(dir, ws.invocationId)).toBeNull();
+    await commitEffects(dir, ws, await diffTaskWorkspace(ws, unit));
+    expect(await pendingCommits(dir)).toEqual([]);
+  });
+
+  it("leaves a manifest naming what was done when a commit is interrupted", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await fs.writeFile(path.join(ws.root, "src/b.ts"), "also", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 1 })).rejects.toThrow();
+    const [manifest] = await pendingCommits(dir);
+    expect(manifest.planned).toHaveLength(2);
+    expect(manifest.done).toHaveLength(1);
+  });
+
+  it("rolls a partial commit back to the bytes it started from", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await fs.writeFile(path.join(ws.root, "src/b.ts"), "also", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 1 })).rejects.toThrow();
+    await reconcileCommit(dir, (await pendingCommits(dir))[0], "rollback");
+    // Detecting a partial commit is not enough; it must be reversible.
+    expect(await fs.readFile(path.join(dir, "src/a.ts"), "utf-8")).toBe("one");
+    expect(await fs.readFile(path.join(dir, "src/b.ts"), "utf-8")).toBe("two");
+  });
+
+  it("removes a file that did not exist before the commit", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one" });
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await fs.writeFile(path.join(ws.root, "src/new.ts"), "new", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 2 })).rejects.toThrow();
+    await reconcileCommit(dir, (await pendingCommits(dir))[0], "rollback");
+    await expect(fs.access(path.join(dir, "src/new.ts"))).rejects.toThrow();
+  });
+
+  it("journals a deletion as a completed step", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
+    await fs.rm(path.join(ws.root, "src/b.ts"));
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 1 })).rejects.toThrow();
+    expect((await pendingCommits(dir))[0].done).toHaveLength(1);
+  });
+
+  it("finishes an interrupted commit from the task workspace", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await fs.writeFile(path.join(ws.root, "src/b.ts"), "also", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 1 })).rejects.toThrow();
+    await reconcileCommit(dir, (await pendingCommits(dir))[0], "finish");
+    expect(await fs.readFile(path.join(dir, "src/b.ts"), "utf-8")).toBe("also");
   });
 
   it("propagates a deletion inside the envelope", async () => {
@@ -897,22 +945,16 @@ export async function diffTaskWorkspace(
   workspace: TaskWorkspace, unit: EffectUnit,
 ): Promise<EffectDiff> {
   const after = await inventory(workspace.root);
-  const before = new Set(workspace.materialized);
-  const baseline = new Map<string, string>();
-  for (const rel of workspace.materialized) {
-    const digest = after.get(rel);
-    if (digest !== undefined) baseline.set(rel, digest);
-  }
+  const baseline = workspace.baseline;
 
   const changed: string[] = [];
   const deleted: string[] = [];
   for (const [rel, digest] of after) {
-    if (!before.has(rel)) { changed.push(rel); continue; }
-    // Baseline digests come from the canonical copy at materialization time;
-    // recompute against it rather than trusting the task copy.
-    if (digest !== baseline.get(rel)) changed.push(rel);
+    // Compared against the canonical bytes captured at materialization, never
+    // against the task copy itself.
+    if (!baseline.has(rel) || digest !== baseline.get(rel)) changed.push(rel);
   }
-  for (const rel of before) if (!after.has(rel)) deleted.push(rel);
+  for (const rel of baseline.keys()) if (!after.has(rel)) deleted.push(rel);
 
   const declaredPaths = new Set(unit.writes);
   const diff: EffectDiff = { declared: [], owned: [], undeclared: [], deleted: deleted.sort() };
@@ -932,25 +974,36 @@ export function validateDiff(diff: EffectDiff, _unit: EffectUnit): ContractOutco
 
 /** A rejected attempt commits none of its changes, including the valid ones.
  *
- * This is NOT atomic across files: a crash mid-commit can leave some files
- * copied and some not, and no filesystem primitive gives multi-file atomicity.
- * The honest guarantee is *recoverable*: a commit manifest records the intended
- * file list and per-file progress before the first copy, so a resumed run
- * finishes or reverses a partial commit rather than guessing. Claiming
- * all-or-nothing without the manifest would be a promise the code cannot keep. */
+ * This is NOT atomic across files: no filesystem primitive gives multi-file
+ * atomicity. The guarantee is *recoverable*. Before the first write, the
+ * manifest records every planned path together with a backup of its current
+ * canonical bytes (or an `absent` marker); each file's completion is journaled
+ * as it lands, deletions included. A manifest found at startup means a commit
+ * was interrupted, and the engine either finishes it or restores every
+ * completed file from its backup — never guesses which half happened. */
 export async function commitEffects(
   canonicalDir: string, workspace: TaskWorkspace, diff: EffectDiff,
 ): Promise<string[]> {
   if (diff.undeclared.length > 0) throw new Error("refusing to commit a diff with undeclared writes");
   const planned = [...diff.declared, ...diff.owned];
-  // Written before the first copy, so a crash leaves a record of what was
-  // about to change and how far it got.
-  await writeCommitManifest(canonicalDir, workspace.invocationId, { planned, done: [] });
+  // Back up current canonical bytes BEFORE the first write, so a partial
+  // commit can be reversed rather than only detected.
+  await stageBackups(canonicalDir, workspace.invocationId, planned);
+  await writeCommitManifest(canonicalDir, workspace.invocationId,
+    { planned, done: [], deletions: diff.deleted });
   const committed: string[] = [];
   for (const rel of [...diff.declared, ...diff.owned]) {
     const source = path.join(workspace.root, rel);
     const target = path.join(canonicalDir, rel);
-    if (diff.deleted.includes(rel)) { await fs.rm(target, { force: true }); committed.push(rel); continue; }
+    if (diff.deleted.includes(rel)) {
+      await fs.rm(target, { force: true });
+      committed.push(rel);
+      // A deletion is a committed step like any other; skipping the journal
+      // here would make it invisible to recovery.
+      await writeCommitManifest(canonicalDir, workspace.invocationId,
+        { planned, done: committed, deletions: diff.deleted });
+      continue;
+    }
     await fs.mkdir(path.dirname(target), { recursive: true });
     const temporary = `${target}.tmp-${process.pid}-${crypto.randomUUID()}`;
     await fs.copyFile(source, temporary);
@@ -962,31 +1015,73 @@ export async function commitEffects(
   return committed.sort();
 }
 
-/** A manifest left behind means a commit was interrupted. The engine resumes it
- * from `done` or reverses it, and never treats the workspace as clean. */
-export async function pendingCommit(
-  canonicalDir: string, invocationId: string,
-): Promise<{ planned: string[]; done: string[] } | null> { /* read the manifest, or null */ }
+const COMMITS = path.join(".malaclaw", "commits");
+
+export const CommitManifest = z.object({
+  invocation_id: z.string().min(1),
+  planned: z.array(z.string().min(1)),
+  done: z.array(z.string().min(1)),
+  deletions: z.array(z.string().min(1)).default([]),
+}).strict();
+export type CommitManifest = z.infer<typeof CommitManifest>;
+
+/** Copies each planned path's current canonical bytes under
+ * `.malaclaw/commits/<invocation>/backup/`, writing an `absent` marker for a
+ * path that does not yet exist. Without backups a partial commit is detectable
+ * but not reversible. */
+export async function stageBackups(
+  canonicalDir: string, invocationId: string, planned: string[],
+): Promise<void> { /* copy each existing planned path; mark the rest absent */ }
+
+export async function writeCommitManifest(
+  canonicalDir: string, invocationId: string, manifest: Omit<CommitManifest, "invocation_id">,
+): Promise<void> { /* atomic temp-and-rename of manifest.json */ }
+
+export async function clearCommitManifest(canonicalDir: string, invocationId: string): Promise<void> {
+  await fs.rm(path.join(canonicalDir, COMMITS, invocationId), { recursive: true, force: true });
+}
+
+export async function pendingCommits(canonicalDir: string): Promise<CommitManifest[]> {
+  const dir = path.join(canonicalDir, COMMITS);
+  const ids = await fs.readdir(dir).catch(() => [] as string[]);
+  const found: CommitManifest[] = [];
+  for (const id of ids) {
+    const raw = await fs.readFile(path.join(dir, id, "manifest.json"), "utf-8").catch(() => null);
+    if (raw !== null) found.push(CommitManifest.parse(JSON.parse(raw)));
+  }
+  return found;
+}
+
+/** Called at engine startup, before any unit runs. `finish` reapplies the
+ * remaining planned files from the task workspace; `rollback` restores every
+ * completed file from its backup and removes files that were absent before. */
+export async function reconcileCommit(
+  canonicalDir: string, manifest: CommitManifest, mode: "finish" | "rollback",
+): Promise<void> { /* ... */ }
 ```
 
-**The baseline must be captured at materialization.** `diffTaskWorkspace`
-cannot compare a post-run task copy against itself, so `TaskWorkspace.materialized`
-is `Array<{ path: string; digest: string }>` from the start — Task 4's
-implementation and its test are written that way, not retrofitted here. Task 4's
-assertion reads `ws.materialized.map((entry) => entry.path).sort()`; a plan that
-changes a type in one task and claims another task's test is unaffected is
-describing two incompatible codebases.
+**One baseline type, used everywhere.** `TaskWorkspace.baseline` is
+`Map<string, string>` from Task 4 onward — path to the canonical digest captured
+at copy time. Task 4's implementation, Task 4's tests and Task 5's diff all read
+that Map; there is no array of paths and no second shape to convert between.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Wire recovery into engine startup**
+
+`runFlowUnlocked` calls `pendingCommits` before scheduling any unit: a manifest
+whose attempt journal reached `applied` is finished, anything earlier is rolled
+back, and a workspace with an unreconciled commit never starts a new unit.
+
+- [ ] **Step 5: Run test to verify it passes**
 
 Run: `npm test -- contract-effect-commit contract-task-workspace`
-Expected: PASS, 7 + 6 tests.
+Expected: PASS, 12 + 6 tests. `commitEffects` takes a test-only `failAfter`
+option so a crash after each file operation is exercised, not assumed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/workflow/effects.ts src/lib/workflow/task-workspace.ts tests/contract-effect-commit.test.ts tests/contract-task-workspace.test.ts
-git commit -m "feat(workflow): validate a task-workspace diff and commit effects atomically"
+git add src/lib/workflow/effects.ts src/lib/workflow/task-workspace.ts src/lib/workflow/engine.ts tests/contract-effect-commit.test.ts tests/contract-task-workspace.test.ts
+git commit -m "feat(workflow): commit effects through a recoverable, reversible manifest"
 ```
 
 ---
@@ -3625,7 +3720,7 @@ import os from "node:os";
 import path from "node:path";
 import { WorkflowDef } from "../src/lib/schema.js";
 import {
-  PreDispatchVerdict, ActionInstance, CostEstimate, readVerdict, parseActionInstance,
+  PreDispatchVerdict, ActionInstance, CostEstimate, readVerdict, parseActionInstance, affordable,
 } from "../src/lib/workflow/dispatch-protocol.js";
 
 const dirs: string[] = [];
@@ -3673,11 +3768,43 @@ describe("dispatch protocol", () => {
     expect(verdict.unreachable[0].objective).toBe("landmark_coverage ");
   });
 
+  it("carries objectives whose producer could not classify the failure", () => {
+    // A failed check with no routable finding still needs a next step; the
+    // verdict is how it reaches diagnosis instead of stalling the round.
+    expect(PreDispatchVerdict.safeParse({
+      version: 1, unreachable: [],
+      requires_diagnosis: [{ objective: "latex_build ", detail: "unclassified compiler error" }],
+    }).success).toBe(true);
+  });
+
   it("knows nothing about what an objective means", () => {
     // The kernel reads a name and a detail string; the domain decides both.
     expect(PreDispatchVerdict.safeParse({
       version: 1, unreachable: [{ objective: "anything at all", detail: "" }],
     }).success).toBe(true);
+  });
+
+  it("passes an explicit request and output path to the materializer", async () => {
+    const dir = await workspace({});
+    const stage = { materializer: { cmd: "node", args: ["-e",
+      "const a=require('node:process').argv;const i=a.indexOf('--output');" +
+      "require('node:fs').writeFileSync(a[i+1],require('node:fs').readFileSync(a[a.indexOf('--request')+1]))"] } };
+    const instance = await runMaterializer(dir, stage as never, validInstanceRequest);
+    // Round-tripping request to output proves the transport, not just the field.
+    expect(instance.action_id).toBe("a1");
+  });
+
+  it("fails the dispatch when the materializer writes no output", async () => {
+    const dir = await workspace({});
+    const stage = { materializer: { cmd: "node", args: ["-e", "0"] } };
+    await expect(runMaterializer(dir, stage as never, validInstanceRequest))
+      .rejects.toThrow(/output/i);
+  });
+
+  it("fails the dispatch when the materializer exits non-zero", async () => {
+    const dir = await workspace({});
+    const stage = { materializer: { cmd: "node", args: ["-e", "process.exit(3)"] } };
+    await expect(runMaterializer(dir, stage as never, validInstanceRequest)).rejects.toThrow();
   });
 
   it("parses a materialized action instance", () => {
@@ -3713,8 +3840,21 @@ describe("dispatch protocol", () => {
     })).toThrow(/acceptance/);
   });
 
-  it("parses a cost estimate the scheduler can compare to run limits", () => {
+  it("compares a cost estimate against limits in the same units", () => {
+    // budget_usd and token counts cannot bound a projection expressed in model
+    // calls and renders; RunLimits gains ceilings in the probe's own units.
+    const wf = WorkflowDef.parse({
+      ir_version: 2, run_limits: { max_model_calls: 4, max_renders: 0 },
+      stages: [{ id: "a", owner: "x" }],
+    });
     expect(CostEstimate.safeParse({ version: 1, model_calls: 5, renders: 1 }).success).toBe(true);
+    expect(affordable({ model_calls: 5, renders: 1 }, wf.run_limits!)).toBe(false);
+    expect(affordable({ model_calls: 3, renders: 0 }, wf.run_limits!)).toBe(true);
+  });
+
+  it("treats an absent limit as unbounded rather than zero", () => {
+    const wf = WorkflowDef.parse({ ir_version: 2, run_limits: {}, stages: [{ id: "a", owner: "x" }] });
+    expect(affordable({ model_calls: 99, renders: 9 }, wf.run_limits!)).toBe(true);
   });
 
   it("declares a diagnosis transition target on the dispatch stage", () => {
@@ -3746,9 +3886,11 @@ Expected: FAIL — `materializer` is rejected by the strict stage schema.
 Add to `ActionDispatchStage` in `src/lib/schema.ts`:
 
 ```ts
-    /** Turns one validated finding set into a concrete action instance. The
-     * kernel executes this command and validates its output; it never learns
-     * what a finding means. */
+    /** Turns one validated finding set into a concrete action instance.
+     *
+     * The kernel appends `--request <abs> --output <abs>` to the declared args
+     * and runs it in a task workspace, then parses the output file. A command
+     * with no defined transport cannot be executed, only described. */
     materializer: WorkflowCommand.optional(),
     /** Artifacts carrying pre-dispatch verdicts the kernel reads BEFORE
      * selecting actions, so an objective proven unattainable never consumes a
@@ -3762,14 +3904,28 @@ Add to `ActionDispatchStage` in `src/lib/schema.ts`:
     on_diagnose: workflowId.optional(),
 ```
 
+Add two ceilings to `RunLimits` in `src/lib/schema.ts`, expressed in the units a
+cost probe actually reports, because `budget_usd` and token counts cannot bound
+model calls and renders:
+
+```ts
+    /** Ceilings in the SAME units a cost probe reports. Absent is unbounded. */
+    max_model_calls: z.number().int().nonnegative().optional(),
+    max_renders: z.number().int().nonnegative().optional(),
+```
+
 Create `src/lib/workflow/dispatch-protocol.ts` with `PreDispatchVerdict`
-(`{ version: 1, unreachable: Array<{ objective, detail }> }`), `CostEstimate`
-(`{ version: 1, model_calls, renders }`), and `ActionInstance` — the wire
-contract §8 shape — whose `superRefine` requires at least one acceptance
-criterion and confines `writes` to `owns`. `runMaterializer` writes the request
-artifact, runs the declared command in a task workspace, and parses its output;
-a materializer that emits an invalid instance fails the dispatch rather than
-being partially believed. Validate `on_diagnose` against declared stage ids in
+(`{ version: 1, unreachable: Array<{ objective, detail }>, requires_diagnosis: Array<{ objective, detail }> }`),
+`CostEstimate` (`{ version: 1, model_calls, renders }`),
+`affordable(estimate, limits)` comparing them and treating an absent limit as
+unbounded, and `ActionInstance` — the wire contract §8 shape — whose `superRefine` requires at least one acceptance
+criterion and confines `writes` to `owns`. `runMaterializer(dir, stage, request)` writes the request artifact to
+`repair/<action-id>/request.json`, spawns the declared command with
+`--request <abs path> --output <abs path>` appended to its args, waits for exit,
+and parses the output file through `parseActionInstance`. A non-zero exit, a
+missing output file, or an invalid instance fails the dispatch rather than being
+partially believed. The transport is explicit because a command without one can
+be described but never executed. Validate `on_diagnose` against declared stage ids in
 the workflow-level refinement.
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -3802,7 +3958,13 @@ its own task workspace while ingestion read the canonical one.
 
 **Interfaces:**
 - Consumes: `Observation`, `Criterion`.
-- Produces: `observationRecordId(observation): string`; `bindObservations(dir, store, criteria): Promise<ObservationBinding[]>` where `ObservationBinding = { metric, scope_key, record_id: string | null }`; `resolveBinding(dir, store, binding)`; `ingestEnvelope(canonicalDir, storePath, envelopeAbsPath, unit)` taking an **absolute** envelope path.
+- Produces: `observationRecordId(observation): string`; `bindBefore(dir, store, expectations): Promise<ObservationBinding[]>` where `expectations = Array<{ metric, scope_key, input_digest, evaluator_digest }>` and `ObservationBinding = { metric, scope_key, record_id: string | null }`; `bindFrom(appended: Observation[]): ObservationBinding[]`; `resolveBinding(dir, store, binding)`; `ingestEnvelope(canonicalDir, storePath, envelopeAbsPath, unit)` taking an **absolute** envelope path and returning `appended` records.
+
+**Binding never re-queries "newest".** A criterion carries no digests, so
+`bindBefore` takes the *expected* digests the domain layer computed — matching
+the same four-tuple the store is keyed by. And the after state is bound directly
+from `ingestEnvelope().appended`, because re-querying could pick up a record a
+concurrent measurement unit appended for the same metric.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3814,7 +3976,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
-  Observation, appendObservation, observationRecordId, bindObservations, resolveBinding,
+  Observation, appendObservation, observationRecordId, bindBefore, bindFrom, resolveBinding,
 } from "../src/lib/workflow/observations.js";
 import { ingestEnvelope } from "../src/lib/workflow/measurements.js";
 
@@ -3832,32 +3994,63 @@ const record = (o: Record<string, unknown> = {}) => Observation.parse({
 });
 
 describe("observation binding", () => {
-  it("binds a criterion to the newest matching record before dispatch", async () => {
+  const expectation = { metric: "test_coverage", scope_key: "",
+                        input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) };
+
+  it("binds the before state by expected digests, not by newest", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-"));
     dirs.push(dir);
     await appendObservation(dir, STORE, record({ value: 0.5, sequence: 1 }));
-    const [binding] = await bindObservations(dir, STORE, [criterion]);
-    // A criterion carries no digests, so the binding — not the criterion — is
-    // what identifies the exact "before" record.
-    expect(binding.record_id).toBeTruthy();
+    const [binding] = await bindBefore(dir, STORE, [expectation]);
     expect((await resolveBinding(dir, STORE, binding))?.value).toBe(0.5);
   });
 
-  it("binds to null when no observation exists yet", async () => {
+  it("binds to null when no observation matches the expected digests", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-none-"));
     dirs.push(dir);
-    expect((await bindObservations(dir, STORE, [criterion]))[0].record_id).toBeNull();
+    await appendObservation(dir, STORE, record({ value: 0.5, input_digest: "f".repeat(64) }));
+    // A record for a different input is not this attempt's before state.
+    expect((await bindBefore(dir, STORE, [expectation]))[0].record_id).toBeNull();
+  });
+
+  it("does not bind a stale record across an A to B to A change", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-aba-"));
+    dirs.push(dir);
+    await appendObservation(dir, STORE, record({ value: 0.5, input_digest: "b".repeat(64), sequence: 1 }));
+    await appendObservation(dir, STORE, record({ value: 0.1, input_digest: "c".repeat(64), sequence: 2 }));
+    // Newest by sequence is the B record; the expected digest is A's.
+    const [binding] = await bindBefore(dir, STORE, [expectation]);
+    expect((await resolveBinding(dir, STORE, binding))?.value).toBe(0.5);
   });
 
   it("keeps the before binding stable when a newer record is appended", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-stable-"));
     dirs.push(dir);
     await appendObservation(dir, STORE, record({ value: 0.5, sequence: 1 }));
-    const [before] = await bindObservations(dir, STORE, [criterion]);
+    const [before] = await bindBefore(dir, STORE, [expectation]);
     await appendObservation(dir, STORE, record({ value: 0.9, sequence: 2, input_digest: "c".repeat(64) }));
-    // The bound record is the one the attempt started from, not whatever is
-    // newest at evaluation time.
     expect((await resolveBinding(dir, STORE, before))?.value).toBe(0.5);
+  });
+
+  it("binds the after state from the records ingestion appended", async () => {
+    const canonical = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-after-"));
+    dirs.push(canonical);
+    const appended = [record({ value: 0.95, sequence: 7 })];
+    const [binding] = bindFrom(appended);
+    expect(binding.record_id).toBe(observationRecordId(appended[0]));
+  });
+
+  it("is unaffected by a concurrent unit appending the same metric", async () => {
+    const canonical = await fs.mkdtemp(path.join(os.tmpdir(), "malaclaw-bind-race-"));
+    dirs.push(canonical);
+    const mine = record({ value: 0.95, sequence: 7 });
+    const theirs = record({ value: 0.20, sequence: 9, input_digest: "d".repeat(64) });
+    await appendObservation(canonical, STORE, mine);
+    await appendObservation(canonical, STORE, theirs);
+    // Re-querying "newest for this metric" would return the other unit's
+    // record; binding from `appended` cannot.
+    const [binding] = bindFrom([mine]);
+    expect((await resolveBinding(canonical, STORE, binding))?.value).toBe(0.95);
   });
 
   it("gives a record a stable content-addressed id", async () => {
@@ -3905,20 +4098,30 @@ Expected: FAIL — `observationRecordId` and `bindObservations` do not exist, an
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add `observationRecordId` (the record's content digest, already the filename
-stem), `bindObservations` and `resolveBinding` to `observations.ts`. Change
-`ingestEnvelope` to take an **absolute** envelope path so it can read the
-measurement's task workspace. Add `observation_bindings` to `AttemptTransition`.
+Add to `observations.ts`: `observationRecordId` (the record's content digest,
+already the filename stem); `bindBefore(dir, store, expectations)`, which filters
+on all four identity fields and takes the highest sequence *among matches*; and
+`bindFrom(appended)`, a pure function over the records ingestion just wrote.
+Change `ingestEnvelope` to take an **absolute** envelope path so it can read the
+measurement's task workspace, and to return its `appended` records. Add
+`observation_bindings` to `AttemptTransition`.
+
+The domain layer supplies the expected digests: the action instance carries, per
+criterion, the `input_digest` and `evaluator_digest` its measurement will
+produce, computed by the same registry that will compute them again at
+measurement time.
 
 Then correct the Task 18 cycle order to:
 
-1. `bindObservations` for the unit's acceptance and `must_preserve` criteria →
+1. `bindBefore` using the expected digests carried on the action instance →
    the **before** bindings, journaled with `prepared`.
 2. Run the mutation in its task workspace; validate and commit its diff.
 3. Run each `evaluate_with` measurement against the post-mutation state, in its
    own task workspace.
 4. `ingestEnvelope` from that task workspace's absolute envelope path.
-5. `bindObservations` again → the **after** bindings, journaled with `measured`.
+5. `bindFrom(result.appended)` → the **after** bindings, journaled with
+   `measured`. Never a second query: a concurrent measurement unit may have
+   appended a record for the same metric.
 6. `evaluateContract` over the resolved before and after records — those exact
    records, not a re-query that could pick up an unrelated newer measurement.
 

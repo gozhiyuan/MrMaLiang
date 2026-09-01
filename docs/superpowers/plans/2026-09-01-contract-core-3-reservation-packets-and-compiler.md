@@ -817,11 +817,18 @@ The packet is built from registered findings, current scoped observations and de
 - Create: `packages/longwrite/src/lib/ops/repair-packet.ts`
 - Test: `packages/longwrite/tests/repair-packet.test.ts`
 
-**Interfaces:**
-- Consumes: `Finding`, `REGISTRY` (Plan 1); `safeFileStem` (existing, `recovery-repair.ts`); the current-values view the kernel exposes.
-- Produces: `RepairPacket` schema; `buildRepairPacket(workspaceDir, request): Promise<RepairPacket>` where `request = { actionId; findings; observations; templateMustPreserve; priorAttempts; limits? }`; `writeRepairPacket(workspaceDir, actionId, packet)`.
+**Prerequisite:** Task 9's capability templates must land before this task —
+`buildRepairPacket` reads them, and templates depend only on the registry.
 
-Protected metrics and acceptance are **derived** from the capability template and the findings' gates, never passed in as optional caller data.
+**Interfaces:**
+- Consumes: `Finding`, `REGISTRY` (Plan 1); `templateFor` (Task 9); `safeFileStem` (existing, `recovery-repair.ts`); the current-values view the kernel exposes.
+- Produces: `RepairPacket` schema; `buildRepairPacket(workspaceDir, request): Promise<RepairPacket>` where `request = { actionId; findings; observations; priorAttempts; limits? }`; `writeRepairPacket(workspaceDir, actionId, packet)`.
+
+Protected metrics and acceptance are **derived** — the capability is resolved
+from the findings, its template is loaded, and `must_preserve_template` comes
+from there. Accepting a `templateMustPreserve` field and trusting it would let a
+caller that omits it produce a packet with no invariants at all, which is the
+opposite of derivation.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -863,7 +870,6 @@ const request = {
   actionId: "a1",
   findings: [finding],
   observations: new Map([["claim_support ", 0.94], ["rendered_visual_review ", 0]]),
-  templateMustPreserve: ["claim_support"],
   priorAttempts: [],
 };
 
@@ -873,12 +879,18 @@ describe("repair packets", () => {
     expect(packet.capability).toBe("revise_sections");
   });
 
-  it("derives protected metrics from the template, not from caller input", async () => {
+  it("derives protected metrics from the resolved capability's template", async () => {
     const packet = await buildRepairPacket(await workspace(), request);
-    // A caller that forgets to pass protected metrics must not produce a packet
-    // with no invariants; they come from the template.
-    expect(packet.protect.map((entry) => entry.metric)).toEqual(["claim_support"]);
+    // The request carries no protected-metric list at all, so a caller cannot
+    // produce a packet with no invariants by omitting one.
+    expect(packet.protect.map((entry) => entry.metric))
+      .toEqual(templateFor("revise_sections").must_preserve_template);
     expect(packet.protect[0].value).toBeCloseTo(0.94, 6);
+  });
+
+  it("rejects a request that tries to supply its own protected metrics", async () => {
+    await expect(buildRepairPacket(await workspace(),
+      { ...request, templateMustPreserve: ["nothing"] } as never)).rejects.toThrow();
   });
 
   it("fails when a protected metric has no current observation", async () => {
@@ -963,6 +975,7 @@ import path from "node:path";
 import { z } from "zod";
 import { FindingSchema, type Finding } from "../registry/records.js";
 import { REGISTRY } from "../registry/producers.js";
+import { templateFor } from "../registry/capabilities.js";
 import { metricDefinition } from "../registry/metrics.js";
 import { metricId } from "../registry/ids.js";
 import { safeFileStem } from "../research/recovery-repair.js";
@@ -1045,8 +1058,6 @@ export async function buildRepairPacket(
     findings: Finding[];
     /** Current scoped values, keyed `metric scope_key`, supplied by the engine. */
     observations: Map<string, number>;
-    /** Metric names the capability template protects. */
-    templateMustPreserve: string[];
     priorAttempts: RepairPacket["prior_attempts"];
     evidence?: RepairPacket["evidence"];
     untrusted?: Array<{ origin: string; body: string }>;
@@ -1074,7 +1085,9 @@ export async function buildRepairPacket(
     return { path: finding.artifact.path, kind: finding.artifact.kind, excerpt, truncated };
   }));
 
-  const protect = request.templateMustPreserve.map((name) => {
+  // Derived from the resolved capability, never from the request.
+  const template = templateFor([...capabilities][0]);
+  const protect = template.must_preserve_template.map((name) => {
     const definition = metricDefinition(metricId(name));
     const key = `${name} `;
     const value = request.observations.get(key);
@@ -1856,7 +1869,7 @@ git commit -m "feat(ops): materialize per-finding action instances from capabili
 
 **Interfaces:**
 - Consumes: `METRIC_REGISTRY`, `metricsOfTier`, `metricDefinition` (Plan 1).
-- Produces: `measure_unit_metrics` and `measure_round_metrics` (script tiers, via `longwrite metrics evaluate`), plus **one acquisition stage per model metric** — `acquire_review_score`, `acquire_claim_support`, `acquire_rendered_visual_review` — each emitting the same envelope format.
+- Produces: `measure_unit_metrics` and `measure_round_metrics` (script tiers, via `longwrite metrics evaluate`), plus **one acquisition stage per model metric** — `acquire_review_score`, `acquire_claim_support`, `acquire_rendered_visual_review` — each emitting the same envelope format. **There is no `measure_release_metrics` stage.**
 
 Two defects, not one. The previous draft declared a single stage claiming every
 registered metric while invoking only `--tier unit`. And `metrics evaluate`
@@ -1881,22 +1894,30 @@ import { metricsOfTier } from "../src/lib/registry/metrics.js";
 // compiledWorkspace() scaffolds and compiles a survey workspace.
 
 describe("measurement stages", () => {
-  it("declares one measurement stage per tier", async () => {
+  it("declares a script measurement stage for the unit and round tiers only", async () => {
     const manifest = await compiledManifest();
-    for (const id of ["measure_unit_metrics", "measure_round_metrics", "measure_release_metrics"]) {
+    for (const id of ["measure_unit_metrics", "measure_round_metrics"]) {
       expect(manifest.workflow.stages.some((stage) => stage.id === id), id).toBe(true);
+    }
+    // There is no measure_release_metrics: `metrics evaluate` defers every
+    // model metric by design, so such a stage could never produce one.
+    expect(manifest.workflow.stages.some((stage) => stage.id === "measure_release_metrics")).toBe(false);
+  });
+
+  it("declares exactly the metrics each script tier owns", async () => {
+    const manifest = await compiledManifest();
+    for (const [id, tier] of [["measure_unit_metrics", "unit"], ["measure_round_metrics", "round"]] as const) {
+      const stage = manifest.workflow.stages.find((entry) => entry.id === id)!;
+      expect((stage.writes_observations ?? []).sort()).toEqual(metricsOfTier(tier).map(String).sort());
     }
   });
 
-  it("declares exactly the metrics each tier owns", async () => {
+  it("gives every release metric exactly one acquisition stage", async () => {
     const manifest = await compiledManifest();
-    for (const [id, tier] of [["measure_unit_metrics", "unit"], ["measure_round_metrics", "round"],
-                              ["measure_release_metrics", "release"]] as const) {
-      const stage = manifest.workflow.stages.find((entry) => entry.id === id)!;
-      // Claiming metrics a stage does not measure is how a release metric came
-      // to be declared by a unit-tier invocation.
-      expect((stage.writes_observations ?? []).sort())
-        .toEqual(metricsOfTier(tier).map(String).sort());
+    for (const metric of metricsOfTier("release")) {
+      const stages = manifest.workflow.stages.filter((s) => (s.writes_observations ?? []).includes(String(metric)));
+      expect(stages.map((s) => s.id), `${metric} must have exactly one producer`).toHaveLength(1);
+      expect(stages[0].id).toBe(`acquire_${String(metric)}`);
     }
   });
 
@@ -1929,7 +1950,9 @@ describe("measurement stages", () => {
 
   it("declares every measurement stage as kind measurement with no envelope", async () => {
     const manifest = await compiledManifest();
-    for (const stage of manifest.workflow.stages.filter((s) => s.id.startsWith("measure_"))) {
+    const measurement = manifest.workflow.stages.filter(
+      (s) => s.id.startsWith("measure_") || s.id.startsWith("acquire_"));
+    for (const stage of measurement) {
       expect(stage.kind).toBe("measurement");
       expect(stage.owns ?? []).toEqual([]);
     }
@@ -1944,7 +1967,7 @@ describe("measurement stages", () => {
   it("names only registered metrics", async () => {
     const manifest = await compiledManifest();
     const registered = new Set([...metricsOfTier("unit"), ...metricsOfTier("round"), ...metricsOfTier("release")].map(String));
-    for (const stage of manifest.workflow.stages.filter((s) => s.id.startsWith("measure_"))) {
+    for (const stage of manifest.workflow.stages) {
       for (const metric of stage.writes_observations ?? []) expect(registered.has(metric), metric).toBe(true);
     }
   });
@@ -2991,7 +3014,17 @@ MrMaLiang into it and proves each path through the **real engine**.
 
 **Interfaces:**
 - Consumes: `materializer`, `verdict_inputs`, `cost_probe`, `on_diagnose` (Plan 2 Task 22).
-- Produces: an `action_dispatch` stage declaring all four; `research materialize-action`, `research reachability-verdict` and `research cost-probe` as its commands.
+- Produces: an `action_dispatch` stage declaring all four, plus **three registered CLI commands with explicit transport**:
+
+| Command | Arguments | Reads | Writes |
+| --- | --- | --- | --- |
+| `research materialize-action <workspace>` | `--request <path> --output <path>` | the finding set and current observations | one `ActionInstance` JSON |
+| `research reachability-verdict <workspace>` | `--output <path>` | gate reachability, target ledger, unclassified checks | one `PreDispatchVerdict` JSON |
+| `research cost-probe <workspace>` | `--request <path> --output <path>` | the metrics a round would measure | one `CostEstimate` JSON |
+
+The kernel appends `--request` and `--output` itself (Plan 2 Task 22), so each
+command must accept them. A command registered as `<workspace>` only cannot be
+driven by the engine — it can be described, never executed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3042,11 +3075,31 @@ describe("kernel dispatch wiring", () => {
     expect(state.units.improve.contractOutcome).toBe("unreachable");
   });
 
-  it("materializes an action instance through the declared command", async () => {
+  it("materializes an action instance by really spawning the command", async () => {
     const ws = await workspaceWithOneFinding();
+    // Through the engine and a real process, not by inspecting the manifest.
     await runFlow({ workflow: await workflowFor(ws), workspaceDir: ws, runtime: scriptRuntime });
     const instance = JSON.parse(await fs.readFile(path.join(ws, "repair/a1/instance.json"), "utf-8"));
     expect(instance.from_template).toBe("revise_sections");
+  });
+
+  it("accepts --request and --output on all three commands", async () => {
+    const ws = await compiledWorkspace();
+    for (const [command, args] of [
+      ["materialize-action", ["--request", "repair/a1/request.json", "--output", "repair/a1/instance.json"]],
+      ["reachability-verdict", ["--output", "reports/reachability-verdict.json"]],
+      ["cost-probe", ["--request", "reports/round.json", "--output", "reports/cost.json"]],
+    ] as const) {
+      const result = await runLongwrite(["research", command, ws, ...args]);
+      expect(result.code, `${command}: ${result.stderr}`).toBe(0);
+    }
+  });
+
+  it("dispatches diagnosis for a check that failed without a routable finding", async () => {
+    const ws = await workspaceWithUnclassifiedBuildError();
+    const state = await runFlow({ workflow: await workflowFor(ws), workspaceDir: ws, runtime: scriptRuntime });
+    // Otherwise the round stalls on a red gate with no next step.
+    expect(state.units.diagnose_objective.executionOutcome).toBe("completed");
   });
 
   it("runs the diagnosis stage when a repair returns unmet", async () => {
@@ -3055,8 +3108,10 @@ describe("kernel dispatch wiring", () => {
     expect(state.units.diagnose_objective.executionOutcome).toBe("completed");
   });
 
-  it("pauses before spending when the cost probe exceeds the remaining budget", async () => {
-    const ws = await workspaceWithTinyBudget();
+  it("pauses before spending when the cost probe exceeds the declared limits", async () => {
+    // run_limits carries max_model_calls and max_renders, the same units the
+    // probe reports; budget_usd could not have bounded them.
+    const ws = await workspaceWithTinyBudget({ max_model_calls: 1, max_renders: 0 });
     const state = await runFlow({ workflow: await workflowFor(ws), workspaceDir: ws, runtime: scriptRuntime });
     expect(state.status).toBe("paused_blocker");
   });
@@ -3070,11 +3125,21 @@ Expected: FAIL — the compiled dispatch stage declares none of the four fields.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Emit the four fields on the improve phase's `action_dispatch` stage in
-`composition.ts`, backed by `research materialize-action`,
-`research reachability-verdict` and `research cost-probe`. Remove the
-`diagnose_requested` and `unreachable_objectives` `when` expressions — both were
-domain concepts the kernel never defined, and both are now protocol fields.
+Register all three commands in `src/cli.ts` with `--request` and `--output`
+options — `materialize-action` currently takes only `<workspace>`, and the other
+two do not exist. Each reads its request (where applicable), computes, and
+writes exactly one JSON document to `--output`; none prints its result to
+stdout, because the kernel reads a file.
+
+Then emit the four protocol fields on the improve phase's `action_dispatch`
+stage in `composition.ts`. Remove the `diagnose_requested` and
+`unreachable_objectives` `when` expressions — both were domain concepts the
+kernel never defined, and both are now protocol fields.
+
+The reachability verdict carries two lists: `unreachable`, from gate
+reachability; and `requires_diagnosis`, from every check that failed with
+`requires_diagnosis: true` — the unclassified LaTeX failure among them, so a
+check with no routable finding reaches diagnosis instead of stalling the round.
 
 - [ ] **Step 4: Run test to verify it passes**
 
