@@ -839,7 +839,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { RepairPacket, buildRepairPacket, writeRepairPacket } from "../src/lib/ops/repair-packet.js";
+import {
+  RepairPacket, buildRepairPacket, writeRepairPacket, OperatorTargetFinding,
+} from "../src/lib/ops/repair-packet.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -861,6 +863,7 @@ const finding = {
   gate_id: "figure_references",
   artifact: { kind: "chapter_prose" as const, path: "chapters/section-03.md", artifact_id: "figure-1" },
   location: "paragraph preceding the float generated at paper/sections/section-03.tex",
+  objective_scope_key: "",
   required_effect: "add_explicit_artifact_reference" as const,
   severity: "major" as const,
   diagnostic: "Figure 1 is not named before its placement.",
@@ -942,6 +945,17 @@ describe("repair packets", () => {
     expect(RepairPacket.safeParse(JSON.parse(await fs.readFile(path.join(ws, written), "utf-8"))).success).toBe(true);
   });
 
+  it("refuses to build a packet for an operator target", async () => {
+    // A missing compiler has no path to excerpt and nothing to edit; the
+    // artifact union has no `path` on that branch at all.
+    await expect(buildRepairPacket(await workspace(), {
+      ...request,
+      findings: [{ ...finding, gate_id: "latex_build",
+        artifact: { kind: "toolchain" as const, target: "pdflatex" },
+        required_effect: "repair_toolchain" as const }],
+    })).rejects.toThrow(OperatorTargetFinding);
+  });
+
   it("throws rather than building a packet for an unrouted finding", async () => {
     await expect(buildRepairPacket(await workspace(), {
       ...request,
@@ -1018,6 +1032,16 @@ export const RepairPacket = z.object({
 }).strict();
 export type RepairPacket = z.infer<typeof RepairPacket>;
 
+/** Raised instead of building a packet for a finding whose artifact is an
+ * operator target. The dispatcher catches it and materializes an
+ * `operator_required` blocker naming the target. */
+export class OperatorTargetFinding extends Error {
+  constructor(readonly findingIds: string[]) {
+    super(`findings ${findingIds.join(", ")} name operator targets; there is nothing to repair, only to ask`);
+    this.name = "OperatorTargetFinding";
+  }
+}
+
 function assertInsideWorkspace(workspaceDir: string, relative: string): string {
   const resolved = path.resolve(workspaceDir, relative);
   const root = path.resolve(workspaceDir);
@@ -1067,6 +1091,14 @@ export async function buildRepairPacket(
   const limits = { ...DEFAULT_LIMITS, ...request.limits };
   if (safeFileStem(request.actionId) !== request.actionId) {
     throw new Error(`unsafe action id for a repair directory: ${request.actionId}`);
+  }
+
+  // An operator target has no path to excerpt and nothing this product can
+  // edit. It is a question, not a repair, so it never becomes a packet — the
+  // dispatcher turns it straight into a typed blocker instead.
+  const operatorTargets = request.findings.filter((finding) => !("path" in finding.artifact));
+  if (operatorTargets.length > 0) {
+    throw new OperatorTargetFinding(operatorTargets.map((finding) => finding.id));
   }
 
   // Fails closed: an unrouted finding raises UnroutedFindingError here rather
@@ -1170,6 +1202,7 @@ const packet = {
   findings: [{
     id: "f1", gate_id: "figure_references",
     artifact: { kind: "chapter_prose", path: "chapters/section-03.md" },
+    objective_scope_key: "",
     required_effect: "add_explicit_artifact_reference", severity: "major",
     diagnostic: "Figure 1 is not named before its placement.",
   }],
@@ -1273,6 +1306,8 @@ export function renderPacketPrompt(packet: RepairPacket): string {
   const instructions = [
     `Action: ${packet.action_id} (${packet.capability})`,
     "",
+    // Every finding in a packet names an editable artifact; operator targets
+    // never reach here, because buildRepairPacket rejects them.
     ...packet.findings.map((finding) => [
       `Finding ${finding.id}`,
       `  Artifact: ${finding.artifact.kind} at ${finding.artifact.path}`,
@@ -1726,6 +1761,7 @@ afterEach(async () => {
 const finding = {
   id: "figure-1-missing-reference", gate_id: "figure_references",
   artifact: { kind: "chapter_prose" as const, path: "chapters/section-03.md", artifact_id: "figure-1" },
+  objective_scope_key: "",
   required_effect: "add_explicit_artifact_reference" as const, severity: "major" as const,
   diagnostic: "Figure 1 is not named before its placement.",
 };
@@ -1820,6 +1856,17 @@ describe("action instances", () => {
       expect.arrayContaining(["template", "finding_ids", "scope_key", "acceptance"]));
   });
 
+  it("turns an operator target into a blocker rather than an instance", async () => {
+    const result = await materializeAction(await workspace(), {
+      actionId: "a1", observations,
+      findings: [{ ...finding, gate_id: "latex_build",
+        artifact: { kind: "toolchain" as const, target: "pdflatex" },
+        required_effect: "repair_toolchain" as const }],
+    });
+    expect(result.kind).toBe("operator_required");
+    expect(result.target).toBe("pdflatex");
+  });
+
   it("produces a schema-valid instance", async () => {
     const instance = await materializeAction(await workspace(), {
       actionId: "a1", findings: [finding], observations,
@@ -1842,6 +1889,11 @@ Run: `npm test --workspace @mr-maliang/longwrite -- action-instance`
 Expected: FAIL — cannot resolve `action-instance.js`.
 
 - [ ] **Step 3: Write minimal implementation**
+
+An operator-target finding never becomes an action instance either:
+`materializeAction` catches `OperatorTargetFinding` and returns an
+`operator_required` blocker naming the target and the question, which the kernel
+treats as a durable pause rather than a dispatchable repair.
 
 Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from `gateAcceptanceCriterion` for each distinct gate, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
 
@@ -3008,6 +3060,8 @@ functions that nothing calls. Plan 2 Task 22 defines the protocol; this compiles
 MrMaLiang into it and proves each path through the **real engine**.
 
 **Files:**
+- Modify: `packages/longwrite/src/cli.ts` (register all three commands with `--request`/`--output`)
+- Create: `packages/longwrite/src/commands/dispatch.ts` (`runMaterializeAction`, `runReachabilityVerdict`, `runCostProbe`)
 - Modify: `packages/longwrite/src/workflow/composition.ts`
 - Modify: `packages/longwrite/src/lib/compiler.ts`
 - Test: `packages/longwrite/tests/kernel-dispatch-wiring.test.ts`
@@ -3149,7 +3203,7 @@ Expected: PASS after regenerating the golden fixtures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/longwrite/src/workflow/composition.ts packages/longwrite/src/lib/compiler.ts packages/longwrite/tests/kernel-dispatch-wiring.test.ts packages/longwrite/tests/fixtures/compiled/
+git add packages/longwrite/src/cli.ts packages/longwrite/src/commands/dispatch.ts packages/longwrite/src/workflow/composition.ts packages/longwrite/src/lib/compiler.ts packages/longwrite/tests/kernel-dispatch-wiring.test.ts packages/longwrite/tests/fixtures/compiled/
 git commit -m "feat(workflow): compile the dispatch protocol so the kernel calls the domain"
 ```
 
@@ -3163,4 +3217,9 @@ git commit -m "feat(workflow): compile the dispatch protocol so the kernel calls
 
 **Type consistency.** `TargetRecord` and `ExclusionReason` (Task 2) are consumed by `reservation.ts` (Task 3) and the selectors (Task 4). `landmarkTargetKey` (Task 1) is the ledger key in Task 2. `RepairPacket` (Task 5) is rendered by Task 6 and written by Task 10. `CapabilityTemplate` (Task 9) is the input to `materializeAction` (Task 10). `metricDefinition` throws on an unknown metric, so Task 13's cost projection fails loudly rather than pricing at zero.
 
-**Ordering constraints.** Task 18 (router retirement) gates every later routing behaviour and should land first among the corrections; Task 20 requires Plan 2 Task 22. Tasks 1–6 and 14 need only Plan 1. Tasks 7–13 and 15–17 need Plan 2 released as MalaClaw 3.0; Task 16 additionally needs Plan 2 Task 20, which ships the corpus. Task 9 precedes Task 10. Task 14 changes emitted prompt text, so it should land before Tasks 8, 11 and 12 regenerate the compiled golden fixtures, or the same fixtures regenerate twice.
+**Ordering constraints.** Task 18 (router retirement) gates every later routing
+behaviour and should land first among the corrections; Task 20 requires Plan 2
+Task 22. Tasks 1–4 and 14 need only Plan 1. **Task 5 requires Task 9**, because a
+packet derives its protected metrics from a capability template — and Task 9
+requires Plan 2, so repair packets are not Plan-1-only work despite appearing
+early in the milestone order. Tasks 7–13 and 15–17 need Plan 2 released as MalaClaw 3.0; Task 16 additionally needs Plan 2 Task 20, which ships the corpus. Task 9 precedes Task 10. Task 14 changes emitted prompt text, so it should land before Tasks 8, 11 and 12 regenerate the compiled golden fixtures, or the same fixtures regenerate twice.

@@ -1537,6 +1537,7 @@ import os from "node:os";
 import path from "node:path";
 import { stringify } from "yaml";
 import { CORPUS_EVALUATORS, MeasurementUnavailable } from "../src/lib/registry/evaluators/corpus.js";
+import { scopeKey } from "../src/lib/registry/scope.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -1623,8 +1624,12 @@ describe("corpus evaluators", () => {
     ], {}, ["memory", "planning"]);
     const values = await CORPUS_EVALUATORS.taxonomy_cell_ab_sources(ctx(ws));
     // The previous design reported min(2, 1) = 1, which cannot tell a repair
-    // which cell is short.
-    expect(values.map((v) => `${v.scope_key}=${v.value}`).sort()).toEqual(["memory=2", "planning=1"]);
+    // which cell is short. The key is canonical, never the raw label: a real
+    // cell may contain spaces the kernel's scope pattern rejects.
+    const byKey = Object.fromEntries(values.map((v) => [v.scope_key, v.value]));
+    expect(byKey[scopeKey("taxonomy_cell", "memory")]).toBe(2);
+    expect(byKey[scopeKey("taxonomy_cell", "planning")]).toBe(1);
+    expect(Object.keys(byKey)).toHaveLength(2);
   });
 
   it("is reproducible across a year boundary because the as-of date is explicit", async () => {
@@ -1805,6 +1810,7 @@ import path from "node:path";
 import { metricId } from "../src/lib/registry/ids.js";
 import { buildEnvelope } from "../src/lib/registry/evaluate.js";
 import { MeasurementEnvelopeSchema } from "../src/lib/registry/records.js";
+import { scopeKey } from "../src/lib/registry/scope.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -1834,10 +1840,11 @@ describe("metrics evaluate", () => {
     expect("sequence" in envelope.measurements[0]).toBe(false);
   });
 
-  it("emits one entry per scope for a scoped metric", async () => {
+  it("emits one canonically-keyed entry per scope for a scoped metric", async () => {
     const ws = await workspace(undefined, undefined, ["memory", "planning"]);
     const envelope = await buildEnvelope(ws, { metrics: [metricId("taxonomy_cell_ab_sources")], asOfDate: AS_OF });
-    expect(envelope.measurements.map((m) => m.scope_key).sort()).toEqual(["memory", "planning"]);
+    expect(envelope.measurements.map((m) => m.scope_key).sort())
+      .toEqual([scopeKey("taxonomy_cell", "memory"), scopeKey("taxonomy_cell", "planning")].sort());
   });
 
   it("marks a model metric deferred, not failed", async () => {
@@ -2041,7 +2048,8 @@ import { stringify } from "yaml";
 import { evaluateCorpusGates } from "../src/lib/research/corpus-gates.js";
 import { MeasurementEntrySchema } from "../src/lib/registry/records.js";
 import { METRIC_REGISTRY } from "../src/lib/registry/metrics.js";
-import { metricId } from "../src/lib/registry/ids.js";
+import { metricId, taxonomyGateId } from "../src/lib/registry/ids.js";
+import { scopeKey } from "../src/lib/registry/scope.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -2097,8 +2105,9 @@ describe("corpus gate structured output", () => {
   it("emits one taxonomy entry per cell, never an aggregate", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
     const cells = report.measurements.filter((entry) => entry.metric === "taxonomy_cell_ab_sources");
-    expect(cells.map((entry) => `${entry.scope_key}=${entry.value}`).sort())
-      .toEqual(["memory=2", "planning=1"]);
+    const byKey = Object.fromEntries(cells.map((entry) => [entry.scope_key, entry.value]));
+    expect(byKey[scopeKey("taxonomy_cell", "memory")]).toBe(2);
+    expect(byKey[scopeKey("taxonomy_cell", "planning")]).toBe(1);
   });
 
   it("emits no sequence, because the kernel allocates them", async () => {
@@ -2115,10 +2124,11 @@ describe("corpus gate structured output", () => {
     expect(core.findings[0].objective_scope_key).toBe("");
   });
 
-  it("scopes a taxonomy check to its cell", async () => {
+  it("scopes a taxonomy check to its cell, with gate id and scope agreeing", async () => {
     const report = await evaluateCorpusGates(await workspace(), { asOfDate: AS_OF });
-    const cell = report.checks.find((check) => String(check.id).startsWith("taxonomy:"))!;
-    expect(cell.findings[0].objective_scope_key).toMatch(/^taxonomy-cell-/);
+    const cell = report.checks.find((check) => String(check.id) === taxonomyGateId("memory"))!;
+    // Both derive from one slugify, so a gate and its scope cannot disagree.
+    expect(cell.findings[0].objective_scope_key).toBe(scopeKey("taxonomy_cell", "memory"));
   });
 
   it("agrees with the gate decision because both read one evaluator result", async () => {

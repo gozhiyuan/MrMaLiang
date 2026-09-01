@@ -883,13 +883,26 @@ describe("effect commit", () => {
     expect((await pendingCommits(dir))[0].done).toHaveLength(1);
   });
 
-  it("finishes an interrupted commit from the task workspace", async () => {
+  it("finishes an interrupted commit after the task workspace is gone", async () => {
     const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two" });
     await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
     await fs.writeFile(path.join(ws.root, "src/b.ts"), "also", "utf-8");
     await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 1 })).rejects.toThrow();
+    // A restart destroys the temp task workspace; recovery must not need it.
+    await fs.rm(ws.root, { recursive: true, force: true });
     await reconcileCommit(dir, (await pendingCommits(dir))[0], "finish");
     expect(await fs.readFile(path.join(dir, "src/b.ts"), "utf-8")).toBe("also");
+  });
+
+  it("keeps deletions in the manifest across every rewrite", async () => {
+    const { dir, ws } = await prepared({ "src/a.ts": "one", "src/b.ts": "two", "src/c.ts": "three" });
+    await fs.rm(path.join(ws.root, "src/c.ts"));
+    await fs.writeFile(path.join(ws.root, "src/a.ts"), "changed", "utf-8");
+    await fs.writeFile(path.join(ws.root, "src/b.ts"), "also", "utf-8");
+    await expect(commitEffects(dir, ws, await diffTaskWorkspace(ws, unit), { failAfter: 2 })).rejects.toThrow();
+    // The regular-file branch used to rebuild the manifest without deletions,
+    // so recovery lost half the plan.
+    expect((await pendingCommits(dir))[0].deletions).toEqual(["src/c.ts"]);
   });
 
   it("propagates a deletion inside the envelope", async () => {
@@ -986,11 +999,13 @@ export async function commitEffects(
 ): Promise<string[]> {
   if (diff.undeclared.length > 0) throw new Error("refusing to commit a diff with undeclared writes");
   const planned = [...diff.declared, ...diff.owned];
-  // Back up current canonical bytes BEFORE the first write, so a partial
-  // commit can be reversed rather than only detected.
+  // Before the first write: back up the current canonical bytes so a partial
+  // commit is reversible, and stage the new bytes so it is also finishable
+  // after the task workspace is gone.
   await stageBackups(canonicalDir, workspace.invocationId, planned);
-  await writeCommitManifest(canonicalDir, workspace.invocationId,
-    { planned, done: [], deletions: diff.deleted });
+  const staged_root = await stageNewBytes(canonicalDir, workspace, planned, diff.deleted);
+  const manifest = { planned, deletions: diff.deleted, staged_root };
+  await writeCommitManifest(canonicalDir, workspace.invocationId, { ...manifest, done: [] });
   const committed: string[] = [];
   for (const rel of [...diff.declared, ...diff.owned]) {
     const source = path.join(workspace.root, rel);
@@ -1000,8 +1015,7 @@ export async function commitEffects(
       committed.push(rel);
       // A deletion is a committed step like any other; skipping the journal
       // here would make it invisible to recovery.
-      await writeCommitManifest(canonicalDir, workspace.invocationId,
-        { planned, done: committed, deletions: diff.deleted });
+      await writeCommitManifest(canonicalDir, workspace.invocationId, { ...manifest, done: committed });
       continue;
     }
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -1009,7 +1023,9 @@ export async function commitEffects(
     await fs.copyFile(source, temporary);
     await fs.rename(temporary, target);
     committed.push(rel);
-    await writeCommitManifest(canonicalDir, workspace.invocationId, { planned, done: committed });
+    // Spread the manifest rather than rebuilding it: the regular-file branch
+    // previously dropped `deletions`, so recovery lost half the plan.
+    await writeCommitManifest(canonicalDir, workspace.invocationId, { ...manifest, done: committed });
   }
   await clearCommitManifest(canonicalDir, workspace.invocationId);
   return committed.sort();
@@ -1022,6 +1038,13 @@ export const CommitManifest = z.object({
   planned: z.array(z.string().min(1)),
   done: z.array(z.string().min(1)),
   deletions: z.array(z.string().min(1)).default([]),
+  /** Where the NEW bytes live, under `.malaclaw/commits/<id>/staged/`.
+   *
+   * A task workspace is a temp directory that does not survive a process
+   * restart, so a manifest pointing at one could detect an interrupted commit
+   * but never finish it. Staging inside the workspace is what makes `finish` a
+   * real option rather than a word. */
+  staged_root: z.string().min(1),
 }).strict();
 export type CommitManifest = z.infer<typeof CommitManifest>;
 
@@ -1032,6 +1055,14 @@ export type CommitManifest = z.infer<typeof CommitManifest>;
 export async function stageBackups(
   canonicalDir: string, invocationId: string, planned: string[],
 ): Promise<void> { /* copy each existing planned path; mark the rest absent */ }
+
+/** Copies the task workspace's new bytes for every planned non-deleted path
+ * under `.malaclaw/commits/<invocation>/staged/`, returning that directory.
+ * Recovery reads from here, not from the task workspace, which a restart
+ * destroys. */
+export async function stageNewBytes(
+  canonicalDir: string, workspace: TaskWorkspace, planned: string[], deletions: string[],
+): Promise<string> { /* copy planned minus deletions into staged/; return its path */ }
 
 export async function writeCommitManifest(
   canonicalDir: string, invocationId: string, manifest: Omit<CommitManifest, "invocation_id">,
@@ -1052,9 +1083,11 @@ export async function pendingCommits(canonicalDir: string): Promise<CommitManife
   return found;
 }
 
-/** Called at engine startup, before any unit runs. `finish` reapplies the
- * remaining planned files from the task workspace; `rollback` restores every
- * completed file from its backup and removes files that were absent before. */
+/** Called at engine startup, before any unit runs. `finish` applies the
+ * remaining planned files from `staged_root`; `rollback` restores every
+ * completed file from its backup and removes files that were absent before.
+ * Both read only from the workspace, so neither depends on a task directory
+ * that a restart deleted. */
 export async function reconcileCommit(
   canonicalDir: string, manifest: CommitManifest, mode: "finish" | "rollback",
 ): Promise<void> { /* ... */ }
@@ -4150,6 +4183,10 @@ stale owner can also renew or commit after takeover.
 - Modify: `src/lib/workflow/leases.ts`
 - Modify: `src/lib/workflow/supervisor.ts`
 - Modify: `src/lib/workflow/engine.ts` (present the token on commit)
+- **Modify: `tests/contract-leases.test.ts`** — Task 13's suite calls
+  `acquireLease`/`renewLease`/`releaseLease` by **owner**; every one of those
+  call sites moves to the token returned by `acquireLease`, and its
+  `classifyHealth` cases read `(await readLease(dir, "u"))!` unchanged.
 - Test: `tests/contract-lease-safety.test.ts`
 
 **Interfaces:**
@@ -4259,15 +4296,25 @@ kill**, distinct from stall diagnosis: document that a unit exceeding it is
 terminated by policy, so "only lease expiry terminates an attempt" is not
 contradicted by a timeout nobody declared.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Update Task 13's lease suite to the token API**
+
+`acquireLease` now returns `{ status, lease }`, and `renewLease` and
+`releaseLease` take a token rather than an owner name. Rewrite every call in
+`tests/contract-leases.test.ts` accordingly — for example
+`await releaseLease(dir, "u", "worker-17")` becomes
+`await releaseLease(dir, "u", held.lease!.token)`. Do not keep an owner-based
+overload to avoid the edit; two ways to release a lease is how a stale owner
+keeps one.
+
+- [ ] **Step 5: Run both lease suites**
 
 Run: `npm test -- contract-lease-safety contract-leases`
 Expected: PASS, 7 + 11 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/lib/workflow/leases.ts src/lib/workflow/supervisor.ts src/lib/workflow/engine.ts tests/contract-lease-safety.test.ts
+git add src/lib/workflow/leases.ts src/lib/workflow/supervisor.ts src/lib/workflow/engine.ts tests/contract-lease-safety.test.ts tests/contract-leases.test.ts
 git commit -m "feat(workflow): make lease acquisition exclusive and fence stale owners"
 ```
 
