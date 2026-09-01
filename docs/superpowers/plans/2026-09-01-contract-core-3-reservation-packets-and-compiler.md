@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **STATUS: BLOCKED — do not execute.** A review found compile-time and
+> semantic defects in this plan. It must be amended against
+> [the Observation and Criterion Wire Contract](../specs/2026-09-01-observation-and-criterion-wire-contract.md)
+> before any task is started. The required amendments are listed at the end of
+> this document under "Pending Amendments".
+
+
 **Goal:** Join Plan 1's registries to Plan 2's kernel — stop targeted research sources from silently disappearing between selectors, give every repair a bounded task packet instead of a compile-time file list, render planner prompts from the registries, add the diagnosis unit, and compile the LongWrite workflow to Contract IR v2.
 
 **Architecture:** Three independent problems that share one dependency. **Reservation** is an invariant on the four selectors that drop targets today. **Repair packets** replace static `inputs:` lists with a per-finding working set the engine constructs. **Compilation** emits IR v2 units carrying `owns`, `acceptance`, `must_preserve`, and `strategy`, with prompts rendered from the registries rather than restated in prose. Reservation has no dependency on the kernel and can start first.
@@ -1675,3 +1682,55 @@ Everything in Spec 1 is now assigned across the three plans. The only deliberate
 **Type consistency.** `TargetRecord` and `ExclusionReason` (Task 1) are consumed by `reservation.ts` (Task 2) and the selectors (Task 3). `Finding` and `resolveCapability` come from Plan 1 and are consumed by `repair-packet.ts` (Task 5). `REQUIRED_EFFECTS` (Plan 1 Task 1) is the enum in `diagnosis.ts` (Task 6). `METRIC_REGISTRY` (Plan 1 Task 6) is consumed by `render.ts` (Task 7), `composition.ts` (Task 8), and `measurement-budget.ts` (Task 10). `metricDefinition` throws on an unknown metric, so Task 10's cost projection fails loudly rather than pricing a metric at zero.
 
 **Known ordering constraints.** Tasks 1–4 are independent of Plan 2 and may start immediately after Plan 1. Tasks 8–10 require Plan 2 published. Task 7 changes emitted prompt text, so it must land before Task 8 regenerates the golden fixtures, or both regenerate the same files twice.
+
+---
+
+## Pending Amendments
+
+Blocking. Tasks 1 to 4 must be corrected before they start.
+
+1. **The landmark schema is wrong.** The real artifact is
+   `{ version: 1, candidates: [{ name, why_canonical, expected_identifiers,
+   confidence }] }` — there is no `landmarks` array, no `title`, and no
+   `resolved_source_id` (see `src/lib/research/landmark.ts`). Resolution happens
+   by matching candidates against the corpus. Add a canonical landmark target
+   key, a resolution record mapping it to a source id, and reconciliation that
+   aliases an unresolved target once discovered.
+2. **The selector API is misread.** `selectSemanticCandidates` returns written
+   artifact paths, not source ids, so `expect(selected).toContain("s3")` cannot
+   pass. Either assert against the produced candidate artifact, or change the
+   selectors to return both selected ids and written paths.
+3. **Reserve capacity; do not detect displacement.** `semantic-screen.ts:331`
+   already reserves taxonomy coverage *before* spending remaining capacity on
+   the global ranking, with a comment explaining why filling rank first makes
+   the reserve a no-op. Landmarks must join that existing mechanism. If
+   reservations exceed capacity, emit a structured `capacity_infeasible` result
+   and pause **before** work starts, rather than throwing after the loss.
+4. **Repair packets must be kernel-constructed.** Protected metrics, acceptance,
+   evidence, prior attempts and untrusted content are all caller-supplied and
+   omissible; `currentValues` is declared as consumed but never used. Build
+   packets from registered findings, current scoped observations, declared
+   reads and attempt history. Enforce safe paths (the current code joins
+   unvalidated ids into filesystem paths and permits traversal), byte and token
+   limits, content roles, secret redaction and tool grants. A JSON key named
+   `untrusted_content` is not an injection defense.
+5. **Connect the diagnosis unit to execution.** Task 6 defines a schema and a
+   CLI validator only. Add the diagnosis stage, wire `contractAction("diagnose")`
+   to it, supply full objective history, validate `next_capability` against the
+   capability registry, materialize the new strategy, and treat
+   `target_infeasible` as a durable pause.
+6. **Acceptance cannot be compiled into a generic catalog action.** `gateId` is
+   unknown at compile time. Emit capability *templates* and materialize concrete
+   action instances at dispatch, per wire contract §8. Also:
+   `citation_verification` is a gate id, not a metric — register a metric for
+   it; and the measurement stage claims to write every registered metric while
+   invoking only `--tier unit`, which excludes release measurements.
+7. **Reachability must pause, not skip.** `when: "unreachable_objectives == 0"`
+   makes an unreachable improve phase look skipped. It belongs in the kernel as
+   a pre-dispatch check producing the `unreachable` contract outcome and a
+   durable, actionable pause.
+8. **Version compatibility is unhandled.** This plan requires MalaClaw
+   `>=3.0.0` while `runtime-compatibility.json` pins `>=2.3.0 <3.0.0` with
+   `ir_version: 1`, so preflight would reject the new runtime. Add MalaClaw 3.0
+   versioning, compatibility metadata, dependency pin updates, SDK golden
+   manifests, CI matrix changes, and migration documentation.

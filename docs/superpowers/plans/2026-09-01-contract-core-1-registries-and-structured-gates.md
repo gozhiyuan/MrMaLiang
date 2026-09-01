@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **STATUS: BLOCKED — do not execute.** A review found compile-time and
+> semantic defects in this plan. It must be amended against
+> [the Observation and Criterion Wire Contract](../specs/2026-09-01-observation-and-criterion-wire-contract.md)
+> before any task is started. The required amendments are listed at the end of
+> this document under "Pending Amendments".
+
+
 **Goal:** Make MrMaLiang's deterministic gates emit structured findings and numeric observations instead of prose, behind closed registries that a triple-level coverage test enforces.
 
 **Architecture:** Gates already compute both the routing triple (artifact, kind, effect) and the numeric observation (value, target), then flatten both into `string` and discard them. This plan adds `src/lib/registry/` — branded ids, explicit producer registration, the legal-triple and routing tables, the metric registry, and a content-addressed observation store — then converts the gate producers. No MalaClaw change and no workflow-topology change.
@@ -2952,3 +2959,42 @@ git commit -m "docs(longwrite): document the metric registry and metrics evaluat
 **Type consistency.** `EvaluatorFn` and `EvaluatorContext` are defined in Task 10 and re-exported by Task 11's index, which Tasks 12 and 14 import. `evaluatorDigest(name, version)` takes two arguments everywhere, with `EVALUATOR_VERSION` from Task 11. `STORE` is exported by Task 8 and used by Tasks 12 and 14. `MetricDefinition.dependencies` (not `requires`) is the field `computeInputDigest` reads. `StructuredCheck` from Task 6 is the return type adopted across all six checks in Task 13. `Criterion` in Task 9 uses `MetricId` from Task 1 and reads `tolerance` and `direction` from Task 7.
 
 **Ordering constraints.** Task 4 must precede Task 6, because `FindingSchema` validates triples against `legalTriples`. Task 7 must precede Task 8 (`computeInputDigest` takes a `MetricDefinition`) and Task 9 (`satisfies` reads `tolerance`). Task 10 must precede Task 11, and Task 11 before Tasks 12 and 14. Task 3 deletes `review_no_regressions`, so it must precede Task 5's coverage assertions.
+
+---
+
+## Pending Amendments
+
+Blocking. Apply before executing any task.
+
+1. **Delete the durable observation store.** Tasks 8 and 12 must not write
+   `.malaclaw/observations`, allocate sequences, or define store paths. MalaClaw
+   owns storage (wire contract §2). Evaluators return envelope entries; keep
+   `canonicalJson` and the digest helpers, which the envelope carries.
+2. **Add `scope_key` to every measurement.** `citation_depth_per_section` emits
+   one entry per section and `taxonomy_cell_ab_sources` one per cell, never an
+   aggregate minimum. Observation identity and objective identity share scope
+   semantics (§4).
+3. **Migrate every gate producer, not two.** Tasks 13 and 14 cover figures and
+   corpus gates only; research, latex, longform, publication, survey-contract,
+   visual-review and preflight still emit strings, so Plan 3's repair packets
+   have no `Finding[]` to consume. Add one migration task per producer. No
+   adapters that parse `diagnostic` prose.
+4. **Correct semantically wrong routes.** A complete table can still be wrong.
+   Known defects: `target_length` supports only `remove_redundant_prose`, so an
+   under-length manuscript is unrepairable; `research_artifacts_present` and
+   `manuscript_build` route to figure specs; `publication_custom_template`
+   routes to placement rather than a template repair; `citation_verification`
+   cannot route a metadata or bibliography defect; `related_work_matrix` cannot
+   route a `table_spec` defect. Derive legal triples from typed producer
+   definitions rather than hand-listing them, and add the missing effects
+   (`expand_argument`, `repair_template`, `repair_toolchain`).
+5. **Add `time_dependent` to the metric registry.** Include `as_of_date` in the
+   input digest only for metrics that declare it; otherwise every date change
+   invalidates every static measurement.
+6. **Enforce model-judgment requirements from `measurement_kind`**, not by
+   convention: reject a `model` entry without `judgment` and a `script` entry
+   with one.
+7. **Replace hand-synchronized `GATE_IDS` declarations** with typed producer
+   construction, or add execution-based coverage that runs each producer against
+   a fixture and compares emitted ids. A declaration list drifts the same way a
+   scanner missed dynamic ids.
