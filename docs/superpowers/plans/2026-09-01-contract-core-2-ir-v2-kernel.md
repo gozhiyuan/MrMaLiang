@@ -40,7 +40,7 @@
 | M8 | Snapshot, conflict and join scheduling | 14 |
 | M9 | Blocked corrective subflows | 15–16 |
 | M10 | Run pin storage and migration | 17 |
-| M11 | Integration across scheduler shapes | 18–20 |
+| M11 | Integration across scheduler shapes | 18–21 |
 
 ---
 
@@ -3293,7 +3293,161 @@ git commit -m "test(workflow): cover the contract cycle across every scheduler s
 
 ---
 
-### Task 20: Boundary enforcement, documentation and full verification
+### Task 20: Ship and export the conformance corpus
+
+The corpus exists so both repositories test against **one** implementation. It
+must therefore travel with the runtime: MrMaLiang resolves `malaclaw` from
+`.dependencies/MalaClaw` and already imports `malaclaw/sdk`, so shipping the
+fixtures in the package means pinning a runtime version pins the contract with
+it, and there is no vendored copy to drift.
+
+**Files:**
+- Create: `fixtures/wire-contract/v1/envelope.json`
+- Modify: `fixtures/wire-contract/v1/arithmetic.json` (add the operator/direction cases)
+- Modify: `src/sdk/index.ts` (export the wire-contract surface)
+- Modify: `package.json` (`files`, `exports`)
+- Test: `tests/contract-conformance.test.ts`
+
+**Interfaces:**
+- Consumes: `Criterion`, `MustImprove` (Task 2); `evaluateContract`, `satisfies`, `closedGapFraction` (Task 9); `MeasurementEnvelope`, `ingestEnvelope` (Task 8).
+- Produces: from `malaclaw/sdk` — `Criterion`, `MustImprove`, `MeasurementEnvelope`, `satisfies`, `closedGapFraction`, `evaluateContract`, and `wireContractFixtureDir()` returning the shipped corpus path.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/contract-conformance.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { MeasurementEnvelope } from "../src/lib/workflow/measurements.js";
+import { evaluateContract } from "../src/lib/workflow/acceptance.js";
+import { Criterion } from "../src/lib/schema.js";
+import { wireContractFixtureDir } from "../src/sdk/index.js";
+
+type ArithmeticCase = {
+  name: string; criterion: unknown; before: number; after: number; expect: string;
+};
+type EnvelopeCase = { name: string; envelope: unknown; expect: "accepted" | "rejected"; reason?: string };
+
+const dir = wireContractFixtureDir();
+const arithmetic: ArithmeticCase[] = JSON.parse(fs.readFileSync(path.join(dir, "arithmetic.json"), "utf-8"));
+const envelopes: EnvelopeCase[] = JSON.parse(fs.readFileSync(path.join(dir, "envelope.json"), "utf-8"));
+
+describe("wire contract conformance", () => {
+  it("ships both fixture families", () => {
+    expect(arithmetic.length).toBeGreaterThan(9);
+    expect(envelopes.length).toBeGreaterThan(6);
+  });
+
+  it("matches every arithmetic case", () => {
+    for (const fixture of arithmetic) {
+      const parsed = Criterion.safeParse(fixture.criterion);
+      if (fixture.expect === "rejected") {
+        expect(parsed.success, fixture.name).toBe(false);
+        continue;
+      }
+      expect(parsed.success, fixture.name).toBe(true);
+      const criterion = parsed.data!;
+      const key = `${criterion.metric} ${criterion.scope_key}`;
+      expect(evaluateContract({
+        acceptance: [criterion],
+        must_improve: [{ metric: criterion.metric, scope_key: criterion.scope_key,
+                         min_absolute_delta: 0, min_gap_fraction: 0, max_attempts: 9 }],
+        must_preserve: [],
+        before: new Map([[key, fixture.before]]),
+        after: new Map([[key, fixture.after]]),
+        attempts: 1, pending: [], unavailable: [],
+      }), fixture.name).toBe(fixture.expect);
+    }
+  });
+
+  it("accepts or rejects every envelope case as specified", () => {
+    for (const fixture of envelopes) {
+      const parsed = MeasurementEnvelope.safeParse(fixture.envelope);
+      expect(parsed.success, `${fixture.name} (${fixture.reason ?? ""})`)
+        .toBe(fixture.expect === "accepted");
+    }
+  });
+
+  it("covers equals from above, below and at target", () => {
+    const names = arithmetic.map((fixture) => fixture.name).join(" ");
+    expect(names).toMatch(/equals starting above/);
+    expect(names).toMatch(/equals starting below/);
+    expect(names).toMatch(/equals reaches target/);
+  });
+
+  it("covers operator/direction rejection in both directions", () => {
+    const rejected = arithmetic.filter((fixture) => fixture.expect === "rejected");
+    expect(rejected.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("resolves the shipped fixture directory from the package, not the source tree", () => {
+    // MrMaLiang reads this same path through its pinned runtime; a source-tree
+    // path would resolve to nothing once installed.
+    expect(fs.existsSync(path.join(dir, "arithmetic.json"))).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- contract-conformance`
+Expected: FAIL — `wireContractFixtureDir` is not exported and `envelope.json` does not exist.
+
+- [ ] **Step 3: Write the envelope fixtures**
+
+Create `fixtures/wire-contract/v1/envelope.json` covering the cases in wire
+contract §7: one entry per scope for a scoped metric; a `model` entry missing
+`judgment` (rejected); a `script` entry carrying `judgment` (rejected); a
+`measured` entry with no value (rejected); an `unavailable` entry with no reason
+(rejected); `unavailable` and `deferred` entries; and an unrecognized version
+(rejected). Extend `arithmetic.json` with the two operator/direction rejection
+cases, marked `"expect": "rejected"`.
+
+- [ ] **Step 4: Export the surface and ship the corpus**
+
+Add to `src/sdk/index.ts`:
+
+```ts
+/** The wire-contract surface, exported so a domain layer validates its
+ * compiled criteria and emitted envelopes against the ENGINE's schemas and
+ * arithmetic rather than a second copy of them. */
+export { Criterion, MustImprove } from "../lib/schema.js";
+export { MeasurementEnvelope } from "../lib/workflow/measurements.js";
+export { satisfies, closedGapFraction, evaluateContract } from "../lib/workflow/acceptance.js";
+
+/** Absolute path to the shipped conformance corpus. Resolved from this
+ * module's own location so it works from `dist/` in an installed package. */
+export function wireContractFixtureDir(version = "v1"): string {
+  return path.join(fileURLToPath(new URL("../../fixtures/wire-contract", import.meta.url)), version);
+}
+```
+
+Add `"fixtures/wire-contract/"` to the package `files`, and
+`"./fixtures/*": "./fixtures/*"` to `exports`.
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `npm test -- contract-conformance`
+Expected: PASS, 6 tests.
+
+- [ ] **Step 6: Verify the corpus survives packing**
+
+Run: `npm pack --dry-run 2>&1 | grep wire-contract`
+Expected: both fixture files listed. A corpus that is not packed is invisible to
+MrMaLiang, which resolves it from the installed runtime.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add fixtures/wire-contract/ src/sdk/index.ts package.json tests/contract-conformance.test.ts
+git commit -m "feat(sdk): ship and export the wire-contract conformance corpus"
+```
+
+---
+
+### Task 21: Boundary enforcement, documentation and full verification
 
 **Files:**
 - Create: `tests/domain-neutrality.test.ts`
@@ -3370,10 +3524,10 @@ git commit -m "test(workflow): enforce the domain boundary automatically and doc
 
 **Spec coverage.** §B1 execution roles → Task 2. §B2 effects → Tasks 2, 4, 5, 6. §B3 acceptance, progress, invariants → Task 9. §B4 measurement scheduling → Tasks 8, 18 (`evaluate_with` dispatch and envelope ingestion); the metric registry and cost tiers are MrMaLiang's. §B5 two-axis outcomes → Task 1. §B6 fingerprints and per-objective stagnation → Task 10. §B7 transitions → Task 1's policies, applied in Task 18. §B8 removals → Task 3 (`ir_version`), Task 18 (output-changed inference). §B9 reachability → consumed as a pre-dispatch verdict in Task 18; the analysis is MrMaLiang's. §B10 blocked workspace → Tasks 15, 16. §B11 observation store → Task 7. §B12 cost accounting → deferred to Plan 3, which owns `estimated_cost`. §B13 attempt lifecycle → Task 12. §B14 checkpoint contract → Tasks 12, 18. §B15 leases → Tasks 11, 13. §B16 concurrency → Task 14. §B17 pinning → Task 17. §B18 untrusted content → Plan 3 builds the task packet; Task 4's isolation is the mechanism that bounds it.
 
-**Wire contract coverage.** §2 ownership → Tasks 7, 8, 9 own storage, ingestion and arithmetic; no other implementation exists. §3 envelope → Task 8. §4 identity and freshness → Task 7. §5 compiled criterion → Task 2. §6 arithmetic → Task 9. §7 conformance fixtures → Task 9. §8 action instantiation → the kernel consumes instances; MrMaLiang emits them (Plan 3).
+**Wire contract coverage.** §2 ownership → Tasks 7, 8, 9 own storage, ingestion and arithmetic; no other implementation exists. §3 envelope → Task 8. §4 identity and freshness → Task 7. §5 compiled criterion → Task 2. §6 arithmetic → Task 9. §7 conformance fixtures → Tasks 9, 20. §8 action instantiation → the kernel consumes instances; MrMaLiang emits them (Plan 3).
 
 **Type consistency.** `Criterion` and `MustImprove` are defined once in `schema.ts` (Task 2) and imported by `acceptance.ts` (Task 9) and `stagnation.ts` (Task 10). `snapshotKey(metric, scopeKey)` is exported by `observations.ts` (Task 7) and is the only key format `evaluateContract` accepts. `EffectUnit` and `TaskWorkspace` come from `task-workspace.ts` (Task 4) and are consumed by `effects.ts` (Task 5). `AttemptTransition` (Task 12) is the parameter of `classifyHealth` (Task 13). `canonicalJson` (Task 7) is used by pinning, attempts and stagnation. `runFlow` keeps its single-object signature throughout.
 
-**Ordering constraints.** Task 2 precedes Tasks 4, 5, 9, 14 (all import from `schema.ts`). Task 7 precedes Tasks 8, 9, 10, 12, 17 (`snapshotKey`, `canonicalJson`). Task 4 precedes Tasks 5 and 6. Task 11 precedes Task 13 — a lease cannot be renewed without an event stream. Tasks 1 through 17 all precede Task 18.
+**Ordering constraints.** Task 20 requires Tasks 2, 8 and 9. Task 2 precedes Tasks 4, 5, 9, 14 (all import from `schema.ts`). Task 7 precedes Tasks 8, 9, 10, 12, 17 (`snapshotKey`, `canonicalJson`). Task 4 precedes Tasks 5 and 6. Task 11 precedes Task 13 — a lease cannot be renewed without an event stream. Tasks 1 through 17 all precede Task 18.
 
 **Deliberately not here.** The metric registry, evaluators, cost tiers, reachability analysis, repair packets, and prompt rendering are MrMaLiang's; this plan consumes their outputs through the wire contract and knows nothing about their meaning.

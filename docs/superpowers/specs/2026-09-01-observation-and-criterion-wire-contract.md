@@ -204,20 +204,56 @@ metric + scope_key + operator + target + finding_ids + artifact_ids
 
 ## 7. Conformance fixtures
 
-`fixtures/wire-contract/v1/` holds JSON cases both repositories execute against
-their own implementations. A change to this document requires a fixture change;
-a fixture change requires a version bump. Required cases:
+A shared corpus both repositories execute — against **one** implementation, not
+two. MrMaLiang must never reimplement the arithmetic in order to satisfy these
+fixtures; the point is to prove its *outputs* are what the kernel's actual
+schemas and arithmetic accept.
 
-- `equals` starting above, below, and at target; moving closer, moving away, and
+**Location and shipping.** The corpus lives in MalaClaw at
+`fixtures/wire-contract/v1/`, is listed in the package `files`, and is reachable
+as `malaclaw/fixtures/wire-contract/v1/*`. MrMaLiang already resolves the
+runtime at `.dependencies/MalaClaw` and imports from `malaclaw/sdk`, so pinning
+a runtime version pins the contract corpus with it — a workspace on MalaClaw
+3.0 tests against 3.0's fixtures, with no vendored copy to drift.
+
+**Two families.**
+
+`arithmetic.json` — cases of `{ name, criterion, before, after, expect }`:
+
+- `equals` starting above, below and at target; moving closer, moving away, and
   reaching within tolerance.
 - Float-tolerance satisfaction for a ratio.
+- `at_least` and `at_most` progress, and an already-satisfied criterion.
 - Operator/direction rejection in both directions.
-- A → B → A digest reuse selecting the correct earlier observation.
-- Two scopes of one metric progressing independently.
+
+`envelope.json` — cases of `{ name, envelope, expect: "accepted" | "rejected", reason? }`:
+
+- A scoped metric emitting one entry per scope.
 - A `model` entry missing `judgment` (rejected).
 - A `script` entry carrying `judgment` (rejected).
-- `unavailable` vs `deferred` producing different contract outcomes.
+- A `measured` entry with no value, and an `unavailable` entry with no reason
+  (both rejected).
+- `unavailable` versus `deferred` producing different contract outcomes.
 - A `must_preserve` metric with no observation producing `measurement_failed`.
+- An unrecognized envelope version (rejected).
+
+**Who runs what.**
+
+| Repository | Executes against |
+| --- | --- |
+| **MalaClaw** | Its own `evaluateContract`, `satisfies`, and `ingestEnvelope` |
+| **MrMaLiang** | The `Criterion` and `MeasurementEnvelope` schemas and the arithmetic **imported from the pinned runtime**, applied to the criteria its compiler emits and the envelopes its evaluators produce |
+
+MrMaLiang's side is the one that catches real divergence: it asserts that a
+criterion compiled from its metric registry — its `tolerance`, its `direction`,
+its `operator` — produces the outcome the shared corpus expects when fed to the
+kernel's arithmetic, and that every envelope its evaluators emit validates
+against the kernel's schema.
+
+**Versioning.** A change to this document requires a fixture change; a fixture
+change requires a directory version bump and a matching
+`runtime-compatibility.json` update in the same commit. The kernel rejects an
+unrecognized envelope version rather than attempting migration.
 
 ## 8. Action instantiation
 

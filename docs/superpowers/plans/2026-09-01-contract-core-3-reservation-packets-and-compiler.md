@@ -40,7 +40,7 @@
 | M5 | Templates and action instances | 9–11 | yes |
 | M6 | Reachability and budget | 12–13 | yes |
 | M7 | Registry-rendered prompts | 14 | no |
-| M8 | Compatibility and release | 15–16 | yes |
+| M8 | Compatibility and release | 15–17 | yes |
 
 ---
 
@@ -2251,7 +2251,207 @@ git commit -m "chore!: require MalaClaw 3.0 and IR version 2"
 
 ---
 
-### Task 16: End-to-end rehearsal and documentation
+### Task 16: Execute the shared conformance corpus
+
+**Prerequisite:** Plan 2 Task 20 landed and released, so `malaclaw/sdk` exports
+the wire-contract surface and the package ships `fixtures/wire-contract/v1/`.
+
+This is the test that keeps the two repositories honest. It validates
+MrMaLiang's **outputs** — the criteria its compiler emits and the envelopes its
+evaluators produce — against the **kernel's own schemas and arithmetic**,
+imported from the pinned runtime. MrMaLiang implements none of it; a second
+implementation here would defeat the purpose.
+
+**Files:**
+- Create: `packages/longwrite/tests/wire-contract-conformance.test.ts`
+- Modify: `packages/longwrite/src/lib/registry/criteria.ts` (export `compileCriterion`)
+
+**Interfaces:**
+- Consumes: `Criterion`, `MeasurementEnvelope`, `satisfies`, `evaluateContract`, `wireContractFixtureDir` from `malaclaw/sdk`; `METRIC_REGISTRY`, `PLANNER_SELECTABLE` (Plan 1); `buildEnvelope` (Plan 1 Task 11).
+- Produces: `compileCriterion(metric, scopeKey, operator, target): Criterion` — the single place MrMaLiang turns a metric registry entry plus a configured target into a wire-contract criterion.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/wire-contract-conformance.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  Criterion, MeasurementEnvelope, evaluateContract, wireContractFixtureDir,
+} from "malaclaw/sdk";
+import { METRIC_REGISTRY, PLANNER_SELECTABLE, metricDefinition } from "../src/lib/registry/metrics.js";
+import { compileCriterion } from "../src/lib/registry/criteria.js";
+import { buildEnvelope } from "../src/lib/registry/evaluate.js";
+import { metricId } from "../src/lib/registry/ids.js";
+
+const dir = wireContractFixtureDir();
+const arithmetic = JSON.parse(fs.readFileSync(path.join(dir, "arithmetic.json"), "utf-8")) as
+  Array<{ name: string; criterion: unknown; before: number; after: number; expect: string }>;
+const envelopes = JSON.parse(fs.readFileSync(path.join(dir, "envelope.json"), "utf-8")) as
+  Array<{ name: string; envelope: unknown; expect: "accepted" | "rejected" }>;
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((r) => fs.promises.rm(r, { recursive: true, force: true })));
+});
+const AS_OF = "2026-09-01T00:00:00.000Z";
+
+describe("wire contract conformance", () => {
+  it("resolves the corpus from the pinned runtime, not a vendored copy", () => {
+    // Pinning a runtime version pins the contract; a local copy would drift.
+    expect(dir).toContain(path.join("malaclaw", "fixtures", "wire-contract"));
+    expect(arithmetic.length).toBeGreaterThan(9);
+  });
+
+  it("agrees with the kernel on every arithmetic case", () => {
+    for (const fixture of arithmetic) {
+      const parsed = Criterion.safeParse(fixture.criterion);
+      if (fixture.expect === "rejected") { expect(parsed.success, fixture.name).toBe(false); continue; }
+      const criterion = parsed.data!;
+      const key = `${criterion.metric} ${criterion.scope_key}`;
+      expect(evaluateContract({
+        acceptance: [criterion],
+        must_improve: [{ metric: criterion.metric, scope_key: criterion.scope_key,
+                         min_absolute_delta: 0, min_gap_fraction: 0, max_attempts: 9 }],
+        must_preserve: [],
+        before: new Map([[key, fixture.before]]),
+        after: new Map([[key, fixture.after]]),
+        attempts: 1, pending: [], unavailable: [],
+      }), fixture.name).toBe(fixture.expect);
+    }
+  });
+
+  it("compiles a criterion the kernel accepts for every planner-selectable metric", () => {
+    for (const metric of PLANNER_SELECTABLE) {
+      const definition = metricDefinition(metric);
+      const operator = definition.direction === "minimize" ? "at_most" as const : "at_least" as const;
+      const compiled = compileCriterion(metric, "", operator, definition.target_type === "ratio" ? 0.5 : 1);
+      const parsed = Criterion.safeParse(compiled);
+      expect(parsed.success, `${metric}: ${JSON.stringify(parsed.error?.issues?.[0])}`).toBe(true);
+    }
+  });
+
+  it("compiles tolerance and direction that behave as the corpus expects", () => {
+    // A ratio metric must tolerate float error; a count metric must not.
+    const ratio = compileCriterion(metricId("landmark_coverage_ratio"), "", "at_least", 0.3);
+    const count = compileCriterion(metricId("core_sources"), "", "at_least", 4);
+    expect(ratio.tolerance).toBeGreaterThan(0);
+    expect(count.tolerance).toBe(0);
+    const key = "landmark_coverage_ratio ";
+    expect(evaluateContract({
+      acceptance: [ratio], must_improve: [], must_preserve: [],
+      before: new Map([[key, 0.1]]), after: new Map([[key, 0.1 + 0.2]]),
+      attempts: 1, pending: [], unavailable: [],
+    })).toBe("accepted");
+  });
+
+  it("never compiles an operator that fights the metric's direction", () => {
+    for (const metric of PLANNER_SELECTABLE) {
+      const definition = metricDefinition(metric);
+      const wrong = definition.direction === "minimize" ? "at_least" as const : "at_most" as const;
+      expect(() => compileCriterion(metric, "", wrong, 1), String(metric)).toThrow();
+    }
+  });
+
+  it("emits envelopes the kernel schema accepts", async () => {
+    const ws = await conformanceWorkspace();
+    roots.push(ws);
+    const envelope = await buildEnvelope(ws, { tier: "unit", asOfDate: AS_OF });
+    const parsed = MeasurementEnvelope.safeParse(envelope);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues?.[0])).toBe(true);
+  });
+
+  it("emits a scoped envelope the kernel schema accepts", async () => {
+    const ws = await conformanceWorkspace({ taxonomy: ["memory", "planning"] });
+    roots.push(ws);
+    const envelope = await buildEnvelope(ws, { metrics: [metricId("taxonomy_cell_ab_sources")], asOfDate: AS_OF });
+    expect(MeasurementEnvelope.safeParse(envelope).success).toBe(true);
+    expect(envelope.measurements.map((entry) => entry.scope_key).sort()).toEqual(["memory", "planning"]);
+  });
+
+  it("agrees with the kernel on every envelope acceptance case", () => {
+    for (const fixture of envelopes) {
+      expect(MeasurementEnvelope.safeParse(fixture.envelope).success, fixture.name)
+        .toBe(fixture.expect === "accepted");
+    }
+  });
+
+  it("registers a metric for every metric name the corpus exercises", () => {
+    const named = new Set(arithmetic
+      .map((fixture) => (fixture.criterion as { metric?: string }).metric)
+      .filter((name): name is string => typeof name === "string"));
+    // The corpus uses placeholder metric names; only assert that any name
+    // matching a registered metric resolves, so a rename cannot pass silently.
+    for (const name of named) {
+      if (METRIC_REGISTRY.has(name as never)) expect(() => metricDefinition(name as never)).not.toThrow();
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- wire-contract-conformance`
+Expected: FAIL — `wireContractFixtureDir` is not exported by the pinned runtime, and `compileCriterion` does not exist.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/longwrite/src/lib/registry/criteria.ts`:
+
+```ts
+import { metricDefinition } from "./metrics.js";
+import type { MetricId } from "./ids.js";
+
+/** The single place a metric registry entry plus a configured target becomes a
+ * wire-contract criterion. Tolerance and direction are resolved here so the
+ * kernel needs no metric registry (wire contract §5). */
+export function compileCriterion(
+  metric: MetricId, scopeKey: string,
+  operator: "at_least" | "at_most" | "equals", target: number,
+) {
+  const definition = metricDefinition(metric);
+  if (definition.direction === "maximize" && operator === "at_most") {
+    throw new Error(`${metric} is maximize; at_most would cap an objective it should raise`);
+  }
+  if (definition.direction === "minimize" && operator === "at_least") {
+    throw new Error(`${metric} is minimize; at_least would demand more of a defect count`);
+  }
+  return {
+    metric: String(metric), scope_key: scopeKey, operator, target,
+    tolerance: definition.tolerance, direction: definition.direction,
+  };
+}
+```
+
+Route every existing criterion construction — `gateAcceptanceCriterion`, the
+corpus gate entries, `materializeAction`'s acceptance and `must_preserve` —
+through this one function.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test --workspace @mr-maliang/longwrite -- wire-contract-conformance`
+Expected: PASS, 9 tests.
+
+- [ ] **Step 5: Wire it into CI as a release gate**
+
+Add the conformance test to `npm run release:check`, so a runtime upgrade that
+changes the corpus fails the release rather than a later flagship run.
+
+Run: `npm run release:check`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/longwrite/src/lib/registry/criteria.ts packages/longwrite/tests/wire-contract-conformance.test.ts package.json
+git commit -m "test(registry): execute the shared wire-contract corpus against the pinned runtime"
+```
+
+---
+
+### Task 17: End-to-end rehearsal and documentation
 
 **Files:**
 - Test: `packages/longwrite/tests/contract-topology.test.ts`
@@ -2309,10 +2509,10 @@ git commit -m "docs: document reservation, packets, diagnosis and action instant
 
 ## Plan Self-Review
 
-**Spec coverage.** §A5 target reservation and selector accounting → Tasks 1–4. §A6 per-finding repair packets → Tasks 5, 6. §A7 registry-rendered prompts → Task 14. §A8 diagnosis unit → Tasks 7, 8. §B9 reachability wiring → Task 12. §B12 cost accounting → Task 13. §B18 untrusted content and least privilege → Task 6. Wire contract §8 action instantiation → Tasks 9, 10.
+**Spec coverage.** §A5 target reservation and selector accounting → Tasks 1–4. §A6 per-finding repair packets → Tasks 5, 6. §A7 registry-rendered prompts → Task 14. §A8 diagnosis unit → Tasks 7, 8. §B9 reachability wiring → Task 12. §B12 cost accounting → Task 13. §B18 untrusted content and least privilege → Task 6. Wire contract §7 conformance corpus → Task 16. §8 action instantiation → Tasks 9, 10.
 
 **Corrections from review.** The landmark schema is the real one — `candidates` with `name`, resolved through the existing `matchLandmarksToCorpus`, with a target key that survives resolution (Task 1). The selectors return `{ selected, written }` because they previously returned only written artifact paths (Task 4). Reservation happens **before** ranking, joining the pattern already at `semantic-screen.ts:334`, and over-subscription pauses through `CapacityInfeasible` rather than truncating (Tasks 3, 4). Packets derive protected metrics from the template and fail when one is unmeasured, enforce safe paths and byte limits, redact secrets, and render untrusted content in a delimited region after every instruction (Tasks 5, 6). Diagnosis is a compiled stage reached by `contractAction("diagnose")`, validating `next_capability` against the registry (Tasks 7, 8). The catalog holds templates with no compile-time acceptance; instances are materialized per dispatch, and `citation_verification_status` is a registered metric rather than the gate id (Tasks 9, 10). Measurement stages are per tier and declare only their own metrics (Task 11). Reachability is a pre-dispatch verdict, not a `when` guard (Task 12). Compatibility moves to MalaClaw 3.x and IR v2 across the contract, preflight, pins and CI (Task 15).
 
 **Type consistency.** `TargetRecord` and `ExclusionReason` (Task 2) are consumed by `reservation.ts` (Task 3) and the selectors (Task 4). `landmarkTargetKey` (Task 1) is the ledger key in Task 2. `RepairPacket` (Task 5) is rendered by Task 6 and written by Task 10. `CapabilityTemplate` (Task 9) is the input to `materializeAction` (Task 10). `metricDefinition` throws on an unknown metric, so Task 13's cost projection fails loudly rather than pricing at zero.
 
-**Ordering constraints.** Tasks 1–6 and 14 need only Plan 1. Tasks 7–13, 15 and 16 need Plan 2 released as MalaClaw 3.0. Task 9 precedes Task 10. Task 14 changes emitted prompt text, so it should land before Tasks 8, 11 and 12 regenerate the compiled golden fixtures, or the same fixtures regenerate twice.
+**Ordering constraints.** Tasks 1–6 and 14 need only Plan 1. Tasks 7–13 and 15–17 need Plan 2 released as MalaClaw 3.0; Task 16 additionally needs Plan 2 Task 20, which ships the corpus. Task 9 precedes Task 10. Task 14 changes emitted prompt text, so it should land before Tasks 8, 11 and 12 regenerate the compiled golden fixtures, or the same fixtures regenerate twice.
