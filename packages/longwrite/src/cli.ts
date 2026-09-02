@@ -301,6 +301,16 @@ metrics
     await runMetricsWords(workspace);
   });
 
+metrics
+  .command("evaluate <workspace>")
+  .description("Measure metrics and write reports/measurements.json for the engine to ingest")
+  .option("--tier <tier>", "only measure metrics on this tier (unit, round, release)")
+  .option("--as-of <iso>", "evaluation date for time-dependent metrics (defaults to now)")
+  .action(async (workspace, options) => {
+    const { runMetricsEvaluate } = await import("./commands/metrics.js");
+    await runMetricsEvaluate(workspace, options);
+  });
+
 const report = program.command("report").description("Write LongWrite operational reports");
 
 report

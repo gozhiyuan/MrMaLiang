@@ -14,3 +14,30 @@ export async function runMetricsWords(workspaceDir: string): Promise<void> {
   console.log(`Status: ${metrics.status}`);
   console.log(`Wrote reports/word-metrics.json and reports/word-metrics.md`);
 }
+
+/** Measures what can be measured and writes the envelope the engine ingests.
+ *
+ * It reports rather than enforces: an unavailable input becomes an entry with
+ * a reason, not a non-zero exit, because deciding what an absent measurement
+ * means is the kernel's job and not this command's. */
+export async function runMetricsEvaluate(
+  workspaceDir: string,
+  options: { tier?: string; asOf?: string } = {},
+): Promise<void> {
+  const { buildEnvelope, writeEnvelope } = await import("../lib/registry/evaluate.js");
+  const tiers = ["unit", "round", "release"] as const;
+  if (options.tier !== undefined && !tiers.includes(options.tier as (typeof tiers)[number])) {
+    throw new Error(`unknown tier "${options.tier}"; expected one of ${tiers.join(", ")}`);
+  }
+  const envelope = await buildEnvelope(path.resolve(workspaceDir), {
+    tier: options.tier as (typeof tiers)[number] | undefined,
+    asOfDate: options.asOf ?? new Date().toISOString(),
+  });
+  const written = await writeEnvelope(path.resolve(workspaceDir), envelope);
+  const counts = envelope.measurements.reduce<Record<string, number>>((totals, entry) => {
+    totals[entry.status] = (totals[entry.status] ?? 0) + 1;
+    return totals;
+  }, {});
+  const summary = Object.entries(counts).map(([status, count]) => `${count} ${status}`).join(", ");
+  process.stdout.write(`${written}: ${envelope.measurements.length} entries (${summary})\n`);
+}
