@@ -74,6 +74,17 @@ release failures may be advisory, but live-provider releases must fail closed.
   schema.
 - `packages/longwrite/src/lib/compiler.ts`: validated LongWrite-to-MalaClaw
   compilation and conditional stage injection.
+- `packages/longwrite/src/lib/registry/`: gate, metric and routing vocabulary.
+  Gate ids and their legal findings are declared by typed producer definitions
+  kept beside the checks that emit them; the class table, the legal triples and
+  the routes are generated from those declarations, never hand-maintained.
+  Routing resolves `(gate, artifact kind, required effect)` to a capability and
+  fails closed — there is no default, so a new failure mode must say how it is
+  repaired or it does not dispatch. `tests/routing-coverage.test.ts` runs every
+  producer and fails if it emits a gate or a finding it never declared, which is
+  the only check a dynamically built gate id cannot defeat.
+  MrMaLiang never writes `.malaclaw/`: it emits measurement envelopes and the
+  engine owns storage, sequencing and acceptance arithmetic.
 - `packages/longexperiment/src/lib/schema.ts`: durable experiment protocol.
 - `packages/longexperiment/src/lib/compiler.ts`: experiment workflow compiler.
 - `packages/research-protocol/src/`: shared experiment/manuscript handoff

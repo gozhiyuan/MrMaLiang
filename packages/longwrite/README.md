@@ -45,6 +45,24 @@ templates, `experiment/`. The public CLI rewrites the parent workspace argument
 to the correct component directory; do not invoke or install a global
 `longwrite` binary.
 
+### Measurement
+
+`longwrite metrics evaluate <workspace> [--tier unit|round|release] [--as-of <iso>]`
+writes `reports/measurements.json`, a measurement envelope the MalaClaw engine
+ingests. MrMaLiang measures; the engine stores, sequences and evaluates. No
+command here writes under `.malaclaw/`, and no entry carries a sequence number.
+
+A scoped metric emits one entry per scope — one per section, one per taxonomy
+cell — never an aggregate, because an aggregate cannot tell a repair which
+scope is short. A metric whose pipeline is `model` or `external` is reported
+**deferred**; one whose required input is missing is reported **unavailable**
+with a reason — never a measured zero, and never a deferral. A measured zero is
+a claim about the manuscript; an absent input is a claim about our ability to
+look at it, and the two dispatch differently.
+
+`--as-of` fixes the evaluation date for the two metrics that genuinely depend
+on it, so a measurement replays identically. Every other metric ignores it.
+
 ## Documentation
 
 - [Paper workflow operator skill](./skills/paper-workflow/SKILL.md)
