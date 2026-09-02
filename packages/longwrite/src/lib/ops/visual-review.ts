@@ -36,6 +36,13 @@ async function writeVisualMetric(workspaceDir: string, passed: boolean): Promise
 /** Shape and coverage validation. A `fail` result is a valid reviewer output:
  * it records a real defect for the revision loop rather than retriggering the
  * reviewer. Only malformed/incomplete visual inspection fails this validator. */
+/** A measurement gate: it is satisfied by re-running the visual review, never
+ * by editing an artifact, so it declares no findings and asks for diagnosis
+ * when the reviewer output itself is unusable. */
+function contractFail(diagnostic: string): ValidationCheck {
+  return { id: gateId("visual_review_contract"), pass: false, findings: [], measurements: [], requires_diagnosis: true, diagnostic };
+}
+
 export async function validateVisualReview(workspaceDir: string): Promise<ValidationCheck> {
   const manifestPath = path.join(workspaceDir, "reports", "visual-render-manifest.json");
   const qaPath = path.join(workspaceDir, "reviews", "visual-qa.json");
@@ -43,12 +50,12 @@ export async function validateVisualReview(workspaceDir: string): Promise<Valida
   const raw = await fs.readFile(qaPath, "utf8").catch(() => null);
   const findings: string[] = [];
   if (!manifest || manifest.version !== 1 || !Array.isArray(manifest.rendered_pages) || manifest.rendered_pages.length === 0) {
-    return { id: "visual_review_contract", pass: false, findings: ["reports/visual-render-manifest.json is missing, invalid, or has no rendered caption pages"] };
+    return contractFail("reports/visual-render-manifest.json is missing, invalid, or has no rendered caption pages");
   }
-  if (raw === null) return { id: "visual_review_contract", pass: false, findings: ["reviews/visual-qa.json is missing"] };
+  if (raw === null) return contractFail("reviews/visual-qa.json is missing");
   let qa: VisualQa;
   try { qa = VisualQa.parse(JSON.parse(raw)); } catch (error) {
-    return { id: "visual_review_contract", pass: false, findings: [`reviews/visual-qa.json is invalid: ${error instanceof Error ? error.message : String(error)}`] };
+    return contractFail(`reviews/visual-qa.json is invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (qa.render_manifest_sha256 !== sha256(JSON.stringify(manifest, null, 2) + "\n")) findings.push("visual QA does not match the current rendered-page manifest");
   const expected = new Set(manifest.rendered_pages.map((page) => page.page));
@@ -62,20 +69,43 @@ export async function validateVisualReview(workspaceDir: string): Promise<Valida
   if (qa.status === "fail" && blocking.length === 0) findings.push("visual QA fail status requires at least one major or critical visual defect");
   const contractPass = findings.length === 0;
   if (contractPass) await writeVisualMetric(workspaceDir, qa.status === "pass");
-  return { id: "visual_review_contract", pass: contractPass, findings };
+  return contractPass
+    ? { id: gateId("visual_review_contract"), pass: true, findings: [], measurements: [], requires_diagnosis: false }
+    : contractFail(findings.join("; "));
 }
 
 export async function checkVisualReviewReleaseGate(workspaceDir: string, required: boolean): Promise<ValidationCheck> {
-  if (!required) return { id: "rendered_visual_review", pass: true, findings: ["rendered visual review is informational for the seed provider"] };
+  const GATE = "rendered_visual_review";
+  if (!required) return { id: gateId(GATE), pass: true, findings: [], measurements: [], requires_diagnosis: false,
+    diagnostic: "rendered visual review is informational for the seed provider" };
   const contract = await validateVisualReview(workspaceDir);
-  if (!contract.pass) return { id: "rendered_visual_review", pass: false, findings: contract.findings };
+  // The reviewer could not be trusted to have run properly, which is a
+  // different failure from the reviewer reporting a defect.
+  if (!contract.pass) return { id: gateId(GATE), pass: false, findings: [], measurements: [],
+    requires_diagnosis: true, diagnostic: contract.diagnostic };
   const qa = VisualQa.parse(JSON.parse(await fs.readFile(path.join(workspaceDir, "reviews", "visual-qa.json"), "utf8")));
-  return qa.status === "pass"
-    ? { id: "rendered_visual_review", pass: true, findings: ["all caption-bearing PDF pages received a passing multimodal visual inspection"] }
-    : { id: "rendered_visual_review", pass: false, findings: qa.findings.filter((finding) => finding.severity !== "minor").map((finding) => `page ${finding.page}: ${finding.summary} → ${finding.remediation}`) };
+  if (qa.status === "pass") return { id: gateId(GATE), pass: true, findings: [], measurements: [], requires_diagnosis: false,
+    diagnostic: "all caption-bearing PDF pages received a passing multimodal visual inspection" };
+  // A rendered-page defect is repaired in the placement plan, never in the
+  // generated TeX or the PDF; the page it was seen on travels as `location`.
+  const findings = qa.findings.filter((finding) => finding.severity !== "minor").map((finding) => FindingSchema.parse({
+    id: `${GATE}-${finding.id}`.replace(/[^A-Za-z0-9._-]+/g, "-"),
+    gate_id: GATE,
+    artifact: { kind: "figure_spec", path: "figures/placement-plan.json", artifact_id: finding.id },
+    location: `rendered page ${finding.page}`,
+    objective_scope_key: GLOBAL_SCOPE,
+    required_effect: "repair_artifact_placement",
+    severity: finding.severity === "critical" ? "critical" : "major",
+    diagnostic: `page ${finding.page}: ${finding.summary} → ${finding.remediation}`,
+  }));
+  return { id: gateId(GATE), pass: false, findings, measurements: [], requires_diagnosis: findings.length === 0,
+    diagnostic: "visual QA reported blocking defects" };
 }
 
 import { defineProducer } from "../registry/producer-types.js";
+import { gateId } from "../registry/ids.js";
+import { FindingSchema } from "../registry/records.js";
+import { GLOBAL_SCOPE } from "../registry/scope.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

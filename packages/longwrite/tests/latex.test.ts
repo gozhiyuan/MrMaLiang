@@ -91,7 +91,7 @@ describe("LaTeX manuscript build", () => {
     await fs.appendFile(path.join(ws, "paper", "sections", "section-1.tex"), "\nThe following table supports this section.\n\\input{tables/inventory.tex}\n", "utf-8");
     const report = await validateLatexWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.find((check) => check.id === "reader_facing_publication")?.findings).toEqual(expect.arrayContaining([
+    expect(report.checks.find((check) => check.id === "reader_facing_publication")?.findings.map((f) => f.diagnostic)).toEqual(expect.arrayContaining([
       expect.stringContaining("execution provenance"),
       expect.stringContaining("production-statistics"),
       expect.stringContaining("source-inventory"),
@@ -201,7 +201,7 @@ describe("LaTeX manuscript build", () => {
     const ws = await makeWorkspace();
     const report = await validateLatexWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+    expect(report.checks.flatMap((check) => [...check.findings.map((f) => f.diagnostic), ...(check.diagnostic ? [check.diagnostic] : [])])).toEqual(expect.arrayContaining([
       expect.stringContaining("paper/main.tex is missing"),
       expect.stringContaining("build/manuscript.pdf is missing"),
     ]));
@@ -213,7 +213,7 @@ describe("LaTeX manuscript build", () => {
     await fs.writeFile(path.join(ws, "reports", "latex-build.md"), "# LaTeX Build Report\n\n- Engine: tectonic\n- Real PDF compiled: no (placeholder PDF in build/manuscript.pdf)\n");
     const report = await validateLatexWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+    expect(report.checks.flatMap((check) => [...check.findings.map((f) => f.diagnostic), ...(check.diagnostic ? [check.diagnostic] : [])])).toEqual(expect.arrayContaining([
       expect.stringContaining("placeholder PDF rather than a real LaTeX compilation"),
     ]));
   });

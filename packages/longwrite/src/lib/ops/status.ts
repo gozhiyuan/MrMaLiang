@@ -167,9 +167,23 @@ export async function readWorkspaceStatus(workspaceDir: string): Promise<Workspa
   const artifacts = (await Promise.all(["sources", "fulltext", "evidence", "chapters", "reviews", "reports", "figures", "tables", "paper", "build"].map((dir) => listFiles(resolved, dir))))
     .flat()
     .sort();
+  // Status is an operator display, so it carries the prose half of each
+  // structured finding. A check that failed with no finding still has its
+  // diagnostic, and showing nothing there would hide the failure entirely.
+  //
+  // The report is read from disk and may have been written before findings
+  // became structured, so a plain string is still accepted here. Reporting
+  // nothing for a stale report would make a failing workspace look clean.
+  const diagnosticOf = (finding: unknown): string =>
+    typeof finding === "string" ? finding : String((finding as { diagnostic?: unknown }).diagnostic ?? finding);
   const failedChecks = validationReport?.checks
     .filter((check) => !check.pass)
-    .map((check) => ({ id: check.id, findings: check.findings })) ?? [];
+    .map((check) => ({
+      id: String(check.id),
+      findings: check.findings.length > 0
+        ? check.findings.map(diagnosticOf)
+        : [check.diagnostic ?? "failed with no diagnostic"],
+    })) ?? [];
   const status: WorkspaceStatus = {
     workspaceDir: resolved,
     projectName: longwriteConfig?.project?.name,

@@ -107,7 +107,7 @@ describe("landmark_coverage release gate", () => {
     const report = await validateResearchWorkspace(ws);
     const check = report.checks.find((c) => c.id === "landmark_coverage");
     expect(check?.pass).toBe(false);
-    expect(check?.findings[0]).toContain("Darwin Godel Machine");
+    expect(check?.findings[0].diagnostic).toContain("Darwin Godel Machine");
   });
 
   it("bounds the canonical denominator by the configured paper-scale budget", async () => {
@@ -131,6 +131,7 @@ describe("landmark_coverage release gate", () => {
     const report = await validateResearchWorkspace(ws);
     const check = report.checks.find((item) => item.id === "landmark_coverage");
     expect(check).toMatchObject({ pass: true });
-    expect(check?.findings[0]).toContain("1/1");
+    // A passing gate has nothing to route, so its prose lives on the check.
+    expect(check?.diagnostic).toContain("1/1");
   });
 });

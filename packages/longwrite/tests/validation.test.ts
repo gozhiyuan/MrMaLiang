@@ -120,7 +120,7 @@ describe("research workspace validation", () => {
     const ws = await makeWorkspace(files);
     const report = await validateResearchWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+    expect(report.checks.flatMap((check) => [...check.findings.map((f) => f.diagnostic), ...(check.diagnostic ? [check.diagnostic] : [])])).toEqual(expect.arrayContaining([
       expect.stringContaining("unknown source id \"missing-source\""),
       expect.stringContaining("does not cite any planned source"),
     ]));
@@ -151,10 +151,10 @@ describe("research workspace validation", () => {
     files["chapters/section-1.md"] += "\nRepository evidence [codebase:github-101:README.md#L1-L2], with invalid evidence [codebase:unknown-repo:README.md#L1-L2].\n";
     const ws = await makeWorkspace(files);
     const report = await validateResearchWorkspace(ws);
-    expect(report.checks.find((check) => check.id === "codebase_evidence")).toMatchObject({
-      pass: false,
-      findings: expect.arrayContaining([expect.stringContaining('unknown codebase id "unknown-repo"')]),
-    });
+    const codebase = report.checks.find((check) => check.id === "codebase_evidence");
+    expect(codebase?.pass).toBe(false);
+    expect(codebase?.findings.map((finding) => finding.diagnostic))
+      .toEqual(expect.arrayContaining([expect.stringContaining('unknown codebase id "unknown-repo"')]));
   });
 
   it("requires a full research release to reach 80% of its configured word target", async () => {
@@ -171,10 +171,12 @@ describe("research workspace validation", () => {
     ].join("\n");
     const ws = await makeWorkspace(files);
     const report = await validateResearchWorkspace(ws);
-    expect(report.checks.find((check) => check.id === "target_length")).toMatchObject({
-      pass: false,
-      findings: [expect.stringContaining("full-release minimum 800")],
-    });
+    const length = report.checks.find((check) => check.id === "target_length");
+    expect(length?.pass).toBe(false);
+    expect(length?.findings.map((finding) => finding.diagnostic))
+      .toEqual([expect.stringContaining("full-release minimum 800")]);
+    // An under-length manuscript must be expandable, not only trimmable.
+    expect(length?.findings[0].required_effect).toBe("expand_argument");
   });
 
   it("gates cited sources, accepted venues, and per-section citation depth separately from corpus breadth", async () => {
@@ -198,14 +200,14 @@ describe("research workspace validation", () => {
     ].join("\n");
     const ws = await makeWorkspace(files);
     const report = await validateResearchWorkspace(ws);
-    expect(report.checks.find((check) => check.id === "cited_literature_release_gates")).toMatchObject({
-      pass: false,
-      findings: expect.arrayContaining([
+    const cited = report.checks.find((check) => check.id === "cited_literature_release_gates");
+    expect(cited?.pass).toBe(false);
+    expect(cited?.findings.map((finding) => finding.diagnostic))
+      .toEqual(expect.arrayContaining([
         expect.stringContaining("cited sources 2 is below configured minimum 3"),
         expect.stringContaining("accepted cited-source ratio"),
         expect.stringContaining("has 0 B-depth cited sources"),
-      ]),
-    });
+      ]));
   });
 
   it("writes JSON and Markdown reports", async () => {

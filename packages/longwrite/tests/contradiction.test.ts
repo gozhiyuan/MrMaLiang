@@ -112,6 +112,6 @@ describe("claim_contradictions release gate", () => {
     const report = await validateResearchWorkspace(ws);
     const check = report.checks.find((c) => c.id === "claim_contradictions");
     expect(check?.pass).toBe(false);
-    expect(check?.findings[0]).toContain("stale-constraint");
+    expect(check?.findings[0].diagnostic).toContain("stale-constraint");
   });
 });

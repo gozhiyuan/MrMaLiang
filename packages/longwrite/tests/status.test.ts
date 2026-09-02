@@ -66,7 +66,15 @@ describe("LongWrite workspace status", () => {
     await fs.writeFile(path.join(ws, "reports", "longwrite-validation.json"), JSON.stringify({
       pass: false,
       checks: [
+        // A report written before findings became structured. Status reads
+        // this file from disk, so it must still surface the failure.
         { id: "citation_markers_present", pass: false, findings: ["missing marker"] },
+        { id: "bibliography_consistent", pass: false, findings: [
+          { id: "bibliography_consistent-x", gate_id: "bibliography_consistent",
+            artifact: { kind: "bibliography", path: "sources/bibliography.bib" },
+            objective_scope_key: "", required_effect: "repair_bibliography_consistency",
+            severity: "major", diagnostic: "structured bibliography defect" },
+        ] },
       ],
     }), "utf-8");
 
@@ -86,6 +94,7 @@ describe("LongWrite workspace status", () => {
     expect(markdown).toContain("Review Policy");
     expect(markdown).toContain("Pending Approvals");
     expect(markdown).toContain("missing marker");
+    expect(markdown).toContain("structured bibliography defect");
   });
 
   it("writes a dated daily digest", async () => {
