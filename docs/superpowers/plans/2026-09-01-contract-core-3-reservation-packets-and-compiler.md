@@ -1739,7 +1739,13 @@ git commit -m "feat(registry): declare capability templates without compile-time
 
 **Interfaces:**
 - Consumes: `CapabilityTemplate` (Task 9); `Finding`, `REGISTRY` (Plan 1); `buildRepairPacket` (Task 5); the current scoped observations.
-- Produces: `ActionInstance` schema per wire contract §8; `materializeAction(workspaceDir, request): Promise<ActionInstance>`; a `research materialize-action` CLI command the dispatcher invokes.
+- Produces: `materializeAction(workspaceDir, request): Promise<MaterializationResult>`; a `research materialize-action` CLI command the dispatcher invokes.
+
+`MaterializationResult = ActionInstance | OperatorRequiredBlocker` is defined by
+the **kernel** (Plan 2 Task 22) and imported from `malaclaw/sdk`, because the
+dispatcher must be able to parse whichever arrives. A domain layer that returned
+a blocker while declaring `Promise<ActionInstance>` would type-check on its own
+and fail at the boundary.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1856,6 +1862,15 @@ describe("action instances", () => {
       expect.arrayContaining(["template", "finding_ids", "scope_key", "acceptance"]));
   });
 
+  it("declares a union return type the dispatcher can parse", async () => {
+    const result = await materializeAction(await workspace(), {
+      actionId: "a1", findings: [finding], observations,
+    });
+    // MaterializationResult, not ActionInstance: both arms must be
+    // representable at the boundary, or the blocker arm fails to parse.
+    expect(result.kind === "action_instance" || result.kind === "operator_required").toBe(true);
+  });
+
   it("turns an operator target into a blocker rather than an instance", async () => {
     const result = await materializeAction(await workspace(), {
       actionId: "a1", observations,
@@ -1894,6 +1909,12 @@ An operator-target finding never becomes an action instance either:
 `materializeAction` catches `OperatorTargetFinding` and returns an
 `operator_required` blocker naming the target and the question, which the kernel
 treats as a durable pause rather than a dispatchable repair.
+
+`RepairPacket.findings` is typed as **editable findings only** —
+`Array<Finding & { artifact: EditableArtifact }>` — so TypeScript narrows
+`.artifact.path` inside the packet builder and the prompt renderer without a
+cast. `buildRepairPacket` filters operator targets out before that point, so the
+narrower type is the accurate one rather than an assertion.
 
 Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from `gateAcceptanceCriterion` for each distinct gate, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
 
@@ -2467,6 +2488,7 @@ import {
   Criterion, MeasurementEnvelope, evaluateContract, wireContractFixtureDir,
 } from "malaclaw/sdk";
 import { METRIC_REGISTRY, PLANNER_SELECTABLE, metricDefinition } from "../src/lib/registry/metrics.js";
+import { scopeKey } from "../src/lib/registry/scope.js";
 import { compileCriterion } from "../src/lib/registry/criteria.js";
 import { buildEnvelope } from "../src/lib/registry/evaluate.js";
 import { metricId } from "../src/lib/registry/ids.js";
@@ -2553,7 +2575,10 @@ describe("wire contract conformance", () => {
     roots.push(ws);
     const envelope = await buildEnvelope(ws, { metrics: [metricId("taxonomy_cell_ab_sources")], asOfDate: AS_OF });
     expect(MeasurementEnvelope.safeParse(envelope).success).toBe(true);
-    expect(envelope.measurements.map((entry) => entry.scope_key).sort()).toEqual(["memory", "planning"]);
+    // Canonical keys, not raw labels: the kernel's scope pattern rejects a
+    // configured cell containing a space.
+    expect(envelope.measurements.map((entry) => entry.scope_key).sort())
+      .toEqual([scopeKey("taxonomy_cell", "memory"), scopeKey("taxonomy_cell", "planning")].sort());
   });
 
   it("agrees with the kernel on every envelope acceptance case", () => {

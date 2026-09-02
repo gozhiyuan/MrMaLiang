@@ -3737,7 +3737,7 @@ never call them.
 
 **Interfaces:**
 - Consumes: `WorkflowCommand`, `Criterion` (Task 2); `ContractOutcome` (Task 1).
-- Produces: on `ActionDispatchStage` — `materializer: WorkflowCommand`, `verdict_inputs: string[]`, `cost_probe?: WorkflowCommand`; schemas `PreDispatchVerdict`, `ActionInstance`, `CostEstimate`; `readVerdict(dir, path)`, `parseActionInstance(raw)`, `runMaterializer(dir, stage, request)`.
+- Produces: on `ActionDispatchStage` — `materializer: WorkflowCommand`, `verdict_inputs: string[]`, `cost_probe?: WorkflowCommand`, `on_diagnose?: WorkflowId`; schemas `PreDispatchVerdict`, `ActionInstance`, `OperatorRequiredBlocker`, `MaterializationResult`, `CostEstimate`; `readVerdict(dir, path)`, `parseActionInstance(raw)`, `parseMaterializationResult(raw)`, `affordable(estimate, limits)`, `runMaterializer(dir, stage, request)`. `MaterializationResult` is exported from `malaclaw/sdk` so the domain layer declares the same union it returns.
 
 Everything is domain-neutral: the kernel reads named verdicts, numeric costs and
 a declared action shape. It never learns what any of them mean.
@@ -3753,7 +3753,8 @@ import os from "node:os";
 import path from "node:path";
 import { WorkflowDef } from "../src/lib/schema.js";
 import {
-  PreDispatchVerdict, ActionInstance, CostEstimate, readVerdict, parseActionInstance, affordable,
+  PreDispatchVerdict, ActionInstance, CostEstimate, readVerdict,
+  parseActionInstance, parseMaterializationResult, affordable,
 } from "../src/lib/workflow/dispatch-protocol.js";
 
 const dirs: string[] = [];
@@ -3840,6 +3841,21 @@ describe("dispatch protocol", () => {
     await expect(runMaterializer(dir, stage as never, validInstanceRequest)).rejects.toThrow();
   });
 
+  it("parses either arm of a materialization result", () => {
+    // A domain materializer may legitimately answer "this needs an operator",
+    // and the dispatcher must be able to parse that answer.
+    expect(parseMaterializationResult({
+      version: 1, kind: "operator_required", action_id: "a1", findings: ["f1"], target: "pdflatex",
+      question: "Install a LaTeX distribution providing pdflatex, or disable the PDF build.",
+    }).kind).toBe("operator_required");
+  });
+
+  it("rejects an operator blocker with no question", () => {
+    expect(() => parseMaterializationResult({
+      version: 1, kind: "operator_required", action_id: "a1", findings: ["f1"], target: "pdflatex",
+    })).toThrow(/question/);
+  });
+
   it("parses a materialized action instance", () => {
     const instance = {
       version: 1, from_template: "revise_sections", action_id: "a1",
@@ -3852,7 +3868,7 @@ describe("dispatch protocol", () => {
                         target: 0.9, tolerance: 0.000001, direction: "maximize" }],
       strategy_key: ["template", "finding_ids", "scope_key", "acceptance"],
     };
-    expect(parseActionInstance(instance).action_id).toBe("a1");
+    expect(parseActionInstance({ ...instance, kind: "action_instance" }).action_id).toBe("a1");
   });
 
   it("rejects an instance whose writes escape its own envelope", () => {
@@ -3951,13 +3967,23 @@ Create `src/lib/workflow/dispatch-protocol.ts` with `PreDispatchVerdict`
 (`{ version: 1, unreachable: Array<{ objective, detail }>, requires_diagnosis: Array<{ objective, detail }> }`),
 `CostEstimate` (`{ version: 1, model_calls, renders }`),
 `affordable(estimate, limits)` comparing them and treating an absent limit as
-unbounded, and `ActionInstance` — the wire contract §8 shape — whose `superRefine` requires at least one acceptance
-criterion and confines `writes` to `owns`. `runMaterializer(dir, stage, request)` writes the request artifact to
+unbounded, `ActionInstance` — the wire contract §8 shape, tagged
+`kind: "action_instance"` — whose `superRefine` requires at least one acceptance
+criterion and confines `writes` to `owns`, `OperatorRequiredBlocker`
+(`{ version: 1, kind: "operator_required", action_id, findings, target, question }`),
+and `MaterializationResult = ActionInstance | OperatorRequiredBlocker`
+discriminated on `kind`.
+
+An `operator_required` blocker is a legitimate materialization answer, not a
+failure: nothing this product owns can install a compiler. A domain layer that
+returned one while the kernel could parse only an `ActionInstance` would
+type-check on its own and fail at the boundary. `runMaterializer(dir, stage, request)` writes the request artifact to
 `repair/<action-id>/request.json`, spawns the declared command with
 `--request <abs path> --output <abs path>` appended to its args, waits for exit,
-and parses the output file through `parseActionInstance`. A non-zero exit, a
-missing output file, or an invalid instance fails the dispatch rather than being
-partially believed. The transport is explicit because a command without one can
+and parses the output file through `parseMaterializationResult`, which accepts
+either arm. A non-zero exit, a missing output file, or a result matching neither
+arm fails the dispatch rather than being partially believed. The engine maps the
+blocker arm to the `operator_required` contract outcome. The transport is explicit because a command without one can
 be described but never executed. Validate `on_diagnose` against declared stage ids in
 the workflow-level refinement.
 
