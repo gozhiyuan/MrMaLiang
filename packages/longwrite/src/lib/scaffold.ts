@@ -263,7 +263,7 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       verification: { max_sources: isResearchMode ? selectedPaperProfile.researchBudget.verificationMaxSources : 30 },
       corpus_gates: mode.id === "auto_research_agentic"
         ? selectedPaperProfile.corpusGates
-        : { min_candidates: 40, min_sources_per_taxonomy_cell: 1, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1, min_landmark_coverage_ratio: 0, min_landmark_citation_coverage_ratio: 0 },
+        : { min_candidates: 40, min_sources_per_taxonomy_cell: 1, min_core_sources: 6, min_recent_ratio: 0.1, min_source_type_diversity: 1, min_landmark_coverage_ratio: 0, min_landmark_citation_coverage_ratio: 0, max_landmark_candidates: 20 },
       writing_strategy: writingStrategy,
       retrieval: { backend: "sqlite_fts", embedding_model: "text-embedding-3-small" },
     },
@@ -310,10 +310,10 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       quality_gates: mode.id === "auto_research_agentic"
         ? selectedPaperProfile.figureGates
         : { min_figures: 0, min_tables: 0, min_comparative_tables: 0, min_verified_metadata_plots: 0, max_nanobanana_illustrations: 1, require_insight_statements: false },
-      // Emitted disabled rather than omitted. This is the only paid backend,
-      // so it must never default on — but leaving it out of the generated file
-      // entirely meant an operator had to know the schema to find it at all.
-      backends: { nanobanana: { enabled: false, budget_usd: 2.0, requires_approval: true } },
+      // Flagship research papers enable the conceptual-illustration backend so
+      // the visual planner can use it without a project-local schema edit.
+      // Paid generation remains separately key-, budget-, and approval-gated.
+      backends: { nanobanana: { enabled: mode.id === "auto_research_agentic", budget_usd: 2.0, requires_approval: true } },
     },
     ...(opts.runLimits ? { run_limits: opts.runLimits } : {}),
     execution: isResearchMode ? FLAGSHIP_EXECUTION_CONFIG : { stage_overrides: {} },

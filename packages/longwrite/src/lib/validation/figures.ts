@@ -9,9 +9,11 @@ import { connectedComponents } from "../research/diagram-connectivity.js";
 import { z } from "zod";
 
 const LOOP_CAPTION_PATTERN = /\b(loop|cycle|feedback|iterative|conjunctive|end-to-end)\b/i;
+const NEGATED_LOOP_CAPTION_PATTERN = /\b(?:not|never|does\s+not|do\s+not|should\s+not|isn't|is\s+not|aren't|are\s+not)\b[^.!?]{0,100}\b(?:loop|cycle|feedback|iterative|conjunctive|end-to-end)\b/i;
 
 const Graph = z.object({
   id: z.string().min(1).optional(), title: z.string().default(""), caption: z.string().default(""),
+  layout: z.object({ kind: z.enum(["grid", "flow"]) }).passthrough().optional(),
   nodes: z.array(z.object({ id: z.string().min(1), label: z.string().default("") }).passthrough()),
   edges: z.array(z.object({ from: z.string().min(1), to: z.string().min(1), label: z.string().optional() }).passthrough()),
 }).passthrough().superRefine((graph, ctx) => {
@@ -179,10 +181,11 @@ async function checkPublicationLayout(workspaceDir: string): Promise<ValidationC
   return { id: "publication_layout", pass: findings.length === 0, findings };
 }
 
-/** A caption that promises one connected process (a "loop", "cycle", or
- * "feedback" mechanism) must render as one connected graph. This catches the
- * exact short-rsi-survey defect: a caption describing one conjunctive
- * improvement loop whose rendered diagram is two disconnected chains. */
+/** A declared flow, or a caption that promises one connected process (a
+ * "loop", "cycle", or "feedback" mechanism), must render as one connected
+ * graph. Grid diagrams intentionally support disconnected comparisons and
+ * capability maps. Negated prose such as "not an end-to-end process" must not
+ * turn a disconnected-intent diagram into a process-flow contract. */
 async function checkDiagramConnectivity(workspaceDir: string): Promise<ValidationCheck> {
   const raw = await readText(workspaceDir, "figures/placement-plan.json");
   if (raw === null) return { id: "diagram_connectivity", pass: true, findings: ["figures/placement-plan.json not present; diagram connectivity check skipped"] };
@@ -212,7 +215,9 @@ async function checkDiagramConnectivity(workspaceDir: string): Promise<Validatio
     }
     const diagram = { ...parsed.data, id: parsed.data.id ?? candidateId };
     const text = `${diagram.title} ${diagram.caption}`;
-    if (!LOOP_CAPTION_PATTERN.test(text)) continue;
+    const requiresConnectivity = diagram.layout?.kind === "flow"
+      || (diagram.layout?.kind !== "grid" && LOOP_CAPTION_PATTERN.test(text) && !NEGATED_LOOP_CAPTION_PATTERN.test(text));
+    if (!requiresConnectivity) continue;
     const components = connectedComponents({ nodes: diagram.nodes, edges: diagram.edges });
     if (components.length > 1) {
       findings.push(`diagram_connectivity: ${diagram.id} caption/title implies one connected process ("${text.trim()}") but its rendered graph forms ${components.length} disconnected groups: ${components.map((group) => `[${group.join(", ")}]`).join(", ")}`);

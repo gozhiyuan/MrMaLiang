@@ -183,6 +183,9 @@ export async function runValidateLandmarks(workspaceDir: string): Promise<void> 
     const parsed = LandmarkCandidates.parse(JSON.parse(raw));
     const canonical = parsed.candidates.filter((candidate) => candidate.confidence !== "low");
     if (canonical.length === 0) throw new Error("at least one high- or medium-confidence landmark is required");
+    const config = await import("../lib/project-config.js").then((mod) => mod.loadProjectConfig(resolved));
+    const maximum = config.research.corpus_gates.max_landmark_candidates;
+    if (canonical.length > maximum) throw new Error(`at most ${maximum} high- or medium-confidence landmarks are allowed by this paper profile; demote adjacent works or remove them`);
     console.log(`Landmark candidates valid: ${canonical.length} high/medium of ${parsed.candidates.length}`);
   } catch (error) {
     console.error(`research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`);

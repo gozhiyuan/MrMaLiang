@@ -58,6 +58,10 @@ export function withResearchScriptStages(
     if (String(stage.id) === "landmark_scout") {
       return {
         ...stage,
+        instructions: [
+          ...((stage.instructions as string[] | undefined) ?? []),
+          `The release-gated canonical set is paper-scale: output at most ${policy?.maxLandmarkCandidates ?? 20} candidates, ordered by genuine canonical importance. Reserve high confidence for works that this exact paper would be academically deficient not to discuss; adjacent examples and general benchmarks are medium or low rather than automatically high.`,
+        ],
         validator_commands: [
           ...((stage.validator_commands as Array<Record<string, unknown>> | undefined) ?? []),
           longwriteCommand(["validate", "landmarks", "."]),

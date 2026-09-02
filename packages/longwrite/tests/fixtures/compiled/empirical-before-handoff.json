@@ -44,7 +44,8 @@
         ],
         "instructions": [
           "Before any broad literature search runs, name the specific canonical or landmark works a domain expert would expect this exact paper to engage with: foundational terminology sources, seminal papers, the most important recent high-impact systems, key surveys, and known counterexamples. Generate these dynamically from the topic and brief — never reuse a fixed list carried over from a different paper's topic.",
-          "Write ONLY research/landmark-candidates.json: {version:1,candidates:[{name,why_canonical,expected_identifiers?:{arxiv_id?,doi?},confidence:high|medium|low}]}. Name real, verifiable works only; omit expected_identifiers rather than inventing one when uncertain of the exact id. List 5 to 30 candidates ordered by confidence."
+          "Write ONLY research/landmark-candidates.json: {version:1,candidates:[{name,why_canonical,expected_identifiers?:{arxiv_id?,doi?},confidence:high|medium|low}]}. Name real, verifiable works only; omit expected_identifiers rather than inventing one when uncertain of the exact id. List 5 to 30 candidates ordered by confidence.",
+          "The release-gated canonical set is paper-scale: output at most 20 candidates, ordered by genuine canonical importance. Reserve high confidence for works that this exact paper would be academically deficient not to discuss; adjacent examples and general benchmarks are medium or low rather than automatically high."
         ],
         "validators": [
           "required_output_exists"
@@ -1018,6 +1019,10 @@
               "reports/release-gates.json",
               "reviews/scorecard.json"
             ],
+            "optional_inputs": [
+              "reports/action-acceptance.json",
+              "reports/final-release-progress.json"
+            ],
             "outputs": [
               "reviews/action-plan.json",
               "reports/final-release-plan-repair.md"
@@ -1617,7 +1622,8 @@
             ],
             "outputs": [
               "reports/final-release-progress.json",
-              "reports/final-release-progress.md"
+              "reports/final-release-progress.md",
+              "reports/action-acceptance.json"
             ],
             "validators": [
               "required_output_exists"

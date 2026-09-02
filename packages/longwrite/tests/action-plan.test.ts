@@ -157,6 +157,28 @@ describe("agentic action-plan contract", () => {
     expect(changed).not.toBe(original);
   });
 
+  it("prioritizes exact missing landmark titles ahead of generic recovery queries", () => {
+    const action: ExpansionAction = {
+      id: "landmark-expansion",
+      source_action_id: "landmark_coverage",
+      weaknesses: [{ category: "major", detail: "Canonical coverage is incomplete." }],
+      rationale: "Retrieve the exact missing canonical works.",
+      acceptance_criteria: [{ metric: "landmark_coverage_ratio", operator: "at_least", target: 0.75 }],
+    };
+    const queries = buildExpansionQueries(
+      "Harness engineering",
+      [action],
+      ["agent optimization"],
+      [],
+      8,
+      ["Promptbreeder: Self-Referential Self-Improvement Via Prompt Evolution", "AFlow"],
+    );
+    expect(queries.slice(0, 2)).toEqual([
+      "Promptbreeder: Self-Referential Self-Improvement Via Prompt Evolution",
+      "AFlow",
+    ]);
+  });
+
   it("routes citation weaving to revision when deterministic corpus gates already pass", async () => {
     const dir = await workspace();
     await fs.mkdir(path.join(dir, "reports"), { recursive: true });

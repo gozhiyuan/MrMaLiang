@@ -119,6 +119,21 @@ describe("final-release action-plan contract", () => {
     ]));
   });
 
+  it("pauses for a typed operator decision after two wholly stalled rounds", async () => {
+    const root = await workspace(
+      { pass: false, checks: [{ id: "landmark_coverage", pass: false, findings: ["missing canonical works"] }] },
+      { version: 1, findings: [], actions: [] },
+    );
+    await fs.writeFile(path.join(root, "reports", "metrics.json"), JSON.stringify({ repair_stalled_rounds: 2 }), "utf-8");
+    await runResearchGenerateFinalReleasePlan(root);
+    const generated = JSON.parse(await fs.readFile(path.join(root, "reviews", "action-plan.json"), "utf-8"));
+    expect(generated.actions).toEqual([expect.objectContaining({
+      id: "repair-stalled-operator-decision",
+      tool: "request_operator_clarification",
+      finding_ids: ["landmark_coverage"],
+    })]);
+  });
+
   it("routes v3 gates to their owning repair capability with directional criteria", async () => {
     const root = await workspace(
       { pass: false, checks: [

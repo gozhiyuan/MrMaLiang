@@ -17,6 +17,7 @@ import { repairCodebaseAnalysis } from "../lib/research/codebase-analysis.js";
 import { repairCodebaseComparison } from "../lib/research/codebase-comparison.js";
 import { loadSearchPlan, type SearchPlan } from "../lib/research/search-plan.js";
 import { gateOwnedByTool, repairRouteForGate } from "../lib/ops/repair-routing.js";
+import type { ClassifiedSource } from "../lib/research/types.js";
 
 /** Copy only a reviewed, publication-eligible LongExperiment result into the
  * paper workspace. LongWrite validates the copied manifest again at release. */
@@ -348,11 +349,15 @@ export function buildExpansionQueries(
   taxonomy: string[],
   venuePriorities: string[],
   limit: number,
+  exactLandmarkTitles: string[] = [],
 ): string[] {
   const criteria = actions.flatMap((action) => action.acceptance_criteria ?? []);
   const acceptedRequired = criteria.some((criterion) => criterion.metric === "accepted_cited_ratio" && criterion.target > 0);
   const citedSourcesRequired = criteria.some((criterion) => criterion.metric === "cited_sources" && criterion.target > 0);
-  const queries: string[] = [];
+  // Exact missing landmark titles come first. The old adapter tokenized a
+  // 30-title finding into generic four-word chunks, retrieving unrelated
+  // papers with overlapping acronyms instead of the named canonical works.
+  const queries: string[] = exactLandmarkTitles.map((title) => title.replace(/\s+/g, " ").trim()).filter(Boolean);
 
   for (const criterion of criteria) {
     if (criterion.metric === "accepted_cited_ratio") {
@@ -504,7 +509,28 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
   }
   const previousLoad = await loadSearchPlan(resolved);
   const previousPlan = previousLoad.present && previousLoad.ok ? previousLoad.plan : undefined;
-  const queryVariants = buildExpansionQueries(topic, actions, config.research.taxonomy, previousPlan?.venue_priorities ?? [], config.research.query_budget);
+  let exactLandmarkTitles: string[] = [];
+  if (actions.some((action) => (action.acceptance_criteria ?? []).some((criterion) => criterion.metric === "landmark_coverage_ratio"))) {
+    try {
+      const [{ LandmarkCandidates, matchLandmarksToCorpus }, classifiedRaw, landmarkRaw] = await Promise.all([
+        import("../lib/research/landmark.js"),
+        fs.readFile(path.join(resolved, "sources", "classified_sources.jsonl"), "utf-8"),
+        fs.readFile(path.join(resolved, "research", "landmark-candidates.json"), "utf-8"),
+      ]);
+      const candidates = LandmarkCandidates.parse(JSON.parse(landmarkRaw)).candidates
+        .filter((candidate) => candidate.confidence !== "low")
+        .slice(0, config.research.corpus_gates.max_landmark_candidates);
+      const sources = classifiedRaw.split("\n").filter(Boolean).flatMap((line) => {
+        try { return [JSON.parse(line) as ClassifiedSource]; } catch { return []; }
+      }).filter((source) => source.citation_depth === "A" || source.citation_depth === "B");
+      const matches = matchLandmarksToCorpus(candidates, sources);
+      exactLandmarkTitles = matches.filter((match) => match.matchedSourceId === null).map((match) => match.candidate);
+    } catch {
+      // Fall back to the bounded diagnostic terms when the optional landmark
+      // artifact is unavailable; expansion remains useful for other gates.
+    }
+  }
+  const queryVariants = buildExpansionQueries(topic, actions, config.research.taxonomy, previousPlan?.venue_priorities ?? [], config.research.query_budget, exactLandmarkTitles);
   const checkpoint = await loadExpansionCheckpoint(resolved);
   const intentKey = expansionIntentKey(topic, actions);
   const intent = checkpoint.intents[intentKey] ?? {
@@ -814,6 +840,38 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
   const target = path.join(resolved, "reviews", "action-plan.json");
   const reportPath = path.join(resolved, "reports", "final-release-plan-repair.md");
   try {
+    // A clarification-only plan is normally invalid because deterministic
+    // failures must receive an executable owner. The one exception is the
+    // typed circuit breaker emitted after two mechanically confirmed stalled
+    // rounds. Validate that exception before enrichment, which otherwise
+    // correctly restores the mandatory executable action.
+    const rawPlan = AgenticActionPlan.parse(JSON.parse(await fs.readFile(target, "utf-8")));
+    const metrics = await fs.readFile(path.join(resolved, "reports", "metrics.json"), "utf-8")
+      .then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => ({} as Record<string, unknown>));
+    const stalledClarification = rawPlan.actions.length === 1
+      && rawPlan.actions[0]?.id === "repair-stalled-operator-decision"
+      && rawPlan.actions[0].tool === "request_operator_clarification"
+      && typeof metrics.repair_stalled_rounds === "number"
+      && metrics.repair_stalled_rounds >= 2;
+    if (stalledClarification) {
+      const validation = JSON.parse(await fs.readFile(path.join(resolved, "reports", "longwrite-validation.json"), "utf-8")) as {
+        pass?: boolean; checks?: Array<{ id?: string; pass?: boolean }>;
+      };
+      const failedIds = (validation.checks ?? []).filter((check) => check.pass === false)
+        .map((check) => check.id).filter((id): id is string => typeof id === "string");
+      const actionIds = new Set(rawPlan.actions[0]!.finding_ids);
+      if (validation.pass || failedIds.length === 0 || failedIds.some((id) => !actionIds.has(id)) || actionIds.size !== failedIds.length) {
+        throw new Error("stalled repair clarification must exactly cover all currently failed release checks");
+      }
+      await fs.mkdir(path.dirname(reportPath), { recursive: true });
+      await fs.writeFile(reportPath, [
+        "# Final-release plan validation", "", "- Status: pass",
+        `- Circuit breaker: ${metrics.repair_stalled_rounds} consecutive wholly stalled repair rounds`,
+        `- Failed checks awaiting an operator decision: ${failedIds.join(", ")}`,
+        "- Selected action: request_operator_clarification", "",
+      ].join("\n"), "utf-8");
+      return;
+    }
     await enrichFinalReleaseActionPlan(resolved);
     const plan = AgenticActionPlan.parse(JSON.parse(await fs.readFile(target, "utf-8")));
     const validation = JSON.parse(await fs.readFile(path.join(resolved, "reports", "longwrite-validation.json"), "utf-8")) as {
@@ -946,6 +1004,9 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
     check.pass === false && typeof check.id === "string",
   );
   const failedIds = failed.map((check) => check.id);
+  const priorMetrics = await fs.readFile(path.join(resolved, "reports", "metrics.json"), "utf-8")
+    .then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => ({} as Record<string, unknown>));
+  const stalledRounds = typeof priorMetrics.repair_stalled_rounds === "number" ? priorMetrics.repair_stalled_rounds : 0;
   type ReviewWeakness = { category: string; detail: string; severity: "critical" | "major" | "minor" };
   type ReviewScorecard = { personas?: Array<{ id?: unknown; weaknesses?: Array<{ category?: unknown; detail?: unknown; severity?: unknown }> }> };
   let scorecard: ReviewScorecard = {};
@@ -1072,6 +1133,20 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
         ],
       });
     }
+  }
+  // Two rounds in which no dispatched action satisfies even one owning gate
+  // indicate an infeasible or mis-scoped repair, not permission to spend a
+  // third identical round. Pause on a typed operator decision with the exact
+  // remaining gates. This is a recoverable escalation, not a false success or
+  // an opaque max-round failure.
+  if (stalledRounds >= 2 && failedIds.length > 0) {
+    actions.splice(0, actions.length, {
+      id: "repair-stalled-operator-decision",
+      tool: "request_operator_clarification",
+      finding_ids: failedIds,
+      rationale: `Automated repair completed ${stalledRounds} consecutive rounds without satisfying any owning release gate. Decide whether to broaden the evidence budget, revise the paper scope/profile, or provide targeted source/venue guidance. Remaining gates: ${failedIds.join(", ")}.`,
+      acceptance_criteria: [await gateAcceptanceCriterion(resolved, failedIds[0]!, config)],
+    });
   }
   const plan = AgenticActionPlan.parse({ version: 1, findings, actions });
   const target = path.join(resolved, "reviews", "action-plan.json");

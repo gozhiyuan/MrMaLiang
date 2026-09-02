@@ -576,7 +576,11 @@ async function checkLandmarkCoverage(workspaceDir: string, sources: ClassifiedSo
     const finding = `research/landmark-candidates.json is invalid: ${error instanceof Error ? error.message : String(error)}`;
     return [{ id: "landmark_coverage", pass: false, findings: [`landmark_coverage: ${finding}`] }, { id: "landmark_citation_coverage", pass: false, findings: [`landmark_citation_coverage: ${finding}`] }];
   }
-  const canonical = candidates.candidates.filter((candidate) => candidate.confidence !== "low");
+  const maxCandidates = config?.research.corpus_gates.max_landmark_candidates ?? 20;
+  // Candidate order is part of the scout contract. Bound the release
+  // denominator to the configured paper scope so an over-enthusiastic scout
+  // cannot turn every adjacent work into a mandatory citation.
+  const canonical = candidates.candidates.filter((candidate) => candidate.confidence !== "low").slice(0, maxCandidates);
   if (canonical.length === 0) {
     const finding = "landmark scout produced no high/medium-confidence candidates";
     return [{ id: "landmark_coverage", pass: threshold <= 0, findings: [`landmark_coverage: ${finding}`] }, { id: "landmark_citation_coverage", pass: citationThreshold <= 0, findings: [`landmark_citation_coverage: ${finding}`] }];

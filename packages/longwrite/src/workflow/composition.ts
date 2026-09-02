@@ -39,6 +39,7 @@ export type CompileResearchPolicy = {
   targetCandidates: number;
   queryBudget: number;
   taxonomy: string[];
+  maxLandmarkCandidates?: number;
   paperProfile?: PaperProfileId;
   codebases?: CodebaseConfig[];
   codebaseDiscovery?: { enabled: boolean; queryBudget: number; maxCandidates: number; maxReadmeFetches: number; maxSelected: number; requireLicense: boolean; includeArchived: boolean; languages: string[] };
@@ -1194,7 +1195,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       title: "Require measurable final-release recovery progress",
       owner: "analyst",
       inputs: ["reports/final-release-baseline.json", "reports/release-gates.json", "reports/evidence-audit.json", "reports/metrics.json"],
-      outputs: ["reports/final-release-progress.json", "reports/final-release-progress.md"], validators: ["required_output_exists"], runtime: "script",
+      outputs: ["reports/final-release-progress.json", "reports/final-release-progress.md", "reports/action-acceptance.json"], validators: ["required_output_exists"], runtime: "script",
       command: longwriteCommand(["research", "assess-final-release-progress", "."]),
     });
     const citationRepairPacket = scriptStage({
@@ -1224,6 +1225,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       // current scorecard, and finite citation-repair packet contain exactly
       // the facts needed to select the next bounded action.
       inputs: ["reports/longwrite-validation.json", "reports/release-gates.json", "reviews/scorecard.json"],
+      optional_inputs: ["reports/action-acceptance.json", "reports/final-release-progress.json"],
       outputs: ["reviews/action-plan.json", "reports/final-release-plan-repair.md"],
       validators: ["required_output_exists"], runtime: "script",
       command: longwriteCommand(["research", "generate-final-release-plan", "."]),

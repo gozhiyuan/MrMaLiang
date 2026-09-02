@@ -1358,10 +1358,11 @@ intermediates, never canonical evidence or the final PDF. See
 Sanitize absolute paths and credentials. Do not commit flow state, prompts, raw
 logs, or secrets.
 
-## 9. Optional Nano Banana conceptual diagram
+## 9. Nano Banana conceptual diagram
 
-Deterministic charts/tables remain the default. To add one non-evidentiary
-conceptual diagram, explicitly set a small budget:
+Flagship research-paper presets enable the Nano Banana conceptual-illustration
+backend with a small budget by default. Deterministic charts and tables remain
+the required choice for empirical or quantitative evidence:
 
 ```yaml
 figures:
@@ -1373,7 +1374,8 @@ figures:
       model: gemini-2.5-flash-image
 ```
 
-Authorize the key and this workspace:
+Paid generation remains inert until the operator supplies a key and explicitly
+authorizes this workspace:
 
 ```bash
 export LONGWRITE_NANOBANANA_API_KEY="..."

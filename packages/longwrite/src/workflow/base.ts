@@ -49,6 +49,7 @@ export type CompileResearchPolicy = {
   targetCandidates: number;
   queryBudget: number;
   taxonomy: string[];
+  maxLandmarkCandidates?: number;
   paperProfile?: PaperProfileId;
   codebases?: CodebaseConfig[];
   codebaseDiscovery?: { enabled: boolean; queryBudget: number; maxCandidates: number; maxReadmeFetches: number; maxSelected: number; requireLicense: boolean; includeArchived: boolean; languages: string[] };

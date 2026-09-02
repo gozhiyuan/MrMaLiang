@@ -129,6 +129,36 @@ describe("final-release recovery repairs", () => {
     expect(report.regressions).toEqual(expect.arrayContaining([expect.stringContaining("ledger_unresolved")]));
   });
 
+  it("records action acceptance and escalates only wholly stalled repair rounds", async () => {
+    const root = await workspace();
+    await fs.writeFile(path.join(root, "reports", "release-gates.json"), JSON.stringify({
+      pass: false,
+      gates: [{ id: "landmark_coverage", pass: false }, { id: "review_target", pass: false }],
+    }), "utf-8");
+    await fs.writeFile(path.join(root, "reviews", "action-plan.json"), JSON.stringify({
+      version: 1,
+      actions: [{
+        id: "repair-both", tool: "revise_sections", finding_ids: ["landmark_coverage", "review_target"],
+        acceptance_criteria: [{ metric: "review_score", operator: "at_least", target: 8 }],
+      }],
+    }), "utf-8");
+    await writeFinalReleaseBaseline(root);
+
+    await assessFinalReleaseProgress(root);
+    let metrics = JSON.parse(await fs.readFile(path.join(root, "reports", "metrics.json"), "utf-8"));
+    expect(metrics).toMatchObject({ repair_actions_accepted: 0, repair_actions_unmet: 1, repair_stalled_rounds: 1 });
+    const acceptance = JSON.parse(await fs.readFile(path.join(root, "reports", "action-acceptance.json"), "utf-8"));
+    expect(acceptance.actions[0]).toMatchObject({ execution_status: "completed", acceptance_status: "unmet", unresolved_finding_ids: ["landmark_coverage", "review_target"] });
+
+    await fs.writeFile(path.join(root, "reports", "release-gates.json"), JSON.stringify({
+      pass: false,
+      gates: [{ id: "landmark_coverage", pass: true }, { id: "review_target", pass: false }],
+    }), "utf-8");
+    await assessFinalReleaseProgress(root);
+    metrics = JSON.parse(await fs.readFile(path.join(root, "reports", "metrics.json"), "utf-8"));
+    expect(metrics).toMatchObject({ repair_actions_accepted: 0, repair_actions_unmet: 1, repair_findings_resolved: 1, repair_stalled_rounds: 0 });
+  });
+
   it("excludes metadata-only indexed chunks from citation-upgrade candidates", async () => {
     const root = await workspace();
     await Promise.all(["chapters", "sources"].map((dir) => fs.mkdir(path.join(root, dir), { recursive: true })));

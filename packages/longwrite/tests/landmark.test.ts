@@ -109,4 +109,28 @@ describe("landmark_coverage release gate", () => {
     expect(check?.pass).toBe(false);
     expect(check?.findings[0]).toContain("Darwin Godel Machine");
   });
+
+  it("bounds the canonical denominator by the configured paper-scale budget", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "landmark-gate-bounded-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "research"), { recursive: true });
+    await fs.mkdir(path.join(ws, "sources"), { recursive: true });
+    await fs.writeFile(path.join(ws, "longwrite.yaml"), [
+      "version: 1",
+      "project:", "  id: bounded", "  artifact_type: research_paper", "  mode: auto_research_agentic",
+      "research:", "  corpus_gates:", "    min_landmark_coverage_ratio: 1", "    max_landmark_candidates: 1",
+    ].join("\n"));
+    await fs.writeFile(path.join(ws, "research", "landmark-candidates.json"), JSON.stringify({
+      version: 1,
+      candidates: [
+        { name: "Promptbreeder", why_canonical: "Canonical prompt evolution work with direct relevance.", confidence: "high" },
+        { name: "Unretrieved adjacent work", why_canonical: "Related but outside the bounded canonical set.", confidence: "medium" },
+      ],
+    }));
+    await fs.writeFile(path.join(ws, "sources", "classified_sources.jsonl"), `${JSON.stringify(source({ id: "pb", title: "Promptbreeder" }))}\n`);
+    const report = await validateResearchWorkspace(ws);
+    const check = report.checks.find((item) => item.id === "landmark_coverage");
+    expect(check).toMatchObject({ pass: true });
+    expect(check?.findings[0]).toContain("1/1");
+  });
 });

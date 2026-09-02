@@ -25,6 +25,13 @@ type RecoverySnapshot = {
   metrics: RecoveryMetrics;
 };
 
+type PlannedRepairAction = {
+  id: string;
+  tool: string;
+  finding_ids: string[];
+  acceptance_criteria?: Array<{ metric: string; operator?: string; target: number; scope?: string }>;
+};
+
 type ValidatedEvidenceClaim = {
   claim: string;
   supporting_excerpt: string;
@@ -381,15 +388,55 @@ export async function assessFinalReleaseProgress(workspaceDir: string): Promise<
   // regression visible and re-openable instead of blessing token-consuming
   // oscillation as convergence.
   const pass = current.release_pass || (improvements.length > 0 && regressions.length === 0);
+  const actionPlan = await readJson<{ actions?: PlannedRepairAction[] }>(path.join(root, "reviews", "action-plan.json"));
+  const actionOutcomes = (actionPlan?.actions ?? []).map((action) => {
+    const unresolvedFindingIds = action.finding_ids.filter((id) => current.gate_pass[id] !== true);
+    return {
+      id: action.id,
+      tool: action.tool,
+      execution_status: "completed" as const,
+      acceptance_status: unresolvedFindingIds.length === 0 ? "accepted" as const : "unmet" as const,
+      resolved_finding_ids: action.finding_ids.filter((id) => current.gate_pass[id] === true),
+      unresolved_finding_ids: unresolvedFindingIds,
+      acceptance_criteria: action.acceptance_criteria ?? [],
+    };
+  });
+  const acceptedActions = actionOutcomes.filter((action) => action.acceptance_status === "accepted").length;
+  const resolvedFindings = actionOutcomes.reduce((sum, action) => sum + action.resolved_finding_ids.length, 0);
+  const stalled = actionOutcomes.length > 0 && resolvedFindings === 0;
+  const metricsPath = path.join(root, "reports", "metrics.json");
+  const priorMetrics = await readJson<Record<string, unknown>>(metricsPath) ?? {};
+  const priorStreak = typeof priorMetrics.repair_stalled_rounds === "number" && Number.isFinite(priorMetrics.repair_stalled_rounds)
+    ? priorMetrics.repair_stalled_rounds : 0;
+  await fs.writeFile(metricsPath, `${JSON.stringify({
+    ...priorMetrics,
+    repair_acceptance_pass: actionOutcomes.length === 0 || acceptedActions === actionOutcomes.length ? 1 : 0,
+    repair_actions_accepted: acceptedActions,
+    repair_actions_unmet: actionOutcomes.length - acceptedActions,
+    repair_findings_resolved: resolvedFindings,
+    repair_stalled_rounds: stalled ? priorStreak + 1 : 0,
+  }, null, 2)}\n`, "utf-8");
+  const acceptanceRel = "reports/action-acceptance.json";
+  await fs.writeFile(path.join(root, acceptanceRel), `${JSON.stringify({
+    version: 1,
+    generated_at: new Date().toISOString(),
+    pass: actionOutcomes.length === 0 || acceptedActions === actionOutcomes.length,
+    stalled,
+    actions: actionOutcomes,
+  }, null, 2)}\n`, "utf-8");
   const rel = "reports/final-release-progress.json";
   const markdown = "reports/final-release-progress.md";
-  await fs.writeFile(path.join(root, rel), `${JSON.stringify({ version: 1, generated_at: new Date().toISOString(), pass, baseline, current, improvements, regressions }, null, 2)}\n`, "utf-8");
+  await fs.writeFile(path.join(root, rel), `${JSON.stringify({ version: 1, generated_at: new Date().toISOString(), pass, baseline, current, improvements, regressions, action_acceptance: { pass: actionOutcomes.length === 0 || acceptedActions === actionOutcomes.length, stalled, actions: actionOutcomes } }, null, 2)}\n`, "utf-8");
   await fs.writeFile(path.join(root, markdown), [
     "# Final-release recovery progress", "",
     `- Status: ${pass ? "progress recorded" : "no measurable progress"}`,
     `- Release pass: ${current.release_pass ? "yes" : "no"}`,
     ...(improvements.length > 0 ? improvements.map((item) => `- ${item}`) : ["- No failed gate passed and no tracked recovery metric improved."]),
     ...(regressions.length > 0 ? ["", "## Regressions", ...regressions.map((item) => `- ${item}`)] : []), "",
+    "## Action acceptance", "",
+    ...(actionOutcomes.length > 0
+      ? actionOutcomes.map((action) => `- ${action.id} (${action.tool}): ${action.acceptance_status}${action.unresolved_finding_ids.length ? `; unresolved ${action.unresolved_finding_ids.join(", ")}` : ""}`)
+      : ["- No repair actions were dispatched."]), "",
   ].join("\n"), "utf-8");
   return { pass, improvements, reportPath: rel };
 }

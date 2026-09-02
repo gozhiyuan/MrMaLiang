@@ -84,6 +84,7 @@ export async function syncWorkspace(workspaceDir: string): Promise<SyncWorkspace
       targetCandidates: config.research.target_candidates,
       queryBudget: config.research.query_budget,
       taxonomy: config.research.taxonomy,
+      maxLandmarkCandidates: config.research.corpus_gates.max_landmark_candidates,
       paperProfile: config.research.paper_profile,
       codebases: config.research.codebases,
       codebaseDiscovery: {

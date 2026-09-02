@@ -509,6 +509,48 @@ describe("diagram connectivity gate", () => {
     expect(check?.pass).toBe(true);
   });
 
+  it("permits disconnected grid capability maps even when the caption negates an end-to-end process", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-grid-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      diagrams: [{
+        id: "capability-map",
+        title: "Capabilities demonstrated across separate systems",
+        caption: "This should not be read as a shared end-to-end process.",
+        layout: { kind: "grid", columns: 2 },
+        nodes: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }, { id: "d", label: "D" }],
+        edges: [{ from: "a", to: "b" }, { from: "c", to: "d" }],
+      }],
+    }));
+    const report = await validateFigureWorkspace(ws);
+    expect(report.checks.find((c) => c.id === "diagram_connectivity")?.pass).toBe(true);
+  });
+
+  it("uses an explicit flow layout as the connectivity contract without relying on caption keywords", async () => {
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-flow-"));
+    tempDirs.push(ws);
+    await fs.mkdir(path.join(ws, "figures"), { recursive: true });
+    await fs.writeFile(path.join(ws, "figures", "placement-plan.json"), JSON.stringify({
+      version: 1,
+      placements: [],
+      diagrams: [{
+        id: "declared-flow",
+        title: "System operation",
+        caption: "Operational stages.",
+        layout: { kind: "flow", direction: "left_to_right" },
+        nodes: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }, { id: "d", label: "D" }],
+        edges: [{ from: "a", to: "b" }, { from: "c", to: "d" }],
+      }],
+    }));
+    const report = await validateFigureWorkspace(ws);
+    const check = report.checks.find((c) => c.id === "diagram_connectivity");
+    expect(check?.pass).toBe(false);
+    expect(check?.findings[0]).toContain("2 disconnected groups");
+  });
+
   it("degrades gracefully when a loop-captioned diagram has malformed node/edge structure", async () => {
     const ws = await fs.mkdtemp(path.join(os.tmpdir(), "diagram-connectivity-"));
     tempDirs.push(ws);
