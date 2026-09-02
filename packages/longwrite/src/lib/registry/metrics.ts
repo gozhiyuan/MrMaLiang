@@ -26,9 +26,11 @@ export type MetricDefinition = {
 
 const CHEAP = { model_calls: 0, render_required: false };
 
-/** The corpus a citation metric reads: the prose that does the citing, the
- * classified records it cites, and the bibliography that resolves them. */
-const CITED = ["chapters/", "sources/classified_sources.jsonl", "paper/references.bib"];
+/** What a citation metric actually reads: the prose that does the citing and
+ * the classified records it cites. Deliberately not the bibliography — no
+ * evaluator opens it, and an over-declared dependency invalidates a
+ * measurement on a change that could not have altered it. */
+const CITED = ["chapters/", "sources/classified_sources.jsonl"];
 
 type Draft = Omit<MetricDefinition, "metric"> & { metric: string };
 
@@ -73,11 +75,12 @@ const ACCEPTANCE: Draft[] = [
   { metric: "citations_per_page", scope_kind: "global", direction: "maximize", target_type: "ratio",
     tolerance: 0.5, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "citations_per_page", reducer: "identity",
-    dependencies: [...CITED, "paper/main.tex"],
+    // The rendered PDF is a genuine input: page count is what the ratio divides by.
+    dependencies: [...CITED, "build/manuscript.pdf"],
     raw_output: ["reports/metrics/citation-density.json"], estimated_cost: CHEAP },
   { metric: "citation_depth_per_section", scope_kind: "section", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
-    evaluator: "citation_depth_per_section", reducer: "per_scope", dependencies: CITED,
+    evaluator: "citation_depth_per_section", reducer: "per_scope", dependencies: ["chapters/"],
     raw_output: ["reports/metrics/citation-depth.json"], estimated_cost: CHEAP },
   { metric: "taxonomy_cell_ab_sources", scope_kind: "taxonomy_cell", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
@@ -97,7 +100,7 @@ const ACCEPTANCE: Draft[] = [
   { metric: "verified_metadata_plots", scope_kind: "global", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "verified_metadata_plots", reducer: "identity",
-    dependencies: ["figures/manifest.json", "figures/concept-provenance.json"],
+    dependencies: ["figures/manifest.json"],
     raw_output: ["reports/metrics/plots.json"], estimated_cost: CHEAP },
   { metric: "figures", scope_kind: "global", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
@@ -118,7 +121,7 @@ const ACCEPTANCE: Draft[] = [
     evaluator: "empirical_trials", reducer: "identity",
     dependencies: ["evidence/experiment-packets.json"],
     raw_output: ["reports/metrics/trials.json"], estimated_cost: CHEAP },
-  { metric: "outline_readiness", scope_kind: "global", direction: "maximize", target_type: "score",
+  { metric: "outline_readiness", scope_kind: "global", direction: "maximize", target_type: "boolean",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "outline_readiness", reducer: "identity",
     dependencies: ["outline.md", "outline.json", "reviews/outline-review.json"],
@@ -138,12 +141,14 @@ const ACCEPTANCE: Draft[] = [
   { metric: "landmark_coverage_ratio", scope_kind: "global", direction: "maximize", target_type: "ratio",
     tolerance: 0.05, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "landmark_coverage_ratio", reducer: "identity",
-    dependencies: ["sources/classified_sources.jsonl", "evidence/active-validated-source-evidence.json"],
+    dependencies: ["sources/classified_sources.jsonl", "research/landmark-candidates.json",
+      "evidence/active-validated-source-evidence.json"],
     raw_output: ["reports/metrics/landmarks.json"], estimated_cost: CHEAP },
   { metric: "landmark_citation_coverage_ratio", scope_kind: "global", direction: "maximize", target_type: "ratio",
     tolerance: 0.05, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "landmark_citation_coverage_ratio", reducer: "identity",
-    dependencies: [...CITED, "evidence/active-validated-source-evidence.json"],
+    dependencies: [...CITED, "research/landmark-candidates.json",
+      "evidence/active-validated-source-evidence.json"],
     raw_output: ["reports/metrics/landmark-citations.json"], estimated_cost: CHEAP },
   { metric: "claim_contradictions", scope_kind: "global", direction: "minimize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
@@ -186,8 +191,11 @@ const OBSERVATIONS: Draft[] = [
   { metric: "citation_verification_status", scope_kind: "global", direction: "maximize", target_type: "boolean",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "citation_verification_status", reducer: "identity",
-    dependencies: ["paper/references.bib", "sources/classified_sources.jsonl", "evidence/citation-ledger.jsonl"],
+    dependencies: ["chapters/", "sources/classified_sources.jsonl"],
     raw_output: ["reports/source-verification.md"], estimated_cost: CHEAP },
+  // External, not script: its value comes from running a LaTeX toolchain this
+  // product does not own, so the latex producer emits the observation rather
+  // than a script evaluator computing one.
   { metric: "latex_build_status", scope_kind: "global", direction: "maximize", target_type: "boolean",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "external",
     evaluator: "latex_build_status", reducer: "identity",
