@@ -604,7 +604,11 @@ async function checkPublicationArtifacts(workspaceDir: string): Promise<Validati
   const [latex, figures] = await Promise.all([validateLatexWorkspace(workspaceDir), validateFigureWorkspace(workspaceDir)]);
   return [
     { id: "publication_latex", pass: latex.pass, findings: latex.checks.flatMap((check) => check.findings) },
-    { id: "publication_figures", pass: figures.pass, findings: figures.checks.flatMap((check) => check.findings) },
+    // The figures producer emits structured findings; this aggregate check is
+    // a prose summary for the operator report, so it carries their diagnostics.
+    // The routable findings reach the kernel from the figures producer itself,
+    // not from here.
+    { id: "publication_figures", pass: figures.pass, findings: figures.checks.flatMap((check) => check.findings.map((item) => item.diagnostic)) },
   ];
 }
 

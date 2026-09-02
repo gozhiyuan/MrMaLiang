@@ -42,8 +42,26 @@ async function probeWorkspace(module: string): Promise<string> {
     JSON.stringify({ id: "s1", citation_depth: "C", source: "arxiv", title: "A", abstract: "x", year: 2020, topics: [] }), "utf-8");
   await fs.writeFile(path.join(dir, "chapters", "section-01.md"), "# One\n\nProse with no markers.\n", "utf-8");
   await fs.writeFile(path.join(dir, "paper", "main.tex"), "\\documentclass{article}\n", "utf-8");
-  await fs.writeFile(path.join(dir, "figures", "manifest.json"),
-    JSON.stringify({ version: 1, figures: [], tables: [] }), "utf-8");
+  // A figure and a table that are declared but never rendered, labeled or
+  // embedded, so the figures gates emit findings rather than passing on an
+  // empty manifest. An empty manifest is legitimately valid, which made the
+  // probe silent for this producer.
+  await fs.writeFile(path.join(dir, "figures", "manifest.json"), JSON.stringify({
+    version: 1,
+    figures: [{
+      id: "figure-1", title: "Overview", caption: "An overview", insight: "",
+      path: "figures/figure-1.svg", latex_path: "paper/figures/figure-1.tex",
+      placement: { section_id: "section-03", discussion: "introduced in the overview" },
+      backend: "deterministic-svg", data: [],
+    }],
+    tables: [{
+      id: "table-1", title: "Comparison", caption: "A comparison", insight: "",
+      path: "figures/table-1.md", latex_path: "paper/tables/table-1.tex",
+      placement: { section_id: "section-03", discussion: "compared in the overview" },
+      backend: "deterministic-markdown", layout: "table", comparative: false, data: [],
+    }],
+  }), "utf-8");
+  await fs.writeFile(path.join(dir, "paper", "sections", "section-03.tex"), "Prose with no float.\n", "utf-8");
   return dir;
 }
 

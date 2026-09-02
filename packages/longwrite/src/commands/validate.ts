@@ -94,7 +94,10 @@ export async function runValidateFigures(workspaceDir: string): Promise<void> {
   console.log(`Validated LongWrite figure/table workspace at ${resolved}`);
   for (const check of report.checks) {
     console.log(`  ${check.pass ? "✓" : "✗"} ${check.id}`);
-    for (const finding of check.findings) console.error(`  ! ${finding}`);
+    // `diagnostic` is the prose half of a structured finding, and the only
+    // half a terminal reader wants.
+    if (check.diagnostic) console.error(`  ! ${check.diagnostic}`);
+    for (const finding of check.findings) console.error(`  ! ${finding.diagnostic}`);
   }
   if (!report.pass) {
     // The seed provider is an offline dry-run fixture. Keep its visual report

@@ -133,7 +133,7 @@ describe("research figures and tables", () => {
     await fs.rm(path.join(ws, declaredPath));
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+    expect(report.checks.flatMap((check) => check.findings.map((f) => f.diagnostic))).toEqual(expect.arrayContaining([
       expect.stringContaining(`${declaredPath} is missing or empty`),
     ]));
   }, 15_000);
@@ -335,7 +335,7 @@ describe("research figures and tables", () => {
     await fs.writeFile(path.join(ws, "paper", "sections", "section-1.tex"), "\\section{Background}\n", "utf-8");
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
-    expect(report.checks.flatMap((check) => check.findings)).toEqual(expect.arrayContaining([
+    expect(report.checks.flatMap((check) => check.findings.map((f) => f.diagnostic))).toEqual(expect.arrayContaining([
       expect.stringContaining("concept-map is not labeled"),
     ]));
   });
@@ -408,7 +408,7 @@ describe("the planner owns the argument, the renderer owns the rendering", () =>
 
     const report = await validateFigureWorkspace(ws);
     expect(report.pass).toBe(false);
-    const findings = report.checks.flatMap((check) => check.findings).join(" ");
+    const findings = report.checks.flatMap((check) => check.findings.map((f) => f.diagnostic)).join(" ");
     expect(findings).toContain("concept-map requires a substantive insight statement");
   });
 
@@ -486,7 +486,7 @@ describe("diagram connectivity gate", () => {
     const report = await validateFigureWorkspace(ws);
     const check = report.checks.find((c) => c.id === "diagram_connectivity");
     expect(check?.pass).toBe(false);
-    expect(check?.findings[0]).toContain("disconnected groups");
+    expect(check?.findings[0].diagnostic).toContain("disconnected groups");
   });
 
   it("passes when the concept map is fully connected", async () => {
@@ -548,7 +548,7 @@ describe("diagram connectivity gate", () => {
     const report = await validateFigureWorkspace(ws);
     const check = report.checks.find((c) => c.id === "diagram_connectivity");
     expect(check?.pass).toBe(false);
-    expect(check?.findings[0]).toContain("2 disconnected groups");
+    expect(check?.findings[0].diagnostic).toContain("2 disconnected groups");
   });
 
   it("degrades gracefully when a loop-captioned diagram has malformed node/edge structure", async () => {
@@ -573,7 +573,7 @@ describe("diagram connectivity gate", () => {
     expect(report.checks).toBeDefined();
     const check = report.checks.find((c) => c.id === "diagram_connectivity");
     expect(check?.pass).toBe(false);
-    expect(check?.findings.some((f) => f.includes("malformed"))).toBe(true);
+    expect(check?.findings.some((f) => f.diagnostic.includes("malformed"))).toBe(true);
   });
 
   it("reports malformed graphs without masking connectivity defects in valid siblings", async () => {
@@ -593,7 +593,8 @@ describe("diagram connectivity gate", () => {
       ],
     }));
     const report = await validateFigureWorkspace(ws);
-    const findings = report.checks.find((check) => check.id === "diagram_connectivity")?.findings ?? [];
+    const findings = (report.checks.find((check) => check.id === "diagram_connectivity")?.findings ?? [])
+      .map((finding) => finding.diagnostic);
     expect(findings.some((finding) => finding.includes("broken") && finding.includes("malformed"))).toBe(true);
     expect(findings.some((finding) => finding.includes("disconnected") && finding.includes("2 disconnected"))).toBe(true);
   });
