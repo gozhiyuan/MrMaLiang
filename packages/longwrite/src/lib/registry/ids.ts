@@ -10,13 +10,18 @@ const SLUG = "[a-z0-9][a-z0-9-]{0,62}";
 const GATE_ID = new RegExp("^" + SEGMENT + "(:" + SLUG + ")?$");
 const PLAIN_ID = new RegExp("^" + SEGMENT + "$");
 
-declare const gateBrand: unique symbol;
-declare const metricBrand: unique symbol;
-declare const capabilityBrand: unique symbol;
-
-export type GateId = string & { readonly [gateBrand]: true };
-export type MetricId = string & { readonly [metricBrand]: true };
-export type CapabilityId = string & { readonly [capabilityBrand]: true };
+/** Branded string aliases.
+ *
+ * A metric-shaped string reaching a GateId parameter is the bug that let
+ * `rendered_visual_review` steer live acceptance selection; distinct brands
+ * make that a compile error at zero runtime cost.
+ *
+ * The brand is a string-literal property rather than a `unique symbol`: a
+ * symbol brand cannot be named in the emitted declarations of the Zod schemas
+ * that carry it (TS4023), which breaks every consumer of this package. */
+export type GateId = string & { readonly __idBrand: "GateId" };
+export type MetricId = string & { readonly __idBrand: "MetricId" };
+export type CapabilityId = string & { readonly __idBrand: "CapabilityId" };
 
 export const GateIdSchema = z.string().regex(GATE_ID).transform((value) => value as GateId);
 export const MetricIdSchema = z.string().regex(PLAIN_ID).transform((value) => value as MetricId);
