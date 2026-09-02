@@ -74,9 +74,10 @@ describe("publication packaging", () => {
     await fs.mkdir(path.join(ws, "reports"), { recursive: true });
     await fs.writeFile(path.join(ws, "reports", "release-gates.json"), JSON.stringify({ version: 1, pass: false, gates: [] }), "utf-8");
     const failed = await validatePublicationWorkspace(ws);
-    expect(failed.checks.find((check) => check.id === "publication_release_gates")).toMatchObject({
-      pass: false, findings: expect.arrayContaining(["research release gates have not passed"]),
-    });
+    const gates = failed.checks.find((check) => check.id === "publication_release_gates");
+    expect(gates?.pass).toBe(false);
+    expect(gates?.findings.map((finding) => finding.diagnostic))
+      .toEqual(expect.arrayContaining(["research release gates have not passed"]));
   });
 
   it("writes an inspectable no-LLM preflight report before a run", async () => {

@@ -3,13 +3,47 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { gateId } from "../registry/ids.js";
+import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
+import { GLOBAL_SCOPE } from "../registry/scope.js";
+
 const execFileAsync = promisify(execFile);
 
-export type LongformCheck = {
-  id: string;
-  pass: boolean;
-  findings: string[];
+export type LongformCheck = StructuredCheck;
+
+/** How each gate in this module is repaired, declared once beside the gates
+ * themselves. Every entry is mirrored by this module's PRODUCER, and
+ * tests/routing-coverage.test.ts fails if the two disagree.
+ *
+ * `required_artifacts` is deliberately absent: it is an environment gate whose
+ * failure means an input has not been produced yet, so it asks for diagnosis
+ * rather than naming an artifact to edit. */
+const ROUTES: Record<string, { kind: "outline" | "chapter_prose"; effect: "replace_organizing_claim" | "expand_argument" | "resolve_contradiction" | "remove_unsupported_claim" | "remove_redundant_prose" }> = {
+  outline_chapter_arcs: { kind: "outline", effect: "replace_organizing_claim" },
+  chapter_contracts: { kind: "outline", effect: "replace_organizing_claim" },
+  chapter_contract_coverage: { kind: "chapter_prose", effect: "expand_argument" },
+  chapter_continuity_coverage: { kind: "chapter_prose", effect: "resolve_contradiction" },
+  character_continuity: { kind: "chapter_prose", effect: "resolve_contradiction" },
+  code_validation: { kind: "chapter_prose", effect: "remove_unsupported_claim" },
+  target_length: { kind: "chapter_prose", effect: "expand_argument" },
+  style_drift: { kind: "chapter_prose", effect: "remove_redundant_prose" },
 };
+
+const ROUTE_PATHS = { outline: "outline.md", chapter_prose: "chapters/" } as const;
+
+function lfFinding(gate: string, index: number, diagnostic: string): Finding {
+  const route = ROUTES[gate];
+  if (!route) throw new Error(`longform gate ${gate} has no declared repair route`);
+  return FindingSchema.parse({
+    id: `${gate}-${index + 1}`,
+    gate_id: gate,
+    artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
+    objective_scope_key: GLOBAL_SCOPE,
+    required_effect: route.effect,
+    severity: "major",
+    diagnostic,
+  });
+}
 
 export type LongformValidationReport = {
   kind: "novel" | "technical_book";
@@ -48,8 +82,28 @@ async function parseJson<T>(workspaceDir: string, rel: string, findings: string[
   }
 }
 
+/** Converts the sentences a check collected into routable findings.
+ *
+ * `required_artifacts` has no route because nothing here can edit a file that
+ * was never produced; it reports the failure and asks for diagnosis. */
 function check(id: string, findings: string[]): LongformCheck {
-  return { id, pass: findings.length === 0, findings };
+  if (id === "required_artifacts") {
+    return { id: gateId(id), pass: findings.length === 0, findings: [], measurements: [],
+      requires_diagnosis: findings.length > 0,
+      ...(findings.length === 0 ? {} : { diagnostic: findings.join("; ") }) };
+  }
+  return {
+    id: gateId(id), pass: findings.length === 0, measurements: [], requires_diagnosis: false,
+    findings: findings.map((diagnostic, index) => lfFinding(id, index, diagnostic)),
+  };
+}
+
+/** An advisory check never fails the build, so its observations are carried as
+ * a diagnostic rather than as findings: emitting a routable finding on a
+ * passing gate would dispatch a repair nothing asked for. */
+function advisory(id: string, findings: string[]): LongformCheck {
+  return { id: gateId(id), pass: true, findings: [], measurements: [], requires_diagnosis: false,
+    ...(findings.length === 0 ? {} : { diagnostic: findings.join("; ") }) };
 }
 
 /** Character names = level-2 headings of the character bible (excluding
@@ -207,13 +261,8 @@ export async function validateNovelWorkspace(workspaceDir: string): Promise<Long
       );
     }
   }
-  checks.push({ id: "target_length", pass: true, findings: lengthFindings });
-
-  checks.push({
-    id: "style_drift",
-    pass: true,
-    findings: styleDriftFindings(chapterTexts).map((f) => `advisory: ${f}`),
-  });
+  checks.push(advisory("target_length", lengthFindings));
+  checks.push(advisory("style_drift", styleDriftFindings(chapterTexts).map((f) => `advisory: ${f}`)));
 
   return { kind: "novel", checks, pass: checks.every((entry) => entry.pass) };
 }

@@ -2,13 +2,54 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseJsonl } from "./jsonl.js";
 import type { ClassifiedSource } from "./types.js";
+import { gateId } from "../registry/ids.js";
+import { FindingSchema, type StructuredCheck } from "../registry/records.js";
+import { GLOBAL_SCOPE } from "../registry/scope.js";
 
 export type SurveyContractReport = {
   version: 1;
   pass: boolean;
+  /** The routable output. `findings` below is the operator summary derived
+   * from it, kept because the JSON report and its Markdown rendering are read
+   * by people. */
+  checks: StructuredCheck[];
   findings: Array<{ id: string; pass: boolean; detail: string }>;
   sections: Array<{ id: string; title: string; role: string }>;
 };
+
+/** Every gate here is a defect in how the survey is organised, which is
+ * repaired by reopening the outline. related_work_matrix is the exception: it
+ * can also be short because the comparison table itself is thin. */
+const ROUTES: Record<string, { kind: "outline" | "table_spec"; effect: "replace_organizing_claim" | "repair_artifact_content" }> = {
+  introduction_gap_contributions: { kind: "outline", effect: "replace_organizing_claim" },
+  multi_axis_taxonomy: { kind: "outline", effect: "replace_organizing_claim" },
+  method_family_chapters: { kind: "outline", effect: "replace_organizing_claim" },
+  related_work_differentiation: { kind: "outline", effect: "replace_organizing_claim" },
+  limitations_future_work: { kind: "outline", effect: "replace_organizing_claim" },
+  section_evidence_requirements: { kind: "outline", effect: "replace_organizing_claim" },
+  chapter_outline_identity: { kind: "outline", effect: "replace_organizing_claim" },
+  related_work_matrix: { kind: "table_spec", effect: "repair_artifact_content" },
+};
+
+const ROUTE_PATHS = { outline: "outline.json", table_spec: "figures/placement-plan.json" } as const;
+
+function surveyCheck(entry: { id: string; pass: boolean; detail: string }): StructuredCheck {
+  const route = ROUTES[entry.id];
+  if (!route) throw new Error(`survey gate ${entry.id} has no declared repair route`);
+  return {
+    id: gateId(entry.id), pass: entry.pass, measurements: [], requires_diagnosis: false,
+    diagnostic: entry.detail,
+    findings: entry.pass ? [] : [FindingSchema.parse({
+      id: entry.id,
+      gate_id: entry.id,
+      artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
+      objective_scope_key: GLOBAL_SCOPE,
+      required_effect: route.effect,
+      severity: "major",
+      diagnostic: entry.detail,
+    })],
+  };
+}
 
 type OutlineSection = {
   id?: unknown;
@@ -207,7 +248,10 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
       detail: `${coreSources.length} A/B-depth sources available for related-work matrix; required 5.`,
     },
   ];
-  const report: SurveyContractReport = { version: 1, pass: findings.every((finding) => finding.pass), findings, sections: roles };
+  const report: SurveyContractReport = {
+    version: 1, pass: findings.every((finding) => finding.pass),
+    checks: findings.map(surveyCheck), findings, sections: roles,
+  };
   await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
   await fs.mkdir(path.join(workspaceDir, "tables"), { recursive: true });
   const written = ["reports/survey-contract.json", "reports/survey-contract.md", "tables/related-work-matrix.md"];

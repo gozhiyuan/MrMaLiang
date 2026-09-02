@@ -2,8 +2,40 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadProjectConfig, loadProjectConfigIfExists } from "./project-config.js";
+import { gateId } from "./registry/ids.js";
+import { FindingSchema, type StructuredCheck } from "./registry/records.js";
+import { GLOBAL_SCOPE } from "./registry/scope.js";
 
-export type PublicationCheck = { id: string; pass: boolean; findings: string[] };
+export type PublicationCheck = StructuredCheck;
+
+const ROUTE_PATHS = {
+  figure_spec: "figures/placement-plan.json",
+  outline: "outline.json",
+  publication_template: "paper/template/",
+  chapter_prose: "chapters/",
+} as const;
+
+type PubRoute =
+  | { kind: "figure_spec"; effect: "repair_artifact_placement" }
+  | { kind: "outline"; effect: "replace_organizing_claim" }
+  | { kind: "publication_template"; effect: "repair_template" }
+  | { kind: "chapter_prose"; effect: "remove_redundant_prose" | "expand_argument" };
+
+function pubCheck(gate: string, route: PubRoute, diagnostics: string[], passing?: string): PublicationCheck {
+  return {
+    id: gateId(gate), pass: diagnostics.length === 0, measurements: [], requires_diagnosis: false,
+    ...(diagnostics.length === 0 && passing !== undefined ? { diagnostic: passing } : {}),
+    findings: diagnostics.map((diagnostic, index) => FindingSchema.parse({
+      id: `${gate}-${index + 1}`,
+      gate_id: gate,
+      artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
+      objective_scope_key: GLOBAL_SCOPE,
+      required_effect: route.effect,
+      severity: "major",
+      diagnostic,
+    })),
+  };
+}
 export type PublicationReport = { pass: boolean; checks: PublicationCheck[] };
 
 function within(root: string, candidate: string): boolean {
@@ -76,7 +108,9 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
   if (main.includes("\\tableofcontents")) common.push("research-paper submission must not use a book-style table of contents");
   if (main.includes("\\date{\\today}")) common.push("submission source must not use \\date{\\today}");
   if (!main.includes("\\begin{abstract}")) common.push("paper/main.tex is missing an abstract");
-  checks.push({ id: "publication_article_layout", pass: common.length === 0, findings: common });
+  // Layout defects in generated main.tex are repaired in the placement plan
+  // that produced it, never in the .tex a later render replaces.
+  checks.push(pubCheck("publication_article_layout", { kind: "figure_spec", effect: "repair_artifact_placement" }, common));
 
   if (config.project.mode === "auto_research_agentic") {
     const releaseFindings: string[] = [];
@@ -91,18 +125,15 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
       if (release.version !== 1 || !Array.isArray(release.gates)) releaseFindings.push("reports/release-gates.json has an invalid contract");
       if (release.pass !== true) releaseFindings.push("research release gates have not passed");
     }
-    checks.push({ id: "publication_release_gates", pass: releaseFindings.length === 0, findings: releaseFindings });
+    checks.push(pubCheck("publication_release_gates", { kind: "figure_spec", effect: "repair_artifact_placement" }, releaseFindings));
   }
 
   const titles = await outlineTitles(root);
   const missingSections = config.publication.required_sections.filter((required) =>
     !titles.some((title) => title.toLocaleLowerCase().includes(required.toLocaleLowerCase())),
   );
-  checks.push({
-    id: "publication_required_sections",
-    pass: missingSections.length === 0,
-    findings: missingSections.map((title) => `required section "${title}" is absent from outline.json`),
-  });
+  checks.push(pubCheck("publication_required_sections", { kind: "outline", effect: "replace_organizing_claim" },
+    missingSections.map((title) => `required section "${title}" is absent from outline.json`)));
 
   if (config.publication.target === "custom") {
     const custom: string[] = [];
@@ -111,32 +142,28 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
       custom.push(`paper/main.tex does not select custom class ${config.publication.document_class}`);
     }
     if (!(await fs.stat(classPath).catch(() => null))) custom.push(`paper/${config.publication.document_class}.cls is missing after template copy`);
-    checks.push({ id: "publication_custom_template", pass: custom.length === 0, findings: custom });
+    checks.push(pubCheck("publication_custom_template", { kind: "publication_template", effect: "repair_template" }, custom));
   }
 
   if (config.publication.page_limit) {
     const pages = await pageCount(path.join(root, "build", "manuscript.pdf"));
-    checks.push({
-      id: "publication_page_limit",
-      pass: pages !== null && pages <= config.publication.page_limit,
-      findings: pages === null
+    checks.push(pubCheck("publication_page_limit", { kind: "chapter_prose", effect: "remove_redundant_prose" },
+      pages === null
         ? ["pdfinfo is required to verify publication.page_limit; install poppler and compile a real PDF"]
         : pages > config.publication.page_limit
           ? [`manuscript has ${pages} pages; publication.page_limit is ${config.publication.page_limit}`]
-          : [`${pages} pages within publication.page_limit ${config.publication.page_limit}`],
-    });
+          : [],
+      pages === null ? undefined : `${pages} pages within publication.page_limit ${config.publication.page_limit}`));
   }
   if (config.publication.min_pages) {
     const pages = await pageCount(path.join(root, "build", "manuscript.pdf"));
-    checks.push({
-      id: "publication_min_pages",
-      pass: pages !== null && pages >= config.publication.min_pages,
-      findings: pages === null
+    checks.push(pubCheck("publication_min_pages", { kind: "chapter_prose", effect: "expand_argument" },
+      pages === null
         ? ["pdfinfo is required to verify publication.min_pages; install poppler and compile a real PDF"]
         : pages < config.publication.min_pages
           ? [`manuscript has ${pages} pages; publication.min_pages is ${config.publication.min_pages}`]
-          : [`${pages} pages meets publication.min_pages ${config.publication.min_pages}`],
-    });
+          : [],
+      pages === null ? undefined : `${pages} pages meets publication.min_pages ${config.publication.min_pages}`));
   }
   return { pass: checks.every((check) => check.pass), checks };
 }
@@ -146,7 +173,7 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
 export async function packagePublicationWorkspace(workspaceDir: string): Promise<string[]> {
   const root = path.resolve(workspaceDir);
   const report = await validatePublicationWorkspace(root);
-  if (!report.pass) throw new Error(report.checks.flatMap((check) => check.findings).join("\n"));
+  if (!report.pass) throw new Error(report.checks.flatMap((check) => check.findings.map((finding) => finding.diagnostic)).join("\n"));
   const config = await loadProjectConfig(root);
   const destination = path.join(root, "build", "submission", config.publication.target);
   await fs.rm(destination, { recursive: true, force: true });
