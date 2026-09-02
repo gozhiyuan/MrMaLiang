@@ -7,8 +7,29 @@ import { loadWorkspaceEnv } from "../lib/workspace-env.js";
 import { requireSupportedNode } from "../lib/node-runtime.js";
 import { runMalaClaw } from "../lib/malaclaw.js";
 import { detectLatexEngine } from "../lib/writing/latex-compile.js";
+import { gateId } from "../lib/registry/ids.js";
+import type { StructuredCheck } from "../lib/registry/records.js";
 
+/** What a preflight check knows while it runs. It is converted to a
+ * StructuredCheck on the way out. */
 type Check = { id: string; pass: boolean; finding: string };
+
+/** Every preflight gate is `environment`, so none of them may emit a finding.
+ *
+ * A missing LaTeX compiler is not repaired by editing prose, and routing it to
+ * a capability is exactly the category error the environment class exists to
+ * prevent. A failure carries its diagnostic and requests diagnosis, which
+ * reaches an operator instead of a repair unit. */
+function toStructured(check: Check): StructuredCheck {
+  return {
+    id: gateId(check.id),
+    pass: check.pass,
+    findings: [],
+    measurements: [],
+    requires_diagnosis: !check.pass,
+    diagnostic: check.finding,
+  };
+}
 
 function executable(bin: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => execFile(bin, args, { timeout: 20_000 }, (error) => resolve(!error)));
@@ -30,7 +51,7 @@ function findStage(items: Array<Record<string, unknown>>, id: string): Record<st
  * what it declares; `runPreflight` renders whatever this returns. */
 export async function collectPreflightChecks(
   workspaceDir: string, opts: { runtime?: string } = {},
-): Promise<Check[]> {
+): Promise<StructuredCheck[]> {
   const root = path.resolve(workspaceDir);
   await loadWorkspaceEnv(root);
   const config = await loadProjectConfig(root);
@@ -74,7 +95,7 @@ export async function collectPreflightChecks(
       checks.push({ id: "worker_runtime", pass: false, finding: error instanceof Error ? error.message.split("\n")[0] : String(error) });
     }
   }
-  return checks;
+  return checks.map(toStructured);
 }
 
 export async function runPreflight(workspaceDir: string, opts: { runtime?: string } = {}): Promise<void> {
@@ -84,9 +105,9 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
   const report = { version: 1, workspace: root, pass: checks.every((check) => check.pass), checks };
   await fs.mkdir(path.join(root, "reports"), { recursive: true });
   await fs.writeFile(path.join(root, "reports", "preflight.json"), `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-  await fs.writeFile(path.join(root, "reports", "preflight.md"), `# LongWrite Preflight\n\nStatus: ${report.pass ? "pass" : "fail"}\n\n${checks.map((check) => `- ${check.pass ? "✓" : "✗"} **${check.id}** — ${check.finding}`).join("\n")}\n`, "utf-8");
+  await fs.writeFile(path.join(root, "reports", "preflight.md"), `# LongWrite Preflight\n\nStatus: ${report.pass ? "pass" : "fail"}\n\n${checks.map((check) => `- ${check.pass ? "✓" : "✗"} **${check.id}** — ${check.diagnostic ?? ""}`).join("\n")}\n`, "utf-8");
   console.log(`LongWrite preflight ${report.pass ? "passed" : "failed"}: ${root}`);
-  for (const check of checks) console.log(`  ${check.pass ? "✓" : "✗"} ${check.id} — ${check.finding}`);
+  for (const check of checks) console.log(`  ${check.pass ? "✓" : "✗"} ${check.id} — ${check.diagnostic ?? ""}`);
   if (!report.pass) process.exitCode = 1;
 }
 
