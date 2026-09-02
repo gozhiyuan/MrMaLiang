@@ -90,8 +90,32 @@ describe("generated routing", () => {
     })).toThrow(/environment.*must declare no findings/i);
   });
 
-  it("rejects two producers declaring the same gate", () => {
-    expect(() => registerProducers([sample, sample])).toThrow(/declared by more than one producer/i);
+  it("rejects the same producer module registered twice", () => {
+    expect(() => registerProducers([sample, sample])).toThrow(/registered more than once/i);
+  });
+
+  it("accepts two modules declaring one gate identically", () => {
+    // `target_length` is a hard gate in the research validator and an advisory
+    // check in the long-form one; both emit it, and it means the same thing.
+    const other = defineProducer({
+      module: "other",
+      gates: [{ id: "visual_review", class: "manuscript", findings: [
+        { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+        { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      ] }],
+    });
+    expect(() => registerProducers([sample, other])).not.toThrow();
+  });
+
+  it("rejects two modules declaring one gate differently", () => {
+    const conflicting = defineProducer({
+      module: "other",
+      gates: [{ id: "visual_review", class: "manuscript", findings: [
+        { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      ] }],
+    });
+    expect(() => registerProducers([sample, conflicting]))
+      .toThrow(/declared differently|means one thing/i);
   });
 
   it("rejects a generated kind as a finding's artifact", () => {

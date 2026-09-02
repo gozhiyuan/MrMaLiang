@@ -24,8 +24,13 @@ function findStage(items: Array<Record<string, unknown>>, id: string): Record<st
   return items.find((stage) => stage.id === id);
 }
 
-export async function runPreflight(workspaceDir: string, opts: { runtime?: string } = {}): Promise<void> {
-  requireSupportedNode("Running LongWrite preflight");
+/** Collect the checks without rendering or exiting.
+ *
+ * Split out so a test can drive the producer and compare what it emits against
+ * what it declares; `runPreflight` renders whatever this returns. */
+export async function collectPreflightChecks(
+  workspaceDir: string, opts: { runtime?: string } = {},
+): Promise<Check[]> {
   const root = path.resolve(workspaceDir);
   await loadWorkspaceEnv(root);
   const config = await loadProjectConfig(root);
@@ -69,6 +74,13 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
       checks.push({ id: "worker_runtime", pass: false, finding: error instanceof Error ? error.message.split("\n")[0] : String(error) });
     }
   }
+  return checks;
+}
+
+export async function runPreflight(workspaceDir: string, opts: { runtime?: string } = {}): Promise<void> {
+  requireSupportedNode("Running LongWrite preflight");
+  const root = path.resolve(workspaceDir);
+  const checks = await collectPreflightChecks(root, opts);
   const report = { version: 1, workspace: root, pass: checks.every((check) => check.pass), checks };
   await fs.mkdir(path.join(root, "reports"), { recursive: true });
   await fs.writeFile(path.join(root, "reports", "preflight.json"), `${JSON.stringify(report, null, 2)}\n`, "utf-8");

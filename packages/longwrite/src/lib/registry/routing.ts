@@ -38,11 +38,29 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
   const routes = new Map<string, CapabilityId>();
   const owners = new Map<GateId, string>();
 
+  const modules = new Set<string>();
   for (const producer of definitions) {
+    if (modules.has(producer.module)) {
+      throw new Error(`producer module ${producer.module} is registered more than once`);
+    }
+    modules.add(producer.module);
     for (const gate of producer.gates) {
       const held = owners.get(gate.id);
       if (held !== undefined) {
-        throw new Error(`gate ${gate.id} is declared by more than one producer: ${held} and ${producer.module}`);
+        // Two modules may legitimately emit one gate — `target_length` is a
+        // hard gate in the research validator and an advisory check in the
+        // long-form one. What must never differ is what it means, so an
+        // identical re-declaration is accepted and a conflicting one is not.
+        const first = { class: classes.get(gate.id), triples: triples.get(gate.id) ?? [] };
+        const same = first.class === gate.class
+          && JSON.stringify(first.triples)
+             === JSON.stringify(gate.findings.map((f) => ({ kind: f.kind, effect: f.effect })));
+        if (!same) {
+          throw new Error(
+            `gate ${gate.id} is declared differently by ${held} and ${producer.module}; ` +
+            `a gate means one thing or it is two gates`);
+        }
+        continue;
       }
       owners.set(gate.id, producer.module);
       classes.set(gate.id, gate.class);

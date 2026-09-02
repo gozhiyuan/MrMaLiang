@@ -333,6 +333,35 @@ import { defineProducer } from "../registry/producer-types.js";
 export const PRODUCER = defineProducer({
   module: "longform",
   gates: [
+    // A missing project brief or outline is a scaffold precondition: no repair
+    // capability in the catalog creates one.
+    { id: "required_artifacts", class: "environment", findings: [] },
+    { id: "outline_chapter_arcs", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "chapter_contracts", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "chapter_contract_coverage", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+    ] },
+    { id: "chapter_continuity_coverage", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
+    ] },
+    { id: "character_continuity", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
+    ] },
+    // A code sample that does not run makes the prose around it unsupported.
+    { id: "code_validation", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+    ] },
+    // Also declared by the research validator, which owns the failing form of
+    // this gate. The check here is advisory, but a gate means one thing
+    // wherever it is emitted, so the declaration is identical.
+    { id: "target_length", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+    ] },
     { id: "style_drift", class: "manuscript", findings: [
       { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
     ] },
