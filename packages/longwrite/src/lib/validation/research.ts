@@ -77,7 +77,7 @@ async function readJsonlFile<T>(workspaceDir: string, rel: string): Promise<{ ro
   }
 }
 
-async function chapterFiles(workspaceDir: string): Promise<Array<{ rel: string; content: string }>> {
+export async function chapterFiles(workspaceDir: string): Promise<Array<{ rel: string; content: string }>> {
   const dir = path.join(workspaceDir, "chapters");
   let entries: string[];
   try {
@@ -98,7 +98,7 @@ function markers(content: string): string[] {
   return citationMarkers(content).map((marker) => marker.sourceId);
 }
 
-function citedSourceIds(chapters: Array<{ rel: string; content: string }>): Set<string> {
+export function citedSourceIds(chapters: Array<{ rel: string; content: string }>): Set<string> {
   return new Set(chapters.flatMap((chapter) => markers(chapter.content)));
 }
 
@@ -143,18 +143,21 @@ async function checkCodebaseEvidence(
 
 /** Acceptance must be recoverable from provider metadata. A DOI alone is not
  * sufficient because it may identify a preprint or non-archival record. */
-function isAcceptedSource(source: ClassifiedSource): boolean {
+export function isAcceptedSource(source: ClassifiedSource): boolean {
   const status = source.identity?.publication_status?.toLowerCase() ?? "";
   if (/(accepted|published|inproceedings|journal|proceedings)/.test(status)) return true;
   return Boolean(source.identifiers?.doi) && !/(arxiv|preprint|unknown)/i.test(source.venue);
 }
 
-function isArxivOnlySource(source: ClassifiedSource): boolean {
+export function isArxivOnlySource(source: ClassifiedSource): boolean {
   return !source.identifiers?.doi && Boolean(source.identifiers?.arxiv_id);
 }
 
-function isWithinOneCalendarYear(source: ClassifiedSource): boolean {
-  const age = new Date().getUTCFullYear() - source.year;
+/** `asOf` is explicit rather than read from the wall clock, so a measurement
+ * taken today and the same measurement replayed next year agree. Reading
+ * `new Date()` here made the result depend on when it happened to run. */
+export function isWithinOneCalendarYear(source: ClassifiedSource, asOf: string): boolean {
+  const age = new Date(asOf).getUTCFullYear() - source.year;
   return age >= 0 && age <= 1;
 }
 
@@ -175,6 +178,7 @@ async function checkCitedLiteratureReleaseGates(
   workspaceDir: string,
   chapters: Array<{ rel: string; content: string }>,
   sources: ClassifiedSource[],
+  asOfDate: string,
 ): Promise<ValidationCheck> {
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   if (!config || !isFullResearchMode(config.project.mode)) {
@@ -196,7 +200,7 @@ async function checkCitedLiteratureReleaseGates(
   }
   const accepted = citedSources.filter(isAcceptedSource).length;
   const acceptedRatio = accepted / Math.max(1, citedSources.length);
-  const withinOneYear = citedSources.filter(isWithinOneCalendarYear).length;
+  const withinOneYear = citedSources.filter((source) => isWithinOneCalendarYear(source, asOfDate)).length;
   const withinOneYearRatio = withinOneYear / Math.max(1, citedSources.length);
   const arxivOnly = citedSources.filter(isArxivOnlySource).length;
   const arxivOnlyRatio = arxivOnly / Math.max(1, citedSources.length);
@@ -658,7 +662,13 @@ export function validationReportToMarkdown(report: ValidationReport): string {
   return `${lines.join("\n")}\n`;
 }
 
-export async function validateResearchWorkspace(workspaceDir: string): Promise<ValidationReport> {
+/** `asOfDate` defaults to now for a live run and is passed explicitly by the
+ * measurement path, so a recency gate is reproducible rather than dependent on
+ * the day it happened to execute. */
+export async function validateResearchWorkspace(
+  workspaceDir: string,
+  asOfDate: string = new Date().toISOString(),
+): Promise<ValidationReport> {
   const sourceResult = await readJsonlFile<ClassifiedSource>(workspaceDir, "sources/classified_sources.jsonl");
   const planResult = await readJsonlFile<CitationPlanEntry>(workspaceDir, "sources/citation_plan.jsonl");
   const bibliography = await readIfExists(path.join(workspaceDir, "sources/bibliography.bib"));
@@ -701,7 +711,7 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
       ? checkEvidenceCitationIntegrity(chapters, sourceIds)
       : checkCitationVerification(sources, planResult.rows, chapters, bibliography),
     await checkResearchPolicy(workspaceDir, sources),
-    await checkCitedLiteratureReleaseGates(workspaceDir, chapters, sources),
+    await checkCitedLiteratureReleaseGates(workspaceDir, chapters, sources, asOfDate),
     await checkCitationUrlLiveness(workspaceDir, requireLiveUrls),
     await checkCodebaseEvidence(workspaceDir, chapters),
     ...evidenceChecks,
