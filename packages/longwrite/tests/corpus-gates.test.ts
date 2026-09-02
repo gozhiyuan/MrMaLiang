@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { stringify } from "yaml";
 import { evaluateCorpusGates, writeCorpusGateReport } from "../src/lib/research/corpus-gates.js";
+import { taxonomyGateId } from "../src/lib/registry/ids.js";
 import { toJsonl } from "../src/lib/research/jsonl.js";
 import type { ClassifiedSource } from "../src/lib/research/types.js";
 
@@ -76,7 +77,10 @@ describe("corpus gates", () => {
     const report = await evaluateCorpusGates(ws);
     expect(report.pass).toBe(false);
     expect(report.findings.filter((finding) => !finding.pass).map((finding) => finding.id))
-      .toEqual(expect.arrayContaining(["total_candidates", "core_sources", "taxonomy:planning"]));
+      // The taxonomy gate id is canonical, built by the same slugify as its
+      // observation scope: a cell label may contain spaces the gate-id pattern
+      // rejects, so the raw label was never a usable id.
+      .toEqual(expect.arrayContaining(["total_candidates", "core_sources", String(taxonomyGateId("planning"))]));
   });
 
   it("uses planned-query provenance for an expanded taxonomy label", async () => {

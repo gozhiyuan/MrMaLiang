@@ -4,7 +4,7 @@ import {
   chapterFiles, citedSourceIds, isAcceptedSource, isArxivOnlySource, isWithinOneCalendarYear,
 } from "../../validation/research.js";
 import { loadProjectConfigIfExists } from "../../project-config.js";
-import { sourceMatchesTaxonomy } from "../../research/taxonomy.js";
+import { isRecentSource, taxonomyCellCounts } from "../../research/corpus-gates.js";
 import type { ClassifiedSource } from "../../research/types.js";
 import { GLOBAL_SCOPE, scopeKey } from "../scope.js";
 
@@ -70,10 +70,13 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
 
   core_sources: async (ctx) => global((await loadSources(ctx.workspaceDir)).filter(isCore).length),
 
+  /** Shares isRecentSource with the corpus gate that reads this value. Two
+   * recency windows — one here and one in the gate — would let a gate fail
+   * while its own observation said it should have passed. */
   recent_source_ratio: async (ctx) => {
     const sources = await loadSources(ctx.workspaceDir);
     return global(ratio(
-      sources.filter((source) => isWithinOneCalendarYear(source, ctx.asOfDate)).length, sources.length));
+      sources.filter((source) => isRecentSource(source, ctx.asOfDate)).length, sources.length));
   },
 
   source_type_diversity_count: async (ctx) => {
@@ -110,9 +113,13 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
     const config = await loadProjectConfigIfExists(ctx.workspaceDir);
     if (!config) throw new MeasurementUnavailable("longwrite.yaml is missing");
     const sources = await loadSources(ctx.workspaceDir);
-    return config.research.taxonomy.map((cell) => ({
-      scope_key: scopeKey("taxonomy_cell", cell),
-      value: sources.filter((source) => isCore(source) && sourceMatchesTaxonomy(source, cell)).length,
+    // The same counter the taxonomy gate uses, including its planned-query
+    // provenance preference. A second implementation here would drift.
+    const counts = await taxonomyCellCounts(
+      ctx.workspaceDir, sources, config.research.taxonomy,
+      config.research.corpus_gates.min_sources_per_taxonomy_cell);
+    return counts.map((row) => ({
+      scope_key: scopeKey("taxonomy_cell", row.cell), value: row.source_count,
     }));
   },
 };
