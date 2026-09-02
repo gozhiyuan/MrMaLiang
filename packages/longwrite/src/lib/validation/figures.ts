@@ -271,3 +271,34 @@ export async function validateFigureWorkspace(workspaceDir: string): Promise<Val
   ];
   return { pass: checks.every((item) => item.pass), checks };
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "figures",
+  gates: [
+    { id: "figure_manifest", class: "manuscript", observes: ["figures", "tables"], findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "figure_artifacts", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "full_mode_visual_contract", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_layout", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+    { id: "diagram_connectivity", class: "manuscript", observes: ["diagram_connectivity"], findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "figure_references", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+    ] },
+  ],
+});

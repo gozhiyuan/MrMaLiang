@@ -324,3 +324,17 @@ export async function writeLongformValidationReport(
   await fs.writeFile(path.join(workspaceDir, "reports", "longwrite-validation.md"), longformReportToMarkdown(report), "utf-8");
   return ["reports/longwrite-validation.json", "reports/longwrite-validation.md"];
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "longform",
+  gates: [
+    { id: "style_drift", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+    ] },
+  ],
+});

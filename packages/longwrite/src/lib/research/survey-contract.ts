@@ -227,3 +227,39 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
   ]);
   return { report, written };
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "survey-contract",
+  gates: [
+    { id: "introduction_gap_contributions", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "multi_axis_taxonomy", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "method_family_chapters", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "related_work_differentiation", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "limitations_future_work", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "section_evidence_requirements", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "chapter_outline_identity", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "related_work_matrix", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+  ],
+});

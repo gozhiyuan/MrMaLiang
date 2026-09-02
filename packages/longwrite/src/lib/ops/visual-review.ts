@@ -74,3 +74,21 @@ export async function checkVisualReviewReleaseGate(workspaceDir: string, require
     ? { id: "rendered_visual_review", pass: true, findings: ["all caption-bearing PDF pages received a passing multimodal visual inspection"] }
     : { id: "rendered_visual_review", pass: false, findings: qa.findings.filter((finding) => finding.severity !== "minor").map((finding) => `page ${finding.page}: ${finding.summary} → ${finding.remediation}`) };
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "visual-review",
+  gates: [
+    { id: "visual_review_contract", class: "measurement", findings: [] },
+    { id: "rendered_visual_review", class: "manuscript", observes: ["rendered_visual_review"], findings: [
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+  ],
+});

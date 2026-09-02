@@ -135,3 +135,29 @@ export async function writeCorpusGateReport(workspaceDir: string, report: Corpus
   ]);
   return [jsonRel, mdRel];
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "corpus-gates",
+  gates: [
+    { id: "total_candidates", class: "manuscript", observes: ["candidate_count"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "core_sources", class: "manuscript", observes: ["core_sources"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "freshness", class: "manuscript", observes: ["recent_source_ratio"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "source_type_diversity", class: "manuscript", observes: ["source_type_diversity_count"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "taxonomy", class: "manuscript", observes: ["taxonomy_cell_ab_sources"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+  ],
+});

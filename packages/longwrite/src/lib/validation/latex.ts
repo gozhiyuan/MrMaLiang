@@ -145,3 +145,28 @@ export async function validateLatexWorkspace(workspaceDir: string): Promise<Vali
   ];
   return { pass: checks.every((check) => check.pass), checks };
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "latex",
+  gates: [
+    { id: "latex_sources", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+    { id: "latex_outline_structure", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "latex_build", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+    ] },
+    { id: "reader_facing_publication", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+  ],
+});

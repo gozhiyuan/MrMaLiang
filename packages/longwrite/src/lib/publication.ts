@@ -196,3 +196,32 @@ export async function writeUnpackagedSubmissionNotice(workspaceDir: string, reas
   }, null, 2)}\n`, "utf-8");
   return path.relative(root, manifestPath);
 }
+
+import { defineProducer } from "./registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "publication",
+  gates: [
+    { id: "publication_article_layout", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_release_gates", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_required_sections", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "publication_custom_template", class: "manuscript", findings: [
+      { kind: "publication_template", effect: "repair_template", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_page_limit", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+    ] },
+    { id: "publication_min_pages", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+    ] },
+  ],
+});

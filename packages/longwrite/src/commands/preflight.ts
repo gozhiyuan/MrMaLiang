@@ -77,3 +77,25 @@ export async function runPreflight(workspaceDir: string, opts: { runtime?: strin
   for (const check of checks) console.log(`  ${check.pass ? "✓" : "✗"} ${check.id} — ${check.finding}`);
   if (!report.pass) process.exitCode = 1;
 }
+
+import { defineProducer } from "../lib/registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this. */
+export const PRODUCER = defineProducer({
+  module: "preflight",
+  gates: [
+    { id: "direct_llm_drafting", class: "environment", findings: [] },
+    { id: "review_topology", class: "environment", findings: [] },
+    { id: "article_front_matter", class: "environment", findings: [] },
+    { id: "draft_concurrency", class: "environment", findings: [] },
+    { id: "token_guardrail", class: "environment", findings: [] },
+    { id: "public_release_urls", class: "environment", findings: [] },
+    { id: "rendered_visual_review_topology", class: "environment", findings: [] },
+    { id: "publication_figure_renderer", class: "environment", findings: [] },
+    { id: "pdf_compiler", class: "environment", findings: [] },
+    { id: "rendered_visual_review_tools", class: "environment", findings: [] },
+    { id: "worker_runtime", class: "environment", findings: [] },
+  ],
+});

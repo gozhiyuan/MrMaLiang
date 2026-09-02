@@ -515,20 +515,6 @@ async function checkTargetLength(
   };
 }
 
-/** No prior-resolved weakness category may reappear in the final review round
- *  (AutoResearch Gate 5). review_regressions is written by the scorecard scorer. */
-async function checkReviewRegressions(workspaceDir: string): Promise<ValidationCheck> {
-  const scorecard = await statIfExists(path.join(workspaceDir, "reviews", "scorecard.json"));
-  if (scorecard === null) return { id: "review_no_regressions", pass: true, findings: ["no scorecard found; regression check skipped"] };
-  const metrics = await jsonIfExists(path.join(workspaceDir, "reports", "metrics.json"));
-  const regressions = typeof metrics?.review_regressions === "number" ? metrics.review_regressions : 0;
-  return {
-    id: "review_no_regressions",
-    pass: regressions === 0,
-    findings: regressions === 0 ? [] : [`${regressions} previously-resolved weakness categor${regressions === 1 ? "y" : "ies"} reappeared (see reports/regressions.md)`],
-  };
-}
-
 async function checkClaimSupport(workspaceDir: string): Promise<ValidationCheck> {
   const judgments = await statIfExists(path.join(workspaceDir, "reviews", "claim-judgments.jsonl"));
   if (judgments === null) return { id: "claim_support", pass: true, findings: ["no claim judgments found; claim gate check skipped"] };
@@ -723,7 +709,6 @@ export async function validateResearchWorkspace(workspaceDir: string): Promise<V
     await checkTargetLength(workspaceDir, chapters),
     await checkReviewTarget(workspaceDir),
     await checkEmpiricalExperiment(workspaceDir),
-    await checkReviewRegressions(workspaceDir),
     await checkClaimSupport(workspaceDir),
     await checkNoContradictions(workspaceDir),
     ...(await checkLandmarkCoverage(workspaceDir, sources, chapters)),
@@ -755,3 +740,110 @@ export async function writeValidationReport(workspaceDir: string, report: Valida
   }, null, 2)}\n`, "utf-8");
   return [jsonRel, markdownRel, gatesRel];
 }
+
+import { defineProducer } from "../registry/producer-types.js";
+
+/** Gate declarations, kept beside the checks that emit them so a reviewer
+ * sees a gate's repair semantics and its code together. The class table,
+ * legal triples and routes are all generated from this.
+ *
+ * `review_no_regressions` is deliberately absent: `must_preserve` in the
+ * kernel subsumes it, and a weaker duplicate would let a regression pass one
+ * check while failing the other. */
+export const PRODUCER = defineProducer({
+  module: "research",
+  gates: [
+    { id: "source_coverage", class: "manuscript", findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "evidence_coverage", class: "manuscript", findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "literature_quality_score", class: "manuscript", findings: [
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+    ] },
+    { id: "research_policy", class: "manuscript", findings: [
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+    ] },
+    { id: "landmark_coverage", class: "manuscript", observes: ["landmark_coverage_ratio"], findings: [
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "codebase_evidence", class: "manuscript", findings: [
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "taxonomy_direct_evidence", class: "manuscript", findings: [
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
+    ] },
+    { id: "research_artifacts_present", class: "manuscript", findings: [
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+    ] },
+    { id: "citation_url_liveness", class: "manuscript", findings: [
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
+    ] },
+    { id: "full_source_identity", class: "manuscript", findings: [
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
+    ] },
+    { id: "bibliography_consistent", class: "manuscript", findings: [
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+    ] },
+    { id: "landmark_citation_coverage", class: "manuscript", observes: ["landmark_citation_coverage_ratio"], findings: [
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
+    ] },
+    { id: "cited_literature_release_gates", class: "manuscript", observes: ["cited_sources", "citation_depth_per_section"], findings: [
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+    ] },
+    { id: "citation_markers_present", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
+    ] },
+    { id: "citation_evidence_ledger", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
+    ] },
+    { id: "citation_verification", class: "manuscript", observes: ["citation_verification_status"], findings: [
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+    ] },
+    { id: "claim_support", class: "manuscript", observes: ["claim_support"], findings: [
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+    ] },
+    { id: "claim_contradictions", class: "manuscript", observes: ["claim_contradictions"], findings: [
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "prose_redundancy", class: "manuscript", observes: ["prose_redundancy"], findings: [
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+    ] },
+    { id: "target_length", class: "manuscript", findings: [
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+    ] },
+    { id: "review_target", class: "manuscript", observes: ["review_score"], findings: [
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "full_research_contracts", class: "manuscript", findings: [
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+    ] },
+    { id: "publication_figures", class: "manuscript", observes: ["figures", "tables"], findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_latex", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+    ] },
+    { id: "publication_artifact_contract", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+    ] },
+    { id: "manuscript_build", class: "manuscript", findings: [
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+    ] },
+    { id: "full_claim_double_review", class: "measurement", findings: [] },
+    { id: "empirical_experiment", class: "environment", findings: [] },
+  ],
+});
