@@ -10,7 +10,7 @@ import { validateEvidenceLedger } from "../research/evidence.js";
 import { citationMarkers } from "../research/citation-markers.js";
 import { sourceMatchesTaxonomy } from "../research/taxonomy.js";
 import { loadProjectConfig } from "../project-config.js";
-import { EDITABLE_KIND_PATHS, OPERATOR_TARGET_KINDS, gateId, slugify, type ArtifactKind, type RequiredEffect } from "../registry/ids.js";
+import { EDITABLE_KIND_PATHS, OPERATOR_TARGET_KINDS, gateId, metricId, slugify, type ArtifactKind, type MetricId, type RequiredEffect } from "../registry/ids.js";
 import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
 import { GLOBAL_SCOPE, scopeKey } from "../registry/scope.js";
 import { paperProfile } from "../paper-profiles.js";
@@ -53,6 +53,11 @@ function rFinding(args: {
   location?: string;
   scope?: string;
   severity?: "minor" | "major" | "critical";
+  /** Which objective this defect blocks, or null when none is registered.
+   *
+   * Required, never defaulted: a compound gate declares one triple against
+   * several metrics, so a default would silently pick the wrong objective. */
+  acceptance_metric: MetricId | null;
 }): Finding {
   const fallback = EDITABLE_KIND_PATHS[args.kind][0];
   return FindingSchema.parse({
@@ -64,7 +69,7 @@ function rFinding(args: {
     ...(args.location === undefined ? {} : { location: args.location }),
     objective_scope_key: args.scope ?? GLOBAL_SCOPE,
     required_effect: args.effect,
-    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(args.gate), args.kind, args.effect),
+    acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(args.gate), args.kind, args.effect, args.acceptance_metric),
     severity: args.severity ?? "major",
     diagnostic: args.diagnostic,
   });
@@ -157,7 +162,8 @@ async function checkCodebaseEvidence(
 ): Promise<ValidationCheck> {
   const GATE = "codebase_evidence";
   const fail = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "evidence_packet", effect: "acquire_additional_evidence", subject, diagnostic });
+    gate: GATE, kind: "evidence_packet", effect: "acquire_additional_evidence", subject, diagnostic,
+    acceptance_metric: null });
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   if (!config) return note(GATE, true, "project configuration is unavailable");
   const requiresCodebase = config.research.codebases.length > 0 || config.research.codebase_discovery.enabled;
@@ -236,10 +242,16 @@ async function checkCitedLiteratureReleaseGates(
   // Too few or too weak cited sources is a corpus problem; a section short on
   // depth is a prose problem, because the sources exist and are simply not
   // woven in. Two different repairs, so two different triples.
-  const corpus = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "corpus", effect: "upgrade_source_quality", subject, diagnostic });
-  const prose = (subject: string, diagnostic: string, chapterPath?: string): Finding => rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "add_supporting_citation", subject, diagnostic,
+  // The metric is passed per finding, never derived from the triple. Four
+  // different objectives repair through `corpus / upgrade_source_quality` —
+  // too few sources, too old, not accepted, too preprint-heavy — and deriving
+  // the metric sent all four to whichever was declared first.
+  const corpus = (subject: string, metric: string, diagnostic: string): Finding => rFinding({
+    gate: GATE, kind: "corpus", effect: "upgrade_source_quality", subject,
+    acceptance_metric: metricId(metric), diagnostic });
+  const prose = (subject: string, metric: string, diagnostic: string, chapterPath?: string): Finding => rFinding({
+    gate: GATE, kind: "chapter_prose", effect: "add_supporting_citation", subject,
+    acceptance_metric: metricId(metric), diagnostic,
     ...(chapterPath === undefined ? {} : { path: chapterPath }) });
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   if (!config || !isFullResearchMode(config.project.mode)) {
@@ -257,7 +269,7 @@ async function checkCitedLiteratureReleaseGates(
   const citedSources = [...cited].map((id) => byId.get(id)).filter((source): source is ClassifiedSource => Boolean(source));
   const findings: Finding[] = [];
   if (citedSources.length < gates.min_cited_sources) {
-    findings.push(corpus("cited-count", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`));
+    findings.push(corpus("cited-count", "cited_sources", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`));
   }
   const accepted = citedSources.filter(isAcceptedSource).length;
   const acceptedRatio = accepted / Math.max(1, citedSources.length);
@@ -266,18 +278,18 @@ async function checkCitedLiteratureReleaseGates(
   const arxivOnly = citedSources.filter(isArxivOnlySource).length;
   const arxivOnlyRatio = arxivOnly / Math.max(1, citedSources.length);
   if (withinOneYearRatio < gates.min_cited_within_one_year_ratio) {
-    findings.push(corpus("recency", `within-one-calendar-year cited-source ratio ${withinOneYearRatio.toFixed(3)} (${withinOneYear}/${citedSources.length}) is below configured ${gates.min_cited_within_one_year_ratio.toFixed(3)}`));
+    findings.push(corpus("recency", "cited_within_one_year_ratio", `within-one-calendar-year cited-source ratio ${withinOneYearRatio.toFixed(3)} (${withinOneYear}/${citedSources.length}) is below configured ${gates.min_cited_within_one_year_ratio.toFixed(3)}`));
   }
   if (acceptedRatio < gates.min_accepted_cited_ratio) {
-    findings.push(corpus("acceptance", `accepted cited-source ratio ${acceptedRatio.toFixed(3)} (${accepted}/${citedSources.length}) is below configured ${gates.min_accepted_cited_ratio.toFixed(3)}`));
+    findings.push(corpus("acceptance", "accepted_cited_ratio", `accepted cited-source ratio ${acceptedRatio.toFixed(3)} (${accepted}/${citedSources.length}) is below configured ${gates.min_accepted_cited_ratio.toFixed(3)}`));
   }
   if (arxivOnlyRatio > gates.max_cited_arxiv_only_ratio) {
-    findings.push(corpus("venue-mix", `arXiv-only cited-source ratio ${arxivOnlyRatio.toFixed(3)} (${arxivOnly}/${citedSources.length}) exceeds configured ${gates.max_cited_arxiv_only_ratio.toFixed(3)}`));
+    findings.push(corpus("venue-mix", "cited_arxiv_only_ratio", `arXiv-only cited-source ratio ${arxivOnlyRatio.toFixed(3)} (${arxivOnly}/${citedSources.length}) exceeds configured ${gates.max_cited_arxiv_only_ratio.toFixed(3)}`));
   }
   if (gates.min_citations_per_page > 0) {
     const pages = await pdfPageCount(workspaceDir);
     if (pages === null) {
-      findings.push(prose("citation-density", "cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf"));
+      findings.push(prose("citation-density", "citations_per_page", "cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf"));
     } else {
       // This gate is explicitly configured as *citations* per page. Counting
       // unique bibliography entries here made a long paper require an
@@ -285,7 +297,7 @@ async function checkCitedLiteratureReleaseGates(
       // appropriately throughout the prose.
       const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
       const density = citationCount / Math.max(1, pages);
-      if (density < gates.min_citations_per_page) findings.push(prose("citation-density", `citation density ${density.toFixed(2)} per page (${citationCount}/${pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`));
+      if (density < gates.min_citations_per_page) findings.push(prose("citation-density", "citations_per_page", `citation density ${density.toFixed(2)} per page (${citationCount}/${pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`));
     }
   }
   for (const chapter of chapters) {
@@ -294,7 +306,7 @@ async function checkCitedLiteratureReleaseGates(
       const required = gates.min_citation_depths_per_section[depth];
       if (required === 0) continue;
       const found = chapterSources.filter((source) => source.citation_depth === depth).length;
-      if (found < required) findings.push(prose(`${sectionIdFromChapter(chapter.rel)}-${depth}`, `${chapter.rel} has ${found} ${depth}-depth cited sources; configured minimum is ${required}`, chapter.rel));
+      if (found < required) findings.push(prose(`${sectionIdFromChapter(chapter.rel)}-${depth}`, "citation_depth_per_section", `${chapter.rel} has ${found} ${depth}-depth cited sources; configured minimum is ${required}`, chapter.rel));
     }
   }
   if (gates.min_cited_ab_sources_per_taxonomy_cell > 0) {
@@ -306,6 +318,7 @@ async function checkCitedLiteratureReleaseGates(
         findings.push(rFinding({
           gate: GATE, kind: "chapter_prose", effect: "add_supporting_citation",
           subject: `cell-${slugify(cell)}`, scope: scopeKey("taxonomy_cell", cell),
+          acceptance_metric: metricId("taxonomy_cell_ab_sources"),
           diagnostic: `taxonomy cell "${cell}" has ${found} woven A/B-depth sources; configured minimum is ${gates.min_cited_ab_sources_per_taxonomy_cell}`,
         }));
       }
@@ -330,6 +343,7 @@ function checkCitationMarkers(
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string, chapterPath?: string) => findings.push(rFinding({
     gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status"),
     ...(chapterPath === undefined ? {} : { path: chapterPath }) }));
   if (chapters.length === 0) {
     fail("chapters", "citation_markers_present: no chapter Markdown files found in chapters/");
@@ -356,7 +370,8 @@ function checkSourceCoverage(
   const GATE = "source_coverage";
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(rFinding({
-    gate: GATE, kind: "corpus", effect: "acquire_additional_evidence", subject, diagnostic }));
+    gate: GATE, kind: "corpus", effect: "acquire_additional_evidence", subject, diagnostic,
+    acceptance_metric: metricId("cited_sources") }));
   const planBySection = new Map(citationPlan.map((entry) => [entry.section_id, entry]));
   for (const entry of citationPlan) {
     for (const sourceId of entry.source_ids) {
@@ -384,7 +399,8 @@ function checkBibliography(
   const GATE = "bibliography_consistent";
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(rFinding({
-    gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic }));
+    gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status") }));
   if (bibliography === null || bibliography.trim().length === 0) {
     fail("bibliography", "bibliography_consistent: sources/bibliography.bib is missing or empty");
     return checkOf(GATE, findings);
@@ -405,7 +421,7 @@ async function checkManuscriptBuild(workspaceDir: string): Promise<ValidationChe
   // LaTeX toolchain, so it goes to the operator rather than to a repair.
   const findings = stat === null || stat.size === 0
     ? [rFinding({ gate: "manuscript_build", kind: "toolchain", effect: "repair_toolchain",
-        subject: "pdflatex", severity: "critical",
+        subject: "pdflatex", severity: "critical", acceptance_metric: metricId("latex_build_status"),
         diagnostic: `manuscript_build: ${rel} is missing or empty` })]
     : [];
   return checkOf("manuscript_build", findings);
@@ -416,7 +432,7 @@ function checkLiteratureQuality(sources: ClassifiedSource[]): ValidationCheck {
   const findings = lqs.score >= 5
     ? []
     : [rFinding({ gate: "literature_quality_score", kind: "corpus", effect: "upgrade_source_quality",
-        subject: "quality-score",
+        subject: "quality-score", acceptance_metric: metricId("core_sources"),
         diagnostic: `literature_quality_score: score ${lqs.score}/10 is below the 5.0 alpha threshold` })];
   return checkOf("literature_quality_score", findings);
 }
@@ -435,7 +451,8 @@ function checkProseRedundancy(
     maxNgramOccurrences: thresholds.max_repeated_ngram_occurrences < 0 ? Number.MAX_SAFE_INTEGER : thresholds.max_repeated_ngram_occurrences,
   });
   const trim = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: "prose_redundancy", kind: "chapter_prose", effect: "remove_redundant_prose", subject, diagnostic });
+    gate: "prose_redundancy", kind: "chapter_prose", effect: "remove_redundant_prose", subject, diagnostic,
+    acceptance_metric: metricId("prose_redundancy") });
   const findings = [
     ...report.trackedPhraseOveruse.map((item, index) => trim(`phrase-${index}`, `prose_redundancy: phrase "${item.phrase}" appears ${item.count} times across ${item.sections.length} section(s) (${item.sections.join(", ")}); configured maximum is ${thresholds.max_tracked_phrase_occurrences}`)),
     ...report.repeatedNgramOveruse.map((item, index) => trim(`ngram-${index}`, `prose_redundancy: repeated phrase "${item.phrase}" appears ${item.count} times across ${item.sections.length} sections; configured maximum is ${thresholds.max_repeated_ngram_occurrences}`)),
@@ -460,6 +477,7 @@ function checkCitationVerification(
   const cited = new Set<string>();
   const prose = (subject: string, diagnostic: string, chapterPath?: string) => findings.push(rFinding({
     gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status"),
     ...(chapterPath === undefined ? {} : { path: chapterPath }) }));
   if (chapters.length === 0) prose("chapters", "citation_verification: no chapter Markdown files found in chapters/");
   for (const chapter of chapters) {
@@ -480,11 +498,13 @@ function checkCitationVerification(
     // cannot cite a source that was never classified.
     if (!sourceIds.has(id)) findings.push(rFinding({
       gate: GATE, kind: "source_record", effect: "repair_source_metadata", subject: id,
+      acceptance_metric: metricId("citation_verification_status"),
       diagnostic: `citation_verification: citation plan references unknown source id "${id}"` }));
     else if (!cited.has(id)) prose(`planned-${id}`, `citation_verification: planned source "${id}" is not cited in any chapter`);
   }
   const bib = (subject: string, diagnostic: string) => findings.push(rFinding({
-    gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic }));
+    gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status") }));
   if (bibliography === null || bibliography.trim().length === 0) {
     bib("bibliography", "citation_verification: sources/bibliography.bib is missing or empty");
   } else {
@@ -504,7 +524,8 @@ async function checkResearchPolicy(workspaceDir: string, sources: ClassifiedSour
   const GATE = "research_policy";
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(rFinding({
-    gate: GATE, kind: "corpus", effect: "upgrade_source_quality", subject, diagnostic }));
+    gate: GATE, kind: "corpus", effect: "upgrade_source_quality", subject, diagnostic,
+    acceptance_metric: metricId("recent_source_ratio") }));
   let config;
   try {
     config = await loadProjectConfig(workspaceDir);
@@ -537,7 +558,8 @@ async function checkCitationUrlLiveness(
   // A dead or missing URL is a defect in the source record, not in the prose
   // that cites it: the citation is correct and the metadata behind it is not.
   const fail = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "source_record", effect: "repair_source_metadata", subject, diagnostic });
+    gate: GATE, kind: "source_record", effect: "repair_source_metadata", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status") });
   if (result.error) {
     return requireLiveUrls
       ? checkOf(GATE, [fail("verification-log", "citation_url_liveness: sources/citation-verification.jsonl is required when source_policy.require_live_urls is true")])
@@ -563,7 +585,8 @@ function checkEvidenceCitationIntegrity(
   const GATE = "citation_verification";
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string, chapterPath: string) => findings.push(rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic, path: chapterPath }));
+    gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic, path: chapterPath,
+    acceptance_metric: metricId("citation_verification_status") }));
   for (const chapter of chapters) {
     const ids = markers(chapter.content);
     const section = sectionIdFromChapter(chapter.rel);
@@ -588,6 +611,7 @@ async function checkEvidenceCoverage(workspaceDir: string): Promise<ValidationCh
       return rFinding({
         gate: GATE, kind: "corpus", effect: "acquire_additional_evidence",
         subject: `cell-${slugify(cell)}`, scope: scopeKey("taxonomy_cell", cell),
+        acceptance_metric: metricId("taxonomy_cell_ab_sources"),
         diagnostic: `taxonomy coverage for "${cell}" has ${String(row.source_count ?? 0)} sources; minimum is 2`,
       });
     });
@@ -600,6 +624,7 @@ async function checkDirectTaxonomyCoverage(workspaceDir: string, provider?: stri
   const coverage = await jsonIfExists(path.join(workspaceDir, "evidence", "coverage.json"));
   if (coverage === null) return checkOf(GATE, [rFinding({
     gate: GATE, kind: "evidence_packet", effect: "acquire_additional_evidence", subject: "coverage",
+    acceptance_metric: metricId("taxonomy_cell_ab_sources"),
     diagnostic: "evidence/coverage.json is required for a live research release" })]);
   const rows = Array.isArray(coverage.taxonomy) ? coverage.taxonomy as Array<Record<string, unknown>> : [];
   const findings = rows
@@ -609,6 +634,7 @@ async function checkDirectTaxonomyCoverage(workspaceDir: string, provider?: stri
       return rFinding({
         gate: GATE, kind: "evidence_packet", effect: "acquire_additional_evidence",
         subject: `cell-${slugify(cell)}`, scope: scopeKey("taxonomy_cell", cell),
+        acceptance_metric: metricId("taxonomy_cell_ab_sources"),
         diagnostic: `taxonomy cell "${cell}" has ${String(row.direct_source_count ?? 0)} A/B-depth sources; minimum is 2`,
       });
     });
@@ -625,7 +651,8 @@ async function checkReviewTarget(workspaceDir: string): Promise<ValidationCheck>
   // repair edits; the gate also declares figure and outline routes for the
   // cases diagnosis attributes elsewhere.
   const fail = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "remove_unsupported_claim", subject, diagnostic });
+    gate: GATE, kind: "chapter_prose", effect: "remove_unsupported_claim", subject, diagnostic,
+    acceptance_metric: metricId("review_score") });
   if (typeof score !== "number") return checkOf(GATE, [fail("score", "reports/metrics.json must contain numeric review_score after a scorecard review")]);
   return score >= 8
     ? note(GATE, true, `review_score ${score.toFixed(1)} meets the research release target 8.0`)
@@ -685,6 +712,7 @@ async function checkTargetLength(
   // failure with no repair that could ever satisfy it.
   return checkOf(GATE, [rFinding({
     gate: GATE, kind: "chapter_prose", effect: "expand_argument", subject: "length",
+    acceptance_metric: null,
     diagnostic: `${total} chapter words is below the full-release minimum ${minimum} for the ${target}-word target; expand evidence-backed prose before release`,
   })]);
 }
@@ -696,7 +724,8 @@ async function checkClaimSupport(workspaceDir: string): Promise<ValidationCheck>
   const metrics = await jsonIfExists(path.join(workspaceDir, "reports", "metrics.json"));
   const rate = metrics?.claim_support_rate;
   const fail = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "remove_unsupported_claim", subject, diagnostic });
+    gate: GATE, kind: "chapter_prose", effect: "remove_unsupported_claim", subject, diagnostic,
+    acceptance_metric: metricId("claim_support") });
   if (typeof rate !== "number") return checkOf(GATE, [fail("rate", "reports/metrics.json must contain claim_support_rate after claim judgments")]);
   return rate >= 0.9
     ? note(GATE, true, `claim_support_rate ${rate.toFixed(3)} meets the release target 0.900`)
@@ -706,7 +735,8 @@ async function checkClaimSupport(workspaceDir: string): Promise<ValidationCheck>
 async function checkNoContradictions(workspaceDir: string): Promise<ValidationCheck> {
   const GATE = "claim_contradictions";
   const resolve = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "resolve_contradiction", subject, diagnostic });
+    gate: GATE, kind: "chapter_prose", effect: "resolve_contradiction", subject, diagnostic,
+    acceptance_metric: metricId("claim_contradictions") });
   const result = await readJsonlFile<ClaimJudgment>(workspaceDir, "reviews/claim-judgments.jsonl");
   if (result.error?.endsWith("is missing")) return note(GATE, true, "no claim judgments found; contradiction check skipped");
   if (result.error) return checkOf(GATE, [resolve("judgments", `claim_contradictions: ${result.error}`)]);
@@ -730,9 +760,11 @@ async function checkLandmarkCoverage(workspaceDir: string, sources: ClassifiedSo
   // A/B depth. Citation coverage is a prose gap: it is in the corpus and the
   // manuscript never cites it. Different repairs, so different triples.
   const missingEvidence = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: "landmark_coverage", kind: "corpus", effect: "acquire_additional_evidence", subject, diagnostic });
+    gate: "landmark_coverage", kind: "corpus", effect: "acquire_additional_evidence", subject, diagnostic,
+    acceptance_metric: metricId("landmark_coverage_ratio") });
   const missingCitation = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: "landmark_citation_coverage", kind: "chapter_prose", effect: "add_supporting_citation", subject, diagnostic });
+    gate: "landmark_citation_coverage", kind: "chapter_prose", effect: "add_supporting_citation", subject, diagnostic,
+    acceptance_metric: metricId("landmark_citation_coverage_ratio") });
   if (threshold <= 0 && citationThreshold <= 0) return [
     note("landmark_coverage", true, "landmark coverage gate is not configured"),
     note("landmark_citation_coverage", true, "landmark citation coverage gate is not configured"),
@@ -822,7 +854,8 @@ async function checkFullResearchContracts(workspaceDir: string): Promise<Validat
   };
   const identity = await readJsonlFile<Record<string, unknown>>(workspaceDir, "sources/source-identities.jsonl");
   const identityFail = (subject: string, diagnostic: string): Finding => rFinding({
-    gate: "full_source_identity", kind: "source_record", effect: "repair_source_metadata", subject, diagnostic });
+    gate: "full_source_identity", kind: "source_record", effect: "repair_source_metadata", subject, diagnostic,
+    acceptance_metric: metricId("citation_verification_status") });
   const identityFailures = identity.error
     ? [identityFail("identities", identity.error)]
     : identity.rows
@@ -900,7 +933,8 @@ export async function validateResearchWorkspace(
           // repaired where the marker is written.
           return checkOf("citation_evidence_ledger", ledger.findings.map((diagnostic, index) => rFinding({
             gate: "citation_evidence_ledger", kind: "chapter_prose", effect: "repair_citation_marker",
-            subject: `entry-${index + 1}`, diagnostic })));
+            subject: `entry-${index + 1}`, diagnostic,
+            acceptance_metric: metricId("citation_verification_status") })));
         })(),
       ]
     : [];
@@ -909,7 +943,8 @@ export async function validateResearchWorkspace(
     // repair is to gather the corpus, not to redraw anything.
     checkOf("research_artifacts_present", setupFindings.map((diagnostic, index) => rFinding({
       gate: "research_artifacts_present", kind: "evidence_packet", effect: "acquire_additional_evidence",
-      subject: `artifact-${index + 1}`, severity: "critical", diagnostic }))),
+      subject: `artifact-${index + 1}`, severity: "critical", diagnostic,
+      acceptance_metric: metricId("candidate_count") }))),
     checkCitationMarkers(chapters, sourceIds),
     evidenceEnabled
       ? note("source_coverage", true, "outline-specific evidence packets supersede the legacy generic citation plan")
@@ -964,7 +999,7 @@ export async function writeValidationReport(workspaceDir: string, report: Valida
   return [jsonRel, markdownRel, gatesRel];
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -1028,13 +1063,28 @@ export const PRODUCER = defineProducer({
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
         acceptance_metric: "landmark_citation_coverage_ratio" },
     ] },
-    { id: "cited_literature_release_gates", class: "manuscript", observes: ["cited_sources", "citation_depth_per_section"], findings: [
+    // A compound gate. One triple serves several objectives, so the same
+    // (kind, effect) is declared once per metric it can block; the emitting
+    // code names which, and requireDeclaredFinding rejects any other pairing.
+    { id: "cited_literature_release_gates", class: "manuscript",
+      observes: ["cited_sources", "citation_depth_per_section", "citations_per_page",
+        "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio"], findings: [
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
         acceptance_metric: "citation_depth_per_section" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "citations_per_page" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
       { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
         acceptance_metric: "cited_sources" },
       { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "cited_sources" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "cited_within_one_year_ratio" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
         acceptance_metric: "accepted_cited_ratio" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "cited_arxiv_only_ratio" },
     ] },
     { id: "citation_markers_present", class: "manuscript", findings: [
       { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",

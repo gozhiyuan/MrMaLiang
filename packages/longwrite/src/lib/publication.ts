@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadProjectConfig, loadProjectConfigIfExists } from "./project-config.js";
-import { gateId } from "./registry/ids.js";
+import { gateId, metricId } from "./registry/ids.js";
 import { FindingSchema, type StructuredCheck } from "./registry/records.js";
 import { GLOBAL_SCOPE } from "./registry/scope.js";
 
@@ -16,10 +16,10 @@ const ROUTE_PATHS = {
 } as const;
 
 type PubRoute =
-  | { kind: "figure_spec"; effect: "repair_artifact_placement" }
-  | { kind: "outline"; effect: "replace_organizing_claim" }
-  | { kind: "publication_template"; effect: "repair_template" }
-  | { kind: "chapter_prose"; effect: "remove_redundant_prose" | "expand_argument" };
+  | { kind: "figure_spec"; effect: "repair_artifact_placement"; metric: null }
+  | { kind: "outline"; effect: "replace_organizing_claim"; metric: "outline_readiness" }
+  | { kind: "publication_template"; effect: "repair_template"; metric: null }
+  | { kind: "chapter_prose"; effect: "remove_redundant_prose" | "expand_argument"; metric: null };
 
 function pubCheck(gate: string, route: PubRoute, diagnostics: string[], passing?: string): PublicationCheck {
   return {
@@ -31,7 +31,7 @@ function pubCheck(gate: string, route: PubRoute, diagnostics: string[], passing?
       artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
       objective_scope_key: GLOBAL_SCOPE,
       required_effect: route.effect,
-      acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
+      acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(gate), route.kind, route.effect, route.metric === null ? null : metricId(route.metric)),
       severity: "major",
       diagnostic,
     })),
@@ -111,7 +111,7 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
   if (!main.includes("\\begin{abstract}")) common.push("paper/main.tex is missing an abstract");
   // Layout defects in generated main.tex are repaired in the placement plan
   // that produced it, never in the .tex a later render replaces.
-  checks.push(pubCheck("publication_article_layout", { kind: "figure_spec", effect: "repair_artifact_placement" }, common));
+  checks.push(pubCheck("publication_article_layout", { kind: "figure_spec", effect: "repair_artifact_placement", metric: null }, common));
 
   if (config.project.mode === "auto_research_agentic") {
     const releaseFindings: string[] = [];
@@ -126,14 +126,14 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
       if (release.version !== 1 || !Array.isArray(release.gates)) releaseFindings.push("reports/release-gates.json has an invalid contract");
       if (release.pass !== true) releaseFindings.push("research release gates have not passed");
     }
-    checks.push(pubCheck("publication_release_gates", { kind: "figure_spec", effect: "repair_artifact_placement" }, releaseFindings));
+    checks.push(pubCheck("publication_release_gates", { kind: "figure_spec", effect: "repair_artifact_placement", metric: null }, releaseFindings));
   }
 
   const titles = await outlineTitles(root);
   const missingSections = config.publication.required_sections.filter((required) =>
     !titles.some((title) => title.toLocaleLowerCase().includes(required.toLocaleLowerCase())),
   );
-  checks.push(pubCheck("publication_required_sections", { kind: "outline", effect: "replace_organizing_claim" },
+  checks.push(pubCheck("publication_required_sections", { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
     missingSections.map((title) => `required section "${title}" is absent from outline.json`)));
 
   if (config.publication.target === "custom") {
@@ -143,12 +143,12 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
       custom.push(`paper/main.tex does not select custom class ${config.publication.document_class}`);
     }
     if (!(await fs.stat(classPath).catch(() => null))) custom.push(`paper/${config.publication.document_class}.cls is missing after template copy`);
-    checks.push(pubCheck("publication_custom_template", { kind: "publication_template", effect: "repair_template" }, custom));
+    checks.push(pubCheck("publication_custom_template", { kind: "publication_template", effect: "repair_template", metric: null }, custom));
   }
 
   if (config.publication.page_limit) {
     const pages = await pageCount(path.join(root, "build", "manuscript.pdf"));
-    checks.push(pubCheck("publication_page_limit", { kind: "chapter_prose", effect: "remove_redundant_prose" },
+    checks.push(pubCheck("publication_page_limit", { kind: "chapter_prose", effect: "remove_redundant_prose", metric: null },
       pages === null
         ? ["pdfinfo is required to verify publication.page_limit; install poppler and compile a real PDF"]
         : pages > config.publication.page_limit
@@ -158,7 +158,7 @@ export async function validatePublicationWorkspace(workspaceDir: string): Promis
   }
   if (config.publication.min_pages) {
     const pages = await pageCount(path.join(root, "build", "manuscript.pdf"));
-    checks.push(pubCheck("publication_min_pages", { kind: "chapter_prose", effect: "expand_argument" },
+    checks.push(pubCheck("publication_min_pages", { kind: "chapter_prose", effect: "expand_argument", metric: null },
       pages === null
         ? ["pdfinfo is required to verify publication.min_pages; install poppler and compile a real PDF"]
         : pages < config.publication.min_pages
@@ -225,7 +225,7 @@ export async function writeUnpackagedSubmissionNotice(workspaceDir: string, reas
   return path.relative(root, manifestPath);
 }
 
-import { defineProducer, acceptanceMetricOf } from "./registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "./registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

@@ -96,8 +96,10 @@ describe("routing coverage", () => {
       for (const finding of (await probeProducer(producer.module)).findings) {
         const artifact = finding.artifact as { kind: never };
         expect(finding, `${producer.module}/${String(finding.id)}`).toHaveProperty("acceptance_metric");
-        expect(finding.acceptance_metric ?? null, `${producer.module}/${String(finding.id)}`)
-          .toBe(REGISTRY.acceptanceMetric(gateId(String(finding.gate_id)), artifact.kind, finding.required_effect as never));
+        // Must be one the producer declared for this exact triple, not merely
+        // some metric: a compound gate declares several.
+        expect([...REGISTRY.acceptanceMetrics(gateId(String(finding.gate_id)), artifact.kind, finding.required_effect as never)],
+          `${producer.module}/${String(finding.id)}`).toContain(finding.acceptance_metric ?? null);
       }
     }
   });

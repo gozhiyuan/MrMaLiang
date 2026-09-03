@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseJsonl } from "./jsonl.js";
 import type { ClassifiedSource } from "./types.js";
-import { gateId } from "../registry/ids.js";
+import { gateId, metricId } from "../registry/ids.js";
 import { FindingSchema, type StructuredCheck } from "../registry/records.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
 
@@ -20,15 +20,15 @@ export type SurveyContractReport = {
 /** Every gate here is a defect in how the survey is organised, which is
  * repaired by reopening the outline. related_work_matrix is the exception: it
  * can also be short because the comparison table itself is thin. */
-const ROUTES: Record<string, { kind: "outline" | "table_spec"; effect: "replace_organizing_claim" | "repair_artifact_content" }> = {
-  introduction_gap_contributions: { kind: "outline", effect: "replace_organizing_claim" },
-  multi_axis_taxonomy: { kind: "outline", effect: "replace_organizing_claim" },
-  method_family_chapters: { kind: "outline", effect: "replace_organizing_claim" },
-  related_work_differentiation: { kind: "outline", effect: "replace_organizing_claim" },
-  limitations_future_work: { kind: "outline", effect: "replace_organizing_claim" },
-  section_evidence_requirements: { kind: "outline", effect: "replace_organizing_claim" },
-  chapter_outline_identity: { kind: "outline", effect: "replace_organizing_claim" },
-  related_work_matrix: { kind: "table_spec", effect: "repair_artifact_content" },
+const ROUTES: Record<string, { kind: "outline" | "table_spec"; effect: "replace_organizing_claim" | "repair_artifact_content"; metric: "outline_readiness" | "comparative_tables" }> = {
+  introduction_gap_contributions: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  multi_axis_taxonomy: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  method_family_chapters: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  related_work_differentiation: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  limitations_future_work: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  section_evidence_requirements: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  chapter_outline_identity: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  related_work_matrix: { kind: "table_spec", effect: "repair_artifact_content", metric: "comparative_tables" },
 };
 
 const ROUTE_PATHS = { outline: "outline.json", table_spec: "figures/placement-plan.json" } as const;
@@ -45,7 +45,7 @@ function surveyCheck(entry: { id: string; pass: boolean; detail: string }): Stru
       artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
       objective_scope_key: GLOBAL_SCOPE,
       required_effect: route.effect,
-      acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(entry.id), route.kind, route.effect),
+      acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(entry.id), route.kind, route.effect, metricId(route.metric)),
       severity: "major",
       diagnostic: entry.detail,
     })],
@@ -273,7 +273,7 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
   return { report, written };
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { gateId } from "../registry/ids.js";
+import { gateId, metricId } from "../registry/ids.js";
 import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
 
@@ -18,15 +18,20 @@ export type LongformCheck = StructuredCheck;
  * `required_artifacts` is deliberately absent: it is an environment gate whose
  * failure means an input has not been produced yet, so it asks for diagnosis
  * rather than naming an artifact to edit. */
-const ROUTES: Record<string, { kind: "outline" | "chapter_prose"; effect: "replace_organizing_claim" | "expand_argument" | "resolve_contradiction" | "remove_unsupported_claim" | "remove_redundant_prose" }> = {
-  outline_chapter_arcs: { kind: "outline", effect: "replace_organizing_claim" },
-  chapter_contracts: { kind: "outline", effect: "replace_organizing_claim" },
-  chapter_contract_coverage: { kind: "chapter_prose", effect: "expand_argument" },
-  chapter_continuity_coverage: { kind: "chapter_prose", effect: "resolve_contradiction" },
-  character_continuity: { kind: "chapter_prose", effect: "resolve_contradiction" },
-  code_validation: { kind: "chapter_prose", effect: "remove_unsupported_claim" },
-  target_length: { kind: "chapter_prose", effect: "expand_argument" },
-  style_drift: { kind: "chapter_prose", effect: "remove_redundant_prose" },
+const ROUTES: Record<string, {
+  kind: "outline" | "chapter_prose";
+  effect: "replace_organizing_claim" | "expand_argument" | "resolve_contradiction" | "remove_unsupported_claim" | "remove_redundant_prose";
+  /** The objective this gate blocks, or null when none is registered. */
+  metric: "outline_readiness" | "claim_contradictions" | "prose_redundancy" | null;
+}> = {
+  outline_chapter_arcs: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  chapter_contracts: { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" },
+  chapter_contract_coverage: { kind: "chapter_prose", effect: "expand_argument", metric: null },
+  chapter_continuity_coverage: { kind: "chapter_prose", effect: "resolve_contradiction", metric: "claim_contradictions" },
+  character_continuity: { kind: "chapter_prose", effect: "resolve_contradiction", metric: "claim_contradictions" },
+  code_validation: { kind: "chapter_prose", effect: "remove_unsupported_claim", metric: null },
+  target_length: { kind: "chapter_prose", effect: "expand_argument", metric: null },
+  style_drift: { kind: "chapter_prose", effect: "remove_redundant_prose", metric: "prose_redundancy" },
 };
 
 const ROUTE_PATHS = { outline: "outline.md", chapter_prose: "chapters/" } as const;
@@ -40,7 +45,7 @@ function lfFinding(gate: string, index: number, diagnostic: string): Finding {
     artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: route.effect,
-    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
+    acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(gate), route.kind, route.effect, route.metric === null ? null : metricId(route.metric)),
     severity: "major",
     diagnostic,
   });
@@ -375,7 +380,7 @@ export async function writeLongformValidationReport(
   return ["reports/longwrite-validation.json", "reports/longwrite-validation.md"];
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

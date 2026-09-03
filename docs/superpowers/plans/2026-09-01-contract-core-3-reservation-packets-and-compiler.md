@@ -1160,7 +1160,34 @@ export async function writeRepairPacket(
 }
 ```
 
-`acceptanceForFindings` derives one criterion per distinct gate from `gateAcceptanceCriterion`.
+`acceptanceForFindings` derives one criterion per distinct
+`(acceptance_metric, objective_scope_key)` pair carried by the findings —
+**never** one per gate.
+
+A gate is not an objective. `cited_literature_release_gates` alone emits
+findings against `cited_sources`, `cited_within_one_year_ratio`,
+`accepted_cited_ratio`, `cited_arxiv_only_ratio`, `citations_per_page`,
+`citation_depth_per_section` and `taxonomy_cell_ab_sources`; one criterion per
+gate would collapse seven objectives into one and let a repair that fixed
+recency claim to have fixed venue mix. Each finding carries the metric it
+moves in `acceptance_metric` (Plan 1), and that field — not the gate — is the
+key.
+
+**Findings whose `acceptance_metric` is `null`.** Roughly twenty declared
+routes have no registered metric, several reachable in a flagship run: figure
+references, publication layout, target length, page limits. These are real
+defects with no numeric objective, so they take a **verification criterion**
+rather than a metric criterion: the action is accepted when the emitting gate
+re-runs clean over the named artifacts. A packet may carry both kinds; it must
+never invent a metric for a `null` finding, and it must never be materialized
+with an empty acceptance list.
+
+**Operator-target findings.** A finding whose artifact is an operator target
+(`toolchain`, `experiment_manifest`) carries `target` rather than `path`, so
+`owns` is empty and no repair capability can act. These materialize as an
+operator clarification request whose acceptance is the environment gate passing
+on a later run — they are never bundled with editable-artifact findings, whose
+acceptance is a metric or a gate re-run.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1916,7 +1943,7 @@ treats as a durable pause rather than a dispatchable repair.
 cast. `buildRepairPacket` filters operator targets out before that point, so the
 narrower type is the accurate one rather than an assertion.
 
-Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from `gateAcceptanceCriterion` for each distinct gate, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
+Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from each distinct `(acceptance_metric, objective_scope_key)` pair the findings carry — a metric criterion where the metric is non-null, a gate-re-run verification criterion where it is `null` — rejecting a packet that would carry no acceptance at all, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2867,7 +2894,7 @@ Delete `repair-routing.ts`. Replace each of its thirteen call sites:
 
 | Site | Was | Now |
 | --- | --- | --- |
-| `action-plan.ts:100` `gateAcceptanceCriterion` | `repairRouteForGate(id).preferred === "revise_visual_plan"` | the gate's declared acceptance metric from the registry |
+| `action-plan.ts:100` `gateAcceptanceCriterion` | `repairRouteForGate(id).preferred === "revise_visual_plan"` | each finding's own `acceptance_metric`, scoped by its `objective_scope_key`; a `null` metric becomes a gate-re-run verification criterion |
 | `action-plan.ts:473,487,520` routing heuristics | preferred-tool comparisons | deleted; the planner no longer selects tools |
 | `action-plan.ts:489,522` `gateOwnedByTool` | ownership assertions | `validateFindingAgainstRegistry` on each finding |
 | `research.ts:909,925,962` required-action synthesis | preferred-tool filters | findings grouped by resolved capability |

@@ -1,5 +1,5 @@
 import { gateFamily, type ArtifactKind, type CapabilityId, type GateClass, type GateId, type MetricId, type RequiredEffect } from "./ids.js";
-import type { ProducerDefinition } from "./producer-types.js";
+import type { GateDefinition, ProducerDefinition } from "./producer-types.js";
 
 export type RouteKey = { gate: GateId; kind: ArtifactKind; effect: RequiredEffect };
 export type Triple = { kind: ArtifactKind; effect: RequiredEffect };
@@ -18,14 +18,30 @@ export type Registry = {
   legalTriples(gate: GateId): readonly Triple[];
   routedTripleKeys(): Set<string>;
   resolveCapability(key: RouteKey): CapabilityId;
-  /** The acceptance metric a triple moves, or null when it moves none. */
-  acceptanceMetric(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): MetricId | null;
+  /** Every acceptance metric this gate may attach to that triple.
+   *
+   * A set, not a value. One triple can serve several objectives: a corpus that
+   * is too small, too old and too preprint-heavy all repair through
+   * `corpus / upgrade_source_quality`, but they are three different
+   * objectives. Returning a single metric forced every such failure onto
+   * whichever one happened to be declared first. */
+  acceptanceMetrics(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): ReadonlySet<MetricId | null>;
   producerOf(gate: GateId): string;
   capabilities(): Set<CapabilityId>;
 };
 
 function tripleKey(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): string {
   return `${gate} ${kind} ${effect}`;
+}
+
+/** Everything that makes a gate declaration mean what it means: its class and
+ * every four-tuple it can emit. Two modules may emit one gate, but only if
+ * they agree on all of this. */
+function declarationOf(gate: GateDefinition): string {
+  const findings = gate.findings
+    .map((finding) => `${finding.kind}|${finding.effect}|${String(finding.capability)}|${finding.acceptance_metric ?? "null"}`)
+    .sort();
+  return JSON.stringify({ class: gate.class, findings });
 }
 
 /** Folds typed producer declarations into the class table, the legal triples
@@ -38,8 +54,9 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
   const classes = new Map<GateId, GateClass>();
   const triples = new Map<GateId, Triple[]>();
   const routes = new Map<string, CapabilityId>();
-  const metrics = new Map<string, MetricId | null>();
+  const metrics = new Map<string, Set<MetricId | null>>();
   const owners = new Map<GateId, string>();
+  const declarations = new Map<GateId, string>();
 
   const modules = new Set<string>();
   for (const producer of definitions) {
@@ -50,29 +67,16 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
     for (const gate of producer.gates) {
       const held = owners.get(gate.id);
       if (held !== undefined) {
+
         // Two modules may legitimately emit one gate — `target_length` is a
         // hard gate in the research validator and an advisory check in the
         // long-form one. What must never differ is what it means, so an
         // identical re-declaration is accepted and a conflicting one is not.
-        const first = { class: classes.get(gate.id), triples: triples.get(gate.id) ?? [] };
         // Capability and acceptance metric are part of what a gate MEANS.
         // Comparing only class and triples accepted two modules routing one
         // triple to different capabilities, and silently kept whichever
         // registered first — so which repair ran depended on import order.
-        const declared = gate.findings.map((f) => ({
-          kind: f.kind, effect: f.effect, capability: String(f.capability),
-          acceptance_metric: f.acceptance_metric === null ? null : String(f.acceptance_metric),
-        }));
-        const held_ = (triples.get(gate.id) ?? []).map((triple) => ({
-          kind: triple.kind, effect: triple.effect,
-          capability: String(routes.get(tripleKey(gate.id, triple.kind, triple.effect))),
-          acceptance_metric: (() => {
-            const metric = metrics.get(tripleKey(gate.id, triple.kind, triple.effect));
-            return metric === null || metric === undefined ? null : String(metric);
-          })(),
-        }));
-        const same = first.class === gate.class
-          && JSON.stringify(held_) === JSON.stringify(declared);
+        const same = declarations.get(gate.id) === declarationOf(gate);
         if (!same) {
           throw new Error(
             `gate ${gate.id} is declared differently by ${held} and ${producer.module}; ` +
@@ -81,12 +85,28 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
         continue;
       }
       owners.set(gate.id, producer.module);
+      declarations.set(gate.id, declarationOf(gate));
       classes.set(gate.id, gate.class);
       if (gate.findings.length > 0) {
-        triples.set(gate.id, gate.findings.map((finding) => ({ kind: finding.kind, effect: finding.effect })));
+        const seen = new Set<string>();
+        triples.set(gate.id, gate.findings
+          .map((finding) => ({ kind: finding.kind, effect: finding.effect }))
+          .filter((triple) => {
+            const key = `${triple.kind} ${triple.effect}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }));
         for (const finding of gate.findings) {
-          routes.set(tripleKey(gate.id, finding.kind, finding.effect), finding.capability);
-          metrics.set(tripleKey(gate.id, finding.kind, finding.effect), finding.acceptance_metric);
+          const key = tripleKey(gate.id, finding.kind, finding.effect);
+          const owner = routes.get(key);
+          if (owner !== undefined && owner !== finding.capability) {
+            throw new Error(
+              `gate ${gate.id} routes (${finding.kind}, ${finding.effect}) to both ${owner} and ` +
+              `${finding.capability}; one triple has one owner`);
+          }
+          routes.set(key, finding.capability);
+          metrics.set(key, (metrics.get(key) ?? new Set()).add(finding.acceptance_metric));
         }
       }
     }
@@ -116,10 +136,10 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
       if (!found) throw new Error(`unclassified gate: ${gate}. Declare it on its producer.`);
       return found;
     },
-    acceptanceMetric: (gate, kind, effect) => {
-      const key = tripleKey(gateFamily(gate), kind, effect);
-      if (!metrics.has(key)) throw new UnroutedFindingError({ gate, kind, effect });
-      return metrics.get(key) ?? null;
+    acceptanceMetrics: (gate, kind, effect) => {
+      const found = metrics.get(tripleKey(gateFamily(gate), kind, effect));
+      if (!found) throw new UnroutedFindingError({ gate, kind, effect });
+      return found;
     },
     capabilities: () => new Set(routes.values()),
   };

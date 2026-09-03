@@ -6,7 +6,7 @@ import { loadProjectConfigIfExists } from "../project-config.js";
 import { paperProfile } from "../paper-profiles.js";
 import { connectedComponents } from "../research/diagram-connectivity.js";
 import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
-import { gateId } from "../registry/ids.js";
+import { gateId, metricId } from "../registry/ids.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
 import { z } from "zod";
 
@@ -46,6 +46,9 @@ function finding(args: {
   diagnostic: string;
   location?: string;
   severity?: "minor" | "major" | "critical";
+  /** Which objective this defect blocks, or null when none is registered.
+   * Required, never defaulted: a default silently picks an objective. */
+  acceptance_metric: "figures" | "tables" | "diagram_connectivity" | null;
 }): Finding {
   return FindingSchema.parse({
     // Stable and derived from the subject, so the same defect keeps the same
@@ -60,7 +63,7 @@ function finding(args: {
     ...(args.location === undefined ? {} : { location: args.location }),
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: args.effect,
-    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(args.gate), args.kind, args.effect),
+    acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(args.gate), args.kind, args.effect, args.acceptance_metric === null ? null : metricId(args.acceptance_metric)),
     severity: args.severity ?? "major",
     diagnostic: args.diagnostic,
   });
@@ -92,7 +95,7 @@ async function loadManifest(workspaceDir: string): Promise<{ manifest?: FigureMa
   if (content === null) {
     return { findings: [finding({
       gate: "figure_manifest", kind: "figure_spec", effect: "repair_artifact_content",
-      subject: "manifest", severity: "critical",
+      subject: "manifest", severity: "critical", acceptance_metric: "figures",
       diagnostic: "figure_manifest: figures/manifest.json is missing",
     })] };
   }
@@ -101,7 +104,7 @@ async function loadManifest(workspaceDir: string): Promise<{ manifest?: FigureMa
   } catch (err) {
     return { findings: [finding({
       gate: "figure_manifest", kind: "figure_spec", effect: "repair_artifact_content",
-      subject: "manifest", severity: "critical",
+      subject: "manifest", severity: "critical", acceptance_metric: "figures",
       diagnostic: `figure_manifest: figures/manifest.json is invalid: ${err instanceof Error ? err.message : String(err)}`,
     })] };
   }
@@ -124,7 +127,7 @@ function blockedOnManifest(gate: string): StructuredCheck {
     id: gateId(gate), pass: false, measurements: [], requires_diagnosis: false,
     findings: [finding({
       gate, kind: "figure_spec", effect: "repair_artifact_content", subject: "manifest",
-      severity: "critical",
+      severity: "critical", acceptance_metric: "figures",
       diagnostic: `${gate}: skipped because figures/manifest.json is missing or invalid`,
     })],
   };
@@ -134,7 +137,8 @@ export async function checkArtifacts(workspaceDir: string, manifest?: FigureMani
   const findings: Finding[] = [];
   if (!manifest) return blockedOnManifest("figure_artifacts");
   const fail = (kind: "figure_spec" | "table_spec", subject: string, diagnostic: string) =>
-    findings.push(finding({ gate: "figure_artifacts", kind, effect: "repair_artifact_content", subject, diagnostic }));
+    findings.push(finding({ gate: "figure_artifacts", kind, effect: "repair_artifact_content", subject, diagnostic,
+      acceptance_metric: kind === "table_spec" ? "tables" : "figures" }));
 
   for (const figure of manifest.figures) {
     if (!(await statNonEmpty(workspaceDir, figure.path))) {
@@ -191,7 +195,8 @@ export async function checkRequiredFullModeVisuals(workspaceDir: string, manifes
   const findings: Finding[] = [];
   const GATE = "full_mode_visual_contract";
   const fail = (kind: "figure_spec" | "table_spec", subject: string, diagnostic: string) =>
-    findings.push(finding({ gate: GATE, kind, effect: "repair_artifact_content", subject, diagnostic }));
+    findings.push(finding({ gate: GATE, kind, effect: "repair_artifact_content", subject, diagnostic,
+      acceptance_metric: kind === "table_spec" ? "tables" : "figures" }));
   if (manifest.figures.length < quality.min_figures) fail("figure_spec", "figure-count", `${GATE}: ${manifest.figures.length} figures is below configured minimum ${quality.min_figures}`);
   if (manifest.tables.length < quality.min_tables) fail("table_spec", "table-count", `${GATE}: ${manifest.tables.length} tables is below configured minimum ${quality.min_tables}`);
   const comparativeTables = manifest.tables.filter((table) => table.comparative).length;
@@ -239,7 +244,7 @@ export async function checkPublicationLayout(workspaceDir: string): Promise<Stru
   // `location` while the artifact stays the plan.
   const fail = (subject: string, location: string, diagnostic: string) =>
     findings.push(finding({ gate: "publication_layout", kind: "figure_spec",
-      effect: "repair_artifact_placement", subject, location, diagnostic }));
+      effect: "repair_artifact_placement", subject, location, diagnostic, acceptance_metric: null }));
   for (const entry of entries) {
     const rel = path.join("paper", "sections", entry);
     const content = await readText(workspaceDir, rel);
@@ -268,7 +273,8 @@ export async function checkDiagramConnectivity(workspaceDir: string): Promise<St
   if (raw === null) return { id: gateId("diagram_connectivity"), pass: true, findings: [], measurements: [], requires_diagnosis: false,
     diagnostic: "figures/placement-plan.json not present; diagram connectivity check skipped" };
   const fail = (subject: string, diagnostic: string) =>
-    finding({ gate: "diagram_connectivity", kind: "figure_spec", effect: "repair_artifact_content", subject, diagnostic });
+    finding({ gate: "diagram_connectivity", kind: "figure_spec", effect: "repair_artifact_content", subject, diagnostic,
+      acceptance_metric: "diagram_connectivity" });
   let plan: z.infer<typeof PlacementPlanGraphs>;
   try {
     plan = PlacementPlanGraphs.parse(JSON.parse(raw));
@@ -317,7 +323,8 @@ export async function checkManuscriptReferences(workspaceDir: string, manifest?:
   // plan. Naming the .tex file as the artifact would send a repair at a file
   // the next render overwrites, so it travels as `location` instead.
   const fail = (kind: "figure_spec" | "table_spec", subject: string, location: string | undefined, diagnostic: string) =>
-    findings.push(finding({ gate: "figure_references", kind, effect: "repair_artifact_placement", subject, location, diagnostic }));
+    findings.push(finding({ gate: "figure_references", kind, effect: "repair_artifact_placement", subject, location, diagnostic,
+      acceptance_metric: null }));
 
   if (main.includes("Generated Figures and Tables")) {
     fail("figure_spec", "generated-section", "paper/main.tex",
@@ -361,7 +368,7 @@ export async function validateFigureWorkspace(workspaceDir: string): Promise<Str
   return { pass: checks.every((item) => item.pass), checks };
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

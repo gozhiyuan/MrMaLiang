@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   ArtifactKindSchema, EDITABLE_KIND_PATHS, GateIdSchema, MetricIdSchema,
   OPERATOR_TARGET_KINDS, RequiredEffectSchema,
-  type ArtifactKind, type GateId, type RequiredEffect,
+  type ArtifactKind, type GateId, type MetricId, type RequiredEffect,
 } from "./ids.js";
 
 // Deliberately NO import of ./producers.js. The migrated validation modules
@@ -129,13 +129,27 @@ export type MeasurementEnvelope = z.infer<typeof MeasurementEnvelopeSchema>;
  * import cycle. */
 export function validateFindingAgainstRegistry(
   finding: Finding,
-  registry: { legalTriples(gate: GateId): readonly { kind: ArtifactKind; effect: RequiredEffect }[] },
+  registry: {
+    legalTriples(gate: GateId): readonly { kind: ArtifactKind; effect: RequiredEffect }[];
+    acceptanceMetrics(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): ReadonlySet<MetricId | null>;
+  },
 ): void {
   const legal = registry.legalTriples(finding.gate_id);
   if (!legal.some((t) => t.kind === finding.artifact.kind && t.effect === finding.required_effect)) {
     throw new Error(
       `${finding.gate_id} never declared (${finding.artifact.kind}, ${finding.required_effect}); ` +
       `declare it on the producer or fix the finding`);
+  }
+  // The metric is checked too, not only the triple. A finding that names a
+  // metric its gate never measures would drive acceptance against an objective
+  // the gate cannot move — reachable as soon as a model-produced plan carries
+  // structured findings.
+  const allowed = registry.acceptanceMetrics(finding.gate_id, finding.artifact.kind, finding.required_effect);
+  if (!allowed.has(finding.acceptance_metric)) {
+    throw new Error(
+      `${finding.gate_id} never declared acceptance metric ${finding.acceptance_metric ?? "null"} for ` +
+      `(${finding.artifact.kind}, ${finding.required_effect}); it declares ` +
+      `${[...allowed].map((metric) => metric ?? "null").join(", ")}`);
   }
 }
 

@@ -1,11 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ValidationCheck, ValidationReport } from "./research.js";
-import { gateId } from "../registry/ids.js";
+import { gateId, metricId } from "../registry/ids.js";
 import { FindingSchema, type Finding } from "../registry/records.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
 
-type Route = { kind: "bibliography" | "outline" | "figure_spec" | "toolchain"; effect: "repair_bibliography_consistency" | "replace_organizing_claim" | "repair_artifact_placement" | "repair_toolchain" };
+type Route = {
+  kind: "bibliography" | "outline" | "figure_spec" | "toolchain";
+  effect: "repair_bibliography_consistency" | "replace_organizing_claim" | "repair_artifact_placement" | "repair_toolchain";
+  /** The objective this route blocks, or null when none is registered. */
+  metric: "outline_readiness" | "latex_build_status" | null;
+};
 
 const PATHS: Record<Route["kind"], string> = {
   bibliography: "sources/bibliography.bib",
@@ -24,7 +29,7 @@ function lFinding(gate: string, route: Route, subject: string, diagnostic: strin
     ...(location === undefined ? {} : { location }),
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: route.effect,
-    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
+    acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(gate), route.kind, route.effect, route.metric === null ? null : metricId(route.metric)),
     severity: "major",
     diagnostic,
   });
@@ -69,7 +74,7 @@ async function checkLatexSources(workspaceDir: string): Promise<ValidationCheck>
   const findings: Finding[] = [];
   const unowned: string[] = [];
   const bib = (subject: string, diagnostic: string) => findings.push(
-    lFinding(GATE, { kind: "bibliography", effect: "repair_bibliography_consistency" }, subject, diagnostic));
+    lFinding(GATE, { kind: "bibliography", effect: "repair_bibliography_consistency", metric: null }, subject, diagnostic));
   const main = await fileText(workspaceDir, "paper/main.tex");
   const refs = await fileText(workspaceDir, "paper/references.bib");
   const sections = await sectionFiles(workspaceDir);
@@ -107,7 +112,7 @@ async function checkOutlineStructure(workspaceDir: string): Promise<ValidationCh
   // The outline is the editable surface; the .tex files are generated from it.
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string, location?: string) => findings.push(
-    lFinding(GATE, { kind: "outline", effect: "replace_organizing_claim" }, subject, diagnostic, location));
+    lFinding(GATE, { kind: "outline", effect: "replace_organizing_claim", metric: "outline_readiness" }, subject, diagnostic, location));
   let outline: { sections?: Array<{ id?: unknown; title?: unknown }> } | null = null;
   try {
     outline = JSON.parse(await fs.readFile(path.join(workspaceDir, "outline.json"), "utf-8")) as { sections?: Array<{ id?: unknown; title?: unknown }> };
@@ -142,7 +147,7 @@ async function checkBuildArtifacts(workspaceDir: string): Promise<ValidationChec
   // or repairs a LaTeX engine.
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(
-    lFinding(GATE, { kind: "toolchain", effect: "repair_toolchain" }, subject, diagnostic));
+    lFinding(GATE, { kind: "toolchain", effect: "repair_toolchain", metric: "latex_build_status" }, subject, diagnostic));
   for (const rel of ["build/manuscript.tex", "build/manuscript.pdf"]) {
     try {
       const stat = await fs.stat(path.join(workspaceDir, rel));
@@ -176,7 +181,7 @@ async function checkReaderFacingPublication(workspaceDir: string): Promise<Valid
   // manuscript through the placement plan that generates it.
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(
-    lFinding(GATE, { kind: "figure_spec", effect: "repair_artifact_placement" }, subject, diagnostic));
+    lFinding(GATE, { kind: "figure_spec", effect: "repair_artifact_placement", metric: null }, subject, diagnostic));
   const main = await fileText(workspaceDir, "paper/main.tex") ?? "";
   const sections = await Promise.all((await sectionFiles(workspaceDir)).map((name) => fileText(workspaceDir, `paper/sections/${name}`)));
   const body = [main, ...sections].filter((value): value is string => Boolean(value)).join("\n");
@@ -212,7 +217,7 @@ export async function validateLatexWorkspace(workspaceDir: string): Promise<Vali
   return { pass: checks.every((check) => check.pass), checks };
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

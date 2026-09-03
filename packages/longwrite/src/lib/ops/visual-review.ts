@@ -95,7 +95,7 @@ export async function checkVisualReviewReleaseGate(workspaceDir: string, require
     location: `rendered page ${finding.page}`,
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: "repair_artifact_placement",
-    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(GATE), "figure_spec", "repair_artifact_placement"),
+    acceptance_metric: requireDeclaredFinding(PRODUCER, gateId(GATE), "figure_spec", "repair_artifact_placement", metricId("rendered_visual_review")),
     severity: finding.severity === "critical" ? "critical" : "major",
     diagnostic: `page ${finding.page}: ${finding.summary} → ${finding.remediation}`,
   }));
@@ -103,8 +103,8 @@ export async function checkVisualReviewReleaseGate(workspaceDir: string, require
     diagnostic: "visual QA reported blocking defects" };
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
-import { gateId } from "../registry/ids.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
+import { gateId, metricId } from "../registry/ids.js";
 import { FindingSchema } from "../registry/records.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
 

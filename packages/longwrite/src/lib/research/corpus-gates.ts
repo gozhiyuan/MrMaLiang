@@ -53,22 +53,17 @@ export function isRecentSource(source: ClassifiedSource, asOfDate: string): bool
   return source.year >= new Date(asOfDate).getUTCFullYear() - 2;
 }
 
-/** What this product means by source-type diversity: retrieval providers plus
- * the identifier systems the records resolve in. Exported so the
- * source_type_diversity_count evaluator computes the same number the gate
- * decided on — counting providers alone gave one workspace two different
- * values for one objective. */
+/** Distinct retrieval providers a corpus was drawn from.
+ *
+ * Providers only. Identifier systems measure metadata completeness, which is a
+ * different property with its own gate, and counting them here let a corpus
+ * drawn entirely from arXiv report three "source types" because its records
+ * carried a DOI, an arXiv id and an OpenAlex id.
+ *
+ * Exported so the source_type_diversity_count evaluator computes the same
+ * number the gate decided on. */
 export function sourceTypeDiversity(sources: ClassifiedSource[]): number {
-  const providerTypes = sources.map((source) => source.source).filter(Boolean);
-  const identifierTypes = sources.flatMap((source) => [
-    source.identifiers?.doi ? "doi" : undefined,
-    source.identifiers?.arxiv_id ? "arxiv" : undefined,
-    source.identifiers?.semantic_scholar_id ? "semantic_scholar" : undefined,
-    source.identifiers?.dblp_key ? "dblp" : undefined,
-    source.identifiers?.openalex_id ? "openalex" : undefined,
-    source.identifiers?.openreview_id ? "openreview" : undefined,
-  ].filter((value): value is string => Boolean(value)));
-  return new Set([...providerTypes, ...identifierTypes]).size;
+  return new Set(sources.map((source) => source.source).filter(Boolean)).size;
 }
 
 export type TaxonomyCellCount = {
@@ -151,7 +146,7 @@ export async function evaluateCorpusGates(
       artifact: { kind: "corpus", path: "sources/" },
       objective_scope_key: args.scopeKey,
       required_effect: args.effect ?? "acquire_additional_evidence",
-      acceptance_metric: acceptanceMetricOf(PRODUCER, args.gate, "corpus", args.effect ?? "acquire_additional_evidence"),
+      acceptance_metric: requireDeclaredFinding(PRODUCER, args.gate, "corpus", args.effect ?? "acquire_additional_evidence", metricId(args.metric)),
       severity: "major",
       diagnostic: args.detail,
     })];
@@ -245,7 +240,7 @@ export async function writeCorpusGateReport(workspaceDir: string, report: Corpus
   return [jsonRel, mdRel];
 }
 
-import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
+import { defineProducer, requireDeclaredFinding } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,

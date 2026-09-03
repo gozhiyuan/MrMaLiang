@@ -83,19 +83,31 @@ export function defineProducer(definition: z.input<typeof ProducerDefinition>): 
   return ProducerDefinition.parse(definition);
 }
 
-/** The acceptance metric a producer declared for one of its triples.
+/** Confirms a producer declared this exact four-tuple, and returns the metric.
  *
- * Each module looks this up against its OWN producer definition, so no module
- * has to import the registry and no import cycle appears. Throws rather than
- * returning undefined: an emitted triple that was never declared is the defect
- * routing-coverage exists to catch, and guessing here would hide it. */
-export function acceptanceMetricOf(
+ * The metric is supplied by the caller rather than looked up, because a gate
+ * may legitimately route several objectives through one triple: a corpus that
+ * is too small, too old and too preprint-heavy all repair through
+ * `corpus / upgrade_source_quality`. Deriving the metric from the triple sent
+ * every one of those to whichever objective was declared first.
+ *
+ * Each module checks against its OWN producer definition, so no module imports
+ * the registry and no cycle appears. */
+export function requireDeclaredFinding(
   producer: ProducerDefinition, gate: GateId, kind: ArtifactKind, effect: RequiredEffect,
+  metric: MetricId | null,
 ): MetricId | null {
   const family = gateFamily(gate);
   const declared = producer.gates.find((entry) => entry.id === family);
   if (!declared) throw new Error(`${producer.module} emits gate ${gate} without declaring it`);
-  const shape = declared.findings.find((finding) => finding.kind === kind && finding.effect === effect);
-  if (!shape) throw new Error(`${producer.module} gate ${gate} never declared (${kind}, ${effect})`);
-  return shape.acceptance_metric;
+  const matches = declared.findings.filter((finding) => finding.kind === kind && finding.effect === effect);
+  if (matches.length === 0) {
+    throw new Error(`${producer.module} gate ${gate} never declared (${kind}, ${effect})`);
+  }
+  if (!matches.some((finding) => finding.acceptance_metric === metric)) {
+    throw new Error(
+      `${producer.module} gate ${gate} never declared (${kind}, ${effect}) against ${metric ?? "null"}; ` +
+      `it declares ${matches.map((finding) => finding.acceptance_metric ?? "null").join(", ")}`);
+  }
+  return metric;
 }
