@@ -130,3 +130,58 @@ describe("citation capacity policy", () => {
     expect(finding?.artifact.kind).toBe("chapter_prose");
   });
 });
+
+describe("an unmeasured gate never passes", () => {
+  it("does not report pass when a configured requirement was never measured", async () => {
+    const ws = await workspace({ min_citations_per_page: 40 });
+    const check = (await validateResearchWorkspace(ws, AS_OF)).checks
+      .find((c) => String(c.id) === "cited_literature_release_gates")!;
+    // Unknown is not satisfied. A configured density of 99 with no rendered
+    // PDF must never read as a met contract.
+    expect(check.pass).toBe(false);
+    // Nothing here is repairable by editing an artifact, so it asks for
+    // diagnosis rather than inventing a finding.
+    expect(check.requires_diagnosis).toBe(true);
+    expect(check.diagnostic).toMatch(/not measured|not been rendered/i);
+  });
+
+  it("still passes when the unmeasured gate was not configured", async () => {
+    const ws = await workspace({ min_citations_per_page: 0 });
+    const check = (await validateResearchWorkspace(ws, AS_OF)).checks
+      .find((c) => String(c.id) === "cited_literature_release_gates")!;
+    expect(check.requires_diagnosis).toBe(false);
+  });
+});
+
+describe("corrupt PDF attribution", () => {
+  it("does not blame figure placement for an unclassified bad PDF", async () => {
+    const ws = await workspace({ min_citations_per_page: 3 });
+    await fs.mkdir(path.join(ws, "build"), { recursive: true });
+    await fs.writeFile(path.join(ws, "build", "manuscript.pdf"), "not a pdf at all\n", "utf-8");
+    const check = (await validateResearchWorkspace(ws, AS_OF)).checks
+      .find((c) => String(c.id) === "cited_literature_release_gates")!;
+    // Malformed TeX, a broken template or a bibliography fault produce the
+    // same symptom; naming the placement plan asserts a cause nobody measured.
+    expect(check.findings.some((f) => f.artifact.kind === "figure_spec")).toBe(false);
+    expect(check.pass).toBe(false);
+    expect(check.requires_diagnosis).toBe(true);
+  });
+});
+
+describe("filesystem errors are not a missing build", () => {
+  it("reports an unreadable build directory as an error, not as not_built", async () => {
+    const ws = await workspace();
+    const build = path.join(ws, "build");
+    await fs.mkdir(build, { recursive: true });
+    await fs.writeFile(path.join(build, "manuscript.pdf"), "%PDF-1.4\n", "utf-8");
+    await fs.chmod(build, 0o000);
+    try {
+      const result = await pdfPageCount(ws);
+      // On a permission failure the honest answer is "we could not look",
+      // which is a measurement error rather than a stage that has not run.
+      if (result.kind !== "ok") expect(result.kind).not.toBe("not_built");
+    } finally {
+      await fs.chmod(build, 0o755);
+    }
+  });
+});

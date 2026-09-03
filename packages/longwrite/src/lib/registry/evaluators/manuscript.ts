@@ -59,8 +59,16 @@ export async function pdfPageCount(workspaceDir: string): Promise<PageCount> {
   const { promisify } = await import("node:util");
   const run = promisify(execFile);
   const pdf = path.join(workspaceDir, "build", "manuscript.pdf");
-  if ((await fs.stat(pdf).catch(() => null)) === null) {
-    return { kind: "not_built", reason: "build/manuscript.pdf has not been rendered" };
+  try {
+    await fs.stat(pdf);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Only "it is not there" means the build has not run. A permission or I/O
+    // failure means we could not look, which is a measurement error — treating
+    // it as an unbuilt manuscript would send the run to rebuild something that
+    // may already exist.
+    if (code === "ENOENT") return { kind: "not_built", reason: "build/manuscript.pdf has not been rendered" };
+    return { kind: "error", reason: `cannot stat build/manuscript.pdf: ${code ?? String(error)}` };
   }
   let stdout: string;
   try {

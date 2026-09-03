@@ -323,18 +323,15 @@ async function checkCitedLiteratureReleaseGates(
         acceptance_metric: metricId("latex_build_status"), severity: "critical",
         diagnostic: `citation density cannot be measured: ${pages.reason}`,
       }));
-    } else if (pages.kind === "invalid") {
-      // The PDF exists and is broken, which the build owns rather than an
-      // operator; the layout that produced it is the editable surface.
-      findings.push(rFinding({
-        gate: GATE, kind: "figure_spec", effect: "repair_artifact_placement", subject: "manuscript-pdf",
-        acceptance_metric: metricId("latex_build_status"),
-        diagnostic: `citation density cannot be measured: ${pages.reason}`,
-      }));
     } else if (pages.kind !== "ok") {
-      // Not built yet, or a transient measurement failure. manuscript_build
-      // already owns "the PDF is missing"; re-reporting it here would pause a
-      // run for an operator on something the next build stage fixes itself.
+      // Everything else goes to diagnosis rather than to a guessed owner.
+      //
+      // A PDF that pdfinfo rejects could come from malformed TeX, a broken
+      // template, bad bibliography output or the toolchain; naming the
+      // placement plan would assert a cause nobody measured. A PDF that has
+      // not been rendered belongs to manuscript_build, which already reports
+      // it, and re-reporting it here as an operator problem would pause a run
+      // for something the next build stage fixes itself.
       unmeasured.push(`citation density not measured: ${pages.reason}`);
     } else {
       // This gate is explicitly configured as *citations* per page. Counting
@@ -384,9 +381,17 @@ async function checkCitedLiteratureReleaseGates(
   const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
   const citationDensity = pages === null ? undefined : citationCount / Math.max(1, pages);
   const summary = `cited=${citedSources.length}; citations=${citationCount}; citation_density=${citationDensity === undefined ? "not measured" : citationDensity.toFixed(2)}; within_1yr=${withinOneYear}/${citedSources.length}; accepted=${accepted}/${citedSources.length}; arxiv_only=${arxivOnly}/${citedSources.length}; pages=${pages ?? "not measured"}`;
-  // Anything that could not be measured is reported for the operator without
-  // being turned into a repair request for a defect nobody has observed.
-  return checkOf(GATE, findings, [summary, ...unmeasured].join("; "));
+  // Unknown is not satisfied. A configured requirement that could not be
+  // measured must never read as a met contract, so the gate fails and asks for
+  // diagnosis — there is no artifact to repair for a defect nobody observed.
+  return {
+    id: gateId(GATE),
+    pass: findings.length === 0 && unmeasured.length === 0,
+    findings,
+    measurements: [],
+    requires_diagnosis: unmeasured.length > 0,
+    diagnostic: [summary, ...unmeasured].join("; "),
+  };
 }
 
 function sectionIdFromChapter(rel: string): string {

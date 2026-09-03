@@ -1015,13 +1015,12 @@ export const RepairPacket = z.object({
     metric: z.string().min(1), scope_key: z.string(), value: z.number(),
     operator: z.enum(["at_least", "at_most", "equals"]), target: z.number(),
   }).strict()),
-  /** The full wire Criterion shape, including tolerance and direction, so the
-   * worker sees exactly what the kernel will evaluate. */
-  acceptance: z.array(z.object({
-    metric: z.string().min(1), scope_key: z.string(),
-    operator: z.enum(["at_least", "at_most", "equals"]), target: z.number(),
-    tolerance: z.number().nonnegative(), direction: z.enum(["maximize", "minimize"]),
-  }).strict()),
+  /** The wire Criterion union itself, IMPORTED rather than restated, so the
+   * worker sees exactly what the kernel will evaluate and a schema change
+   * cannot leave this copy behind. Restating a metric-only shape here would
+   * reject every verification criterion — the objectives belonging to the
+   * roughly twenty null-metric routes. */
+  acceptance: z.array(Criterion),
   prior_attempts: z.array(z.object({
     fingerprint: z.string().min(1), capability: z.string().min(1),
     effect: z.string().min(1), outcome: z.string().min(1),
@@ -1167,8 +1166,8 @@ observation rather than re-deriving them, and refuses to compile a criterion
 for a scoped metric whose observation carries no target — a criterion with an
 invented target is worse than no action at all.
 
-**The packet renders both criterion arms.** The repair packet schema imports
-the wire `Criterion` union directly rather than restating a metric-only shape,
+**The packet renders both criterion arms.** `RepairPacket.acceptance` is
+`z.array(Criterion)` — the imported union, never a restated metric-only shape —
 and the prompt renderer narrows on `kind`: a metric criterion renders as
 "metric, operator, target, current value"; a verification criterion renders as
 "this check must pass again over these artifacts". Accessing `.metric` or
@@ -1360,7 +1359,12 @@ export function renderPacketPrompt(packet: RepairPacket): string {
     ].filter(Boolean).join("\n")),
     "",
     "Acceptance:", ...packet.acceptance.map((c) =>
-      `  ${c.metric}(${c.scope_key || "global"}) ${c.operator} ${c.target} (tolerance ${c.tolerance})`),
+      // Both arms render explicitly. Reaching for `.metric` on a verification
+      // criterion would print `undefined` into a worker prompt, which is worse
+      // than crashing because the worker would act on it.
+      c.kind === "metric"
+        ? `  ${c.metric}(${c.scope_key || "global"}) ${c.operator} ${c.target} (tolerance ${c.tolerance})`
+        : `  ${c.verification_id}(${c.scope_key || "global"}) must pass again after your change`),
     "Must preserve:", ...packet.protect.map((p) => `  ${p.metric} ${p.operator} ${p.target} (currently ${p.value})`),
     ...(packet.prior_attempts.length > 0
       ? ["Already attempted and rejected:",
@@ -2672,15 +2676,45 @@ export function compileCriterion(
     throw new Error(`${metric} is minimize; at_least would demand more of a defect count`);
   }
   return {
+    // Explicit: a discriminated union reads the discriminant before applying
+    // any member default, so a criterion omitting `kind` matches no arm and is
+    // rejected at IR parse.
+    kind: "metric" as const,
     metric: String(metric), scope_key: scopeKey, operator, target,
     tolerance: definition.tolerance, direction: definition.direction,
   };
+}
+
+/** The other arm. A finding whose `acceptance_metric` is `null` names no
+ * number, so its objective is that the gate which emitted it passes again. */
+export function compileVerificationCriterion(gate: GateId, scopeKey: string) {
+  if (typeof VERIFIERS[String(gate)] !== "function") {
+    throw new Error(
+      `${gate} has no registered verifier, so a criterion naming it could never be satisfied; ` +
+      `register one or give the finding an acceptance metric`);
+  }
+  // No digest: the bytes this must be checked against do not exist until the
+  // repair has run. Freshness is bound by the post-effect verification request.
+  return { kind: "verification" as const, verification_id: String(gate), scope_key: scopeKey, expect_pass: true };
 }
 ```
 
 Route every existing criterion construction — `gateAcceptanceCriterion`, the
 corpus gate entries, `materializeAction`'s acceptance and `must_preserve` —
-through this one function.
+through these two functions. Nothing constructs a criterion literal by hand.
+
+- [ ] **Step 3b: Prove no hand-written criterion survives**
+
+Add `packages/longwrite/tests/criterion-literals.test.ts`: parse every
+criterion this repository produces through the imported wire `Criterion` union
+and assert each carries an explicit `kind`. Drive it from real output —
+`compileCriterion`, `compileVerificationCriterion`, and every criterion inside
+a materialized packet from the conformance corpus — rather than from a source
+scan, because a scan cannot see a criterion built at runtime.
+
+This exists because the union was introduced once and the literals were missed:
+schema changes do not propagate themselves, and only executing the producers
+finds the ones that were left behind.
 
 - [ ] **Step 4: Run test to verify it passes**
 

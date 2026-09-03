@@ -293,9 +293,9 @@ describe("IR v2 effect declarations", () => {
     const wf = v2([{
       id: "repair", owner: "eng", kind: "mutation", owns: ["src/**"], writes: ["src/a.ts"],
       outputs: ["src/a.ts"],
-      acceptance: [{ metric: "test_coverage", scope_key: "module-a", operator: "at_least",
+      acceptance: [{ kind: "metric" as const, metric: "test_coverage", scope_key: "module-a", operator: "at_least",
                      target: 0.9, tolerance: 0.000001, direction: "maximize" }],
-      must_preserve: [{ metric: "row_validity", scope_key: "", operator: "at_least",
+      must_preserve: [{ kind: "metric" as const, metric: "row_validity", scope_key: "", operator: "at_least",
                         target: 1, tolerance: 0, direction: "maximize" }],
     }]);
     const stage = wf.stages[0] as { acceptance: Array<{ scope_key: string; tolerance: number }> };
@@ -306,7 +306,7 @@ describe("IR v2 effect declarations", () => {
   it("rejects an operator that fights the compiled direction", () => {
     expect(() => v2([{
       id: "repair", owner: "eng", kind: "mutation", owns: ["src/**"],
-      acceptance: [{ metric: "defects", scope_key: "", operator: "at_least",
+      acceptance: [{ kind: "metric" as const, metric: "defects", scope_key: "", operator: "at_least",
                      target: 1, tolerance: 0, direction: "minimize" }],
     }])).toThrow(/direction/i);
   });
@@ -368,20 +368,25 @@ export const MetricCriterion = z.object({
 });
 export type MetricCriterion = z.infer<typeof MetricCriterion>;
 
-/** Satisfied when a named verification re-runs clean over the same inputs.
+/** Satisfied when a named verification re-runs clean AFTER the attempt's
+ * effects are applied.
  *
  * `verification_id` is opaque to the kernel: it identifies whatever the domain
  * layer will re-run, and the kernel only compares the recorded outcome to
- * `expect_pass`. `input_digest` pins what it ran against, so a pass recorded
- * before the artifacts changed cannot satisfy it afterwards — the same
- * freshness rule metric observations follow. */
+ * `expect_pass`.
+ *
+ * It deliberately carries NO digest. A criterion is compiled before the repair
+ * runs, and the bytes it must be verified against do not exist yet; a digest
+ * fixed at compile time could only ever name the pre-repair state. Freshness
+ * is bound at request time instead: after effects are applied the kernel issues
+ * a verification request, the domain layer computes the current input and
+ * verifier digests, and only a result bound to THAT request can satisfy this
+ * criterion. */
 export const VerificationCriterion = z.object({
   kind: z.literal("verification"),
   verification_id: z.string().min(1),
   /** Canonical scope; the empty string means workspace-global. */
   scope_key: z.string().default(""),
-  /** Identity of the inputs the verification must run against. */
-  input_digest: z.string().regex(/^[0-9a-f]{64}$/),
   expect_pass: z.boolean().default(true),
 }).strict();
 export type VerificationCriterion = z.infer<typeof VerificationCriterion>;
@@ -1349,8 +1354,8 @@ describe("observation store", () => {
 
   it("keys identity by metric AND scope", async () => {
     const dir = await workspace();
-    await appendObservation(dir, STORE, record({ metric: "depth", scope_key: "section-03", value: 2 }));
-    await appendObservation(dir, STORE, record({ metric: "depth", scope_key: "section-06", value: 5 }));
+    await appendObservation(dir, STORE, record({ kind: "metric" as const, metric: "depth", scope_key: "section-03", value: 2 }));
+    await appendObservation(dir, STORE, record({ kind: "metric" as const, metric: "depth", scope_key: "section-06", value: 5 }));
     const three = await currentObservation(dir, STORE, "depth", "section-03", "b".repeat(64), "a".repeat(64));
     const six = await currentObservation(dir, STORE, "depth", "section-06", "b".repeat(64), "a".repeat(64));
     // Without scope in identity these collapse and a repair in one section
@@ -1396,9 +1401,9 @@ describe("observation store", () => {
 
   it("builds a snapshot keyed by metric and scope", async () => {
     const dir = await workspace();
-    await appendObservation(dir, STORE, record({ metric: "depth", scope_key: "section-03", value: 2 }));
+    await appendObservation(dir, STORE, record({ kind: "metric" as const, metric: "depth", scope_key: "section-03", value: 2 }));
     const snapshot = await snapshotFor(dir, STORE, [
-      { metric: "depth", scope_key: "section-03", input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) },
+      { kind: "metric" as const, metric: "depth", scope_key: "section-03", input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) },
     ]);
     expect(snapshot.get("depth section-03")).toBe(2);
   });
@@ -1406,7 +1411,7 @@ describe("observation store", () => {
   it("omits a metric with no matching observation from the snapshot", async () => {
     const dir = await workspace();
     const snapshot = await snapshotFor(dir, STORE, [
-      { metric: "depth", scope_key: "section-03", input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) },
+      { kind: "metric" as const, metric: "depth", scope_key: "section-03", input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) },
     ]);
     expect(snapshot.has("depth section-03")).toBe(false);
   });
@@ -1720,8 +1725,8 @@ describe("measurement ingestion", () => {
 
   it("ingests one entry per scope for a scoped metric", async () => {
     const dir = await withEnvelope([
-      measured({ metric: "test_coverage", scope_key: "module-a", value: 0.5 }),
-      measured({ metric: "test_coverage", scope_key: "module-b", value: 0.8 }),
+      measured({ kind: "metric" as const, metric: "test_coverage", scope_key: "module-a", value: 0.5 }),
+      measured({ kind: "metric" as const, metric: "test_coverage", scope_key: "module-b", value: 0.8 }),
     ]);
     const result = await ingestEnvelope(dir, STORE, "reports/measurements.json", unit);
     expect(result.appended.map((o) => o.scope_key).sort()).toEqual(["module-a", "module-b"]);
@@ -1863,13 +1868,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { satisfies, closedGapFraction, evaluateContract } from "../src/lib/workflow/acceptance.js";
 
-const coverage = { metric: "test_coverage", scope_key: "", operator: "at_least" as const,
+const coverage = { kind: "metric" as const, metric: "test_coverage", scope_key: "", operator: "at_least" as const,
                    target: 0.9, tolerance: 1e-6, direction: "maximize" as const };
-const rows = { metric: "row_validity", scope_key: "", operator: "at_least" as const,
+const rows = { kind: "metric" as const, metric: "row_validity", scope_key: "", operator: "at_least" as const,
                target: 1, tolerance: 0, direction: "maximize" as const };
-const exact = { metric: "artifacts", scope_key: "", operator: "equals" as const,
+const exact = { kind: "metric" as const, metric: "artifacts", scope_key: "", operator: "equals" as const,
                 target: 4, tolerance: 0, direction: "maximize" as const };
-const improve = { metric: "test_coverage", scope_key: "", min_absolute_delta: 0.01,
+const improve = { kind: "metric" as const, metric: "test_coverage", scope_key: "", min_absolute_delta: 0.01,
                   min_gap_fraction: 0.2, max_attempts: 2 };
 
 const snap = (entries: Record<string, number>) => new Map(Object.entries(entries));
@@ -2098,13 +2103,19 @@ export type ContractInput = {
 };
 
 /** What the kernel knows about one verification. It never runs one itself and
- * never interprets `verification_id`; the domain layer records this. */
+ * never interprets `verification_id`; the domain layer records this.
+ *
+ * The status is preserved rather than collapsed to a boolean. Four states send
+ * a round four different ways, and flattening them loses the distinction
+ * between "the check found a defect", "nobody has run it yet" and "it could
+ * not run": `passed` satisfies, `failed` is `unmet`, `deferred` is
+ * `pending_verification`, `unavailable` is `measurement_failed`. */
 export type VerificationOutcome = {
-  passed: boolean;
-  /** What it ran against. A pass recorded against different inputs is stale
-   * and does not satisfy the criterion — the same freshness rule observations
-   * follow. */
-  input_digest: string;
+  status: "passed" | "failed" | "deferred" | "unavailable";
+  /** The request this result answers. Bound after the attempt's effects were
+   * applied, so a result carried over from an earlier attempt cannot satisfy
+   * this one. */
+  request_id: string;
 };
 
 const key = (criterion: { metric: string; scope_key: string }) => snapshotKey(criterion.metric, criterion.scope_key);
@@ -2114,15 +2125,19 @@ const key = (criterion: { metric: string; scope_key: string }) => snapshotKey(cr
 export const verificationKey = (criterion: VerificationCriterion): string =>
   `verification:${criterion.verification_id}:${criterion.scope_key}`;
 
-/** A fresh, matching pass. Anything else — absent, stale, failed — is not a
- * satisfied criterion. */
-function verificationSatisfied(
+/** Resolves one criterion against the outcome bound to this attempt.
+ *
+ * Each status maps to a distinct kernel state. `missing` is reserved for a
+ * criterion with no result at all — nobody ran it and nobody said why — which
+ * is a measurement failure rather than a pending one. */
+function verificationState(
   criterion: VerificationCriterion, outcomes: Map<string, VerificationOutcome>,
-): "satisfied" | "unsatisfied" | "missing" {
+): "satisfied" | "unsatisfied" | "pending" | "unavailable" | "missing" {
   const outcome = outcomes.get(verificationKey(criterion));
   if (!outcome) return "missing";
-  if (outcome.input_digest !== criterion.input_digest) return "missing";
-  return outcome.passed === criterion.expect_pass ? "satisfied" : "unsatisfied";
+  if (outcome.status === "deferred") return "pending";
+  if (outcome.status === "unavailable") return "unavailable";
+  return (outcome.status === "passed") === criterion.expect_pass ? "satisfied" : "unsatisfied";
 }
 
 /** The kernel knows nothing about what any metric means; it compares numbers
@@ -2164,10 +2179,12 @@ export function evaluateContract(input: ContractInput): ContractOutcome {
   if (required.some((k) => input.pending.includes(k))) return "pending_verification";
   if (required.some((k) => !input.after.has(k))) return "measurement_failed";
 
-  // A verification that was never re-run, or whose recorded pass is against
-  // stale inputs, is an unknown rather than a pass.
-  const verified = verifyAcceptance.map((criterion) => verificationSatisfied(criterion, input.verifications));
-  if (verified.includes("missing")) return "measurement_failed";
+  // Each verification status maps to its own kernel state. Collapsing deferred
+  // and unavailable into one would report a check that has not run yet as a
+  // failed measurement, ending a round that should have waited for it.
+  const verified = verifyAcceptance.map((criterion) => verificationState(criterion, input.verifications));
+  if (verified.includes("unavailable") || verified.includes("missing")) return "measurement_failed";
+  if (verified.includes("pending")) return "pending_verification";
 
   const metricsMet = metricAcceptance.every((criterion) => satisfies(criterion, input.after.get(key(criterion))!));
   if (metricsMet && verified.every((state) => state === "satisfied")) {
@@ -2223,7 +2240,7 @@ Create `tests/contract-stagnation.test.ts`:
 import { describe, it, expect } from "vitest";
 import { objectiveKey, strategyFingerprint, recordAttempt, isRepeatedStrategy } from "../src/lib/workflow/stagnation.js";
 
-const base = { metric: "test_coverage", operator: "at_least" as const, target: 0.9,
+const base = { kind: "metric" as const, metric: "test_coverage", operator: "at_least" as const, target: 0.9,
                tolerance: 1e-6, direction: "maximize" as const };
 const moduleA = { ...base, scope_key: "module-a" };
 const moduleB = { ...base, scope_key: "module-b" };
@@ -3283,7 +3300,7 @@ import { computePin, pinDigest, assertPinMatches, PinMismatchError, RunPin } fro
 
 const wf = WorkflowDef.parse({ ir_version: 2, stages: [{ id: "a", owner: "x", outputs: ["a.md"] }] });
 const env = {
-  registry_versions: { metric: "1", finding: "1" },
+  registry_versions: { kind: "metric" as const, metric: "1", finding: "1" },
   prompt_versions: { plan: "3" },
   model_profile: "flagship",
   evaluator_configuration: "1",
@@ -3299,7 +3316,7 @@ describe("run pinning", () => {
     for (const drift of [
       { ...env, prompt_versions: { plan: "4" } },
       { ...env, model_profile: "economy" },
-      { ...env, registry_versions: { metric: "2", finding: "1" } },
+      { ...env, registry_versions: { kind: "metric" as const, metric: "2", finding: "1" } },
       { ...env, evaluator_configuration: "2" },
       { ...env, tool_versions: { latex: "2025" } },
     ]) {
@@ -3410,11 +3427,11 @@ function workflow(coverage: number, rowValidity = 1) {
   const envelope = JSON.stringify({
     version: 1,
     measurements: [
-      { metric: "test_coverage", scope_key: "", status: "measured", value: coverage,
+      { kind: "metric" as const, metric: "test_coverage", scope_key: "", status: "measured", value: coverage,
         target: 0.9, operator: "at_least", tolerance: 0.000001, direction: "maximize",
         evaluator: "coverage", evaluator_digest: "a".repeat(64), input_digest: "b".repeat(64),
         measurement_kind: "script" },
-      { metric: "row_validity", scope_key: "", status: "measured", value: rowValidity,
+      { kind: "metric" as const, metric: "row_validity", scope_key: "", status: "measured", value: rowValidity,
         target: 1, operator: "at_least", tolerance: 0, direction: "maximize",
         evaluator: "rows", evaluator_digest: "c".repeat(64), input_digest: "d".repeat(64),
         measurement_kind: "script" },
@@ -3426,11 +3443,11 @@ function workflow(coverage: number, rowValidity = 1) {
       { id: "repair", owner: "eng", kind: "mutation", runtime: "script",
         reads: ["src/**"], writes: ["src/a.ts"], owns: ["src/**"], outputs: ["src/a.ts"],
         evaluate_with: ["measure"],
-        acceptance: [{ metric: "test_coverage", scope_key: "", operator: "at_least",
+        acceptance: [{ kind: "metric" as const, metric: "test_coverage", scope_key: "", operator: "at_least",
                        target: 0.9, tolerance: 0.000001, direction: "maximize" }],
-        must_improve: [{ metric: "test_coverage", scope_key: "", min_absolute_delta: 0.01,
+        must_improve: [{ kind: "metric" as const, metric: "test_coverage", scope_key: "", min_absolute_delta: 0.01,
                          min_gap_fraction: 0.2, max_attempts: 2 }],
-        must_preserve: [{ metric: "row_validity", scope_key: "", operator: "at_least",
+        must_preserve: [{ kind: "metric" as const, metric: "row_validity", scope_key: "", operator: "at_least",
                           target: 1, tolerance: 0, direction: "maximize" }],
         command: { cmd: "node", args: ["-e", "require('fs').writeFileSync('src/a.ts','repaired')"] } },
       { id: "measure", owner: "ci", kind: "measurement", runtime: "script",
@@ -3964,9 +3981,9 @@ describe("dispatch protocol", () => {
       findings: ["f1"], scope_key: "section-03",
       reads: ["repair/a1/packet.json", "chapters/section-03.md"],
       owns: ["chapters/section-03.md"], writes: ["chapters/section-03.md"],
-      acceptance: [{ metric: "rendered_visual_review", scope_key: "", operator: "equals",
+      acceptance: [{ kind: "metric" as const, metric: "rendered_visual_review", scope_key: "", operator: "equals",
                      target: 1, tolerance: 0, direction: "maximize" }],
-      must_preserve: [{ metric: "claim_support", scope_key: "", operator: "at_least",
+      must_preserve: [{ kind: "metric" as const, metric: "claim_support", scope_key: "", operator: "at_least",
                         target: 0.9, tolerance: 0.000001, direction: "maximize" }],
       strategy_key: ["template", "finding_ids", "scope_key", "acceptance"],
     };
@@ -4146,7 +4163,7 @@ afterEach(async () => {
   while (dirs.length > 0) await fs.rm(dirs.pop()!, { recursive: true, force: true });
 });
 const STORE = ".malaclaw/observations";
-const criterion = { metric: "test_coverage", scope_key: "", operator: "at_least" as const,
+const criterion = { kind: "metric" as const, metric: "test_coverage", scope_key: "", operator: "at_least" as const,
                     target: 0.9, tolerance: 1e-6, direction: "maximize" as const };
 const record = (o: Record<string, unknown> = {}) => Observation.parse({
   metric: "test_coverage", scope_key: "", value: 0.5, evaluator: "coverage",
@@ -4155,7 +4172,7 @@ const record = (o: Record<string, unknown> = {}) => Observation.parse({
 });
 
 describe("observation binding", () => {
-  const expectation = { metric: "test_coverage", scope_key: "",
+  const expectation = { kind: "metric" as const, metric: "test_coverage", scope_key: "",
                         input_digest: "b".repeat(64), evaluator_digest: "a".repeat(64) };
 
   it("binds the before state by expected digests, not by newest", async () => {
@@ -4244,8 +4261,8 @@ describe("observation binding", () => {
       invocation_id: "i1", idempotency_key: "k", unit_key: "u", to: "measured",
       at: new Date().toISOString(), intended_effects: [], applied_effects: [],
       observation_bindings: {
-        before: [{ metric: "test_coverage", scope_key: "", record_id: "abc" }],
-        after: [{ metric: "test_coverage", scope_key: "", record_id: "def" }],
+        before: [{ kind: "metric" as const, metric: "test_coverage", scope_key: "", record_id: "abc" }],
+        after: [{ kind: "metric" as const, metric: "test_coverage", scope_key: "", record_id: "def" }],
       },
     }).success).toBe(true);
   });
@@ -4354,23 +4371,54 @@ Storage mirrors observations exactly: append-only under
 scope_key)` allocated by the kernel, never by the emitter. Ingestion rejects a
 result carrying a sequence, exactly as §2 requires for observations.
 
+**Selection is not "the latest".** Inputs move A → B → A: a manuscript is
+edited and reverted, a template is swapped back. Taking the highest sequence
+would return the stale B result and hide the A result that is currently valid,
+which is the same freshness bug §4 fixes for observations. `verificationsFor`
+resolves in this order:
+
+1. `verification_id`
+2. `scope_key`
+3. results whose `input_digest` equals the CURRENT input digest
+4. of those, results whose `verifier_digest` equals the CURRENT verifier digest
+5. of those, the highest sequence
+
+Steps 3 and 4 are filters, not tie-breakers, and a result failing either is not
+a candidate at all. `verifier_digest` must participate: a pass recorded by
+verifier code that has since changed says nothing about the check as it exists
+now, exactly as `evaluator_digest` governs a metric observation.
+
+Where the current digests come from is the verification request (Task 26), not
+the criterion — see the timing note on `VerificationCriterion`.
+
 - [ ] **Step 1: Write the failing test**
 
 Assert: an envelope with no sequence is accepted and sequenced on ingest; a
-result carrying its own sequence is rejected; `verificationsFor` returns the
-latest per `(verification_id, scope_key)`; a `deferred` result is never
-returned as an outcome to `evaluateContract`; an `unavailable` result without a
-reason is rejected; and a stored pass whose `input_digest` differs from the
-criterion's does not satisfy it.
+result carrying its own sequence is rejected; an `unavailable` result without a
+reason is rejected; and every selection rule above, specifically —
+
+- a stored pass whose `input_digest` differs from the current one is not
+  selected;
+- a stored pass whose `verifier_digest` differs from the current one is not
+  selected, even when its `input_digest` matches;
+- **A → B → A**: with three results in sequence order for digests A, B, A, the
+  first A result is selected over the later B one when the current digest is A;
+- `deferred` reaches `evaluateContract` as `pending_verification`, not as a
+  measurement failure;
+- `unavailable` reaches it as `measurement_failed`;
+- `failed` reaches it as `unmet`, not as an absent result.
 
 - [ ] **Step 2: Run it, then implement until it passes**
 
 - [ ] **Step 3: Feed results into contract evaluation**
 
 `runContract` builds `input.verifications` from `verificationsFor` over the
-unit's acceptance criteria, mapping `passed`/`failed` to a
-`VerificationOutcome` and leaving `deferred`/`unavailable` absent — absence is
-`measurement_failed`, which is the honest answer for a check nobody ran.
+unit's acceptance criteria, **preserving the status**: `passed`, `failed`,
+`deferred` and `unavailable` each travel through to `evaluateContract`, which
+maps them to `accepted`, `unmet`, `pending_verification` and
+`measurement_failed` respectively. Only a criterion with no result at all is
+absent from the map, and absence is `measurement_failed` — the honest answer
+for a check nobody ran and nobody explained.
 
 - [ ] **Step 4: Commit**
 
@@ -4386,9 +4434,17 @@ git commit -m "feat(kernel): store and sequence verification results alongside o
 - Modify: `src/lib/workflow/domain-dispatch.ts` (Task 22)
 - Test: `tests/verification-dispatch.test.ts`
 
-The kernel cannot run a verification. It emits a `verify` request naming the
-`verification_id`, the `scope_key` and the `input_digest` it needs a result
-against, and waits for the domain layer to append one.
+The kernel cannot run a verification. **After the attempt's effects are
+applied**, it emits a `verify` request naming the `verification_id` and
+`scope_key`, and the domain layer answers with a result carrying the
+`input_digest` and `verifier_digest` it observed at that moment.
+
+The ordering is the whole point. A criterion compiled before the repair cannot
+name the bytes the repair will produce, so freshness is bound here instead: the
+request gets a `request_id`, the attempt journal records it against the action,
+and only a result carrying that `request_id` can satisfy the criterion. A
+result left over from an earlier attempt answers an earlier request and is
+never eligible for this one.
 
 A request whose `verification_id` the domain layer does not recognise is a
 **hard failure at dispatch**, not a silent skip: a criterion nobody can verify
@@ -4398,10 +4454,13 @@ than refusing at the start.
 - [ ] **Step 1: Write the failing test**
 
 Assert: a unit with a verification criterion emits exactly one `verify`
-request per `(verification_id, scope_key)`; the request carries the
-post-mutation `input_digest`, not the pre-mutation one; an unrecognised
-`verification_id` fails the dispatch with a message naming it; and a result
-appended for a different digest does not close the request.
+request per `(verification_id, scope_key)`, and only after its effects are
+applied; the result records the POST-effect `input_digest`, so re-running the
+same criterion against the pre-effect bytes does not satisfy it; an
+unrecognised `verification_id` fails the dispatch with a message naming it; a
+result carrying a different `request_id` does not close the request; and the
+attempt journal binds request to action so a later attempt cannot inherit an
+earlier answer.
 
 - [ ] **Step 2: Run it, then implement until it passes**
 

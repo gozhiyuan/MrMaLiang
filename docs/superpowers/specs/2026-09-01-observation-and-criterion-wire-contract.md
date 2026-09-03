@@ -161,10 +161,22 @@ when a named check re-runs clean over the same inputs:
   "kind": "verification",
   "verification_id": "figure_references",
   "scope_key": "",
-  "input_digest": "9f2c…",
   "expect_pass": true
 }
 ```
+
+A verification criterion carries **no digest**. It is compiled before the
+repair runs, and the bytes it must be checked against do not exist yet.
+Freshness is bound after the effects are applied: the kernel issues a
+verification request, the domain layer answers with the `input_digest` and
+`verifier_digest` it observed at that moment, and only a result bound to that
+request satisfies the criterion.
+
+Selecting a stored result resolves by `verification_id`, then `scope_key`, then
+results matching the CURRENT `input_digest`, then those matching the current
+`verifier_digest`, then the highest sequence. The digest steps are filters, not
+tie-breakers: inputs move A → B → A, and "the latest result" would return the
+stale B one while a currently valid A result sits behind it.
 
 Not every real defect has a number. A missing figure reference, a layout fault,
 a page limit and an under-length manuscript are all repairable and none is
