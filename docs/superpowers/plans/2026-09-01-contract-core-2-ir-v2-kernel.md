@@ -344,7 +344,11 @@ Add to `src/lib/schema.ts`, above `workUnitFields`:
  * knows `verification_id` is an opaque string it hands back to the domain
  * layer, and nothing about what a paper "gate" is. */
 export const MetricCriterion = z.object({
-  kind: z.literal("metric").default("metric"),
+  /** Explicit, never defaulted. `z.discriminatedUnion` reads the discriminant
+   * BEFORE applying any member's defaults, so an object omitting `kind` fails
+   * to match any arm and is rejected outright. Every fixture and every
+   * compiler output states it. */
+  kind: z.literal("metric"),
   metric: z.string().min(1),
   /** Canonical scope; the empty string means workspace-global. */
   scope_key: z.string().default(""),
@@ -427,7 +431,9 @@ Add to `workUnitFields`:
   evaluate_with: z.array(workflowId).default([]),
   acceptance: z.array(Criterion).default([]),
   must_improve: z.array(MustImprove).default([]),
-  must_preserve: z.array(Criterion).default([]),
+  // Metric objectives only: preservation is measured as a value that must not
+  // regress, and a verification either passes or does not.
+  must_preserve: z.array(MetricCriterion).default([]),
   strategy: Strategy.optional(),
 ```
 
@@ -1997,34 +2003,34 @@ Create `fixtures/wire-contract/v1/arithmetic.json` covering wire contract §7: `
 ```json
 [
   { "name": "at_least reaches target",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.9, "tolerance": 0.000001, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.9, "tolerance": 0.000001, "direction": "maximize" },
     "before": 0.5, "after": 0.95, "expect": "accepted" },
   { "name": "at_least within float tolerance",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.3, "tolerance": 0.000001, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.3, "tolerance": 0.000001, "direction": "maximize" },
     "before": 0.1, "after": 0.30000000000000004, "expect": "accepted" },
   { "name": "at_least improves short of target",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.9, "tolerance": 0.000001, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.9, "tolerance": 0.000001, "direction": "maximize" },
     "before": 0.5, "after": 0.6, "expect": "improved" },
   { "name": "at_most reduces a defect count",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_most", "target": 0, "tolerance": 0, "direction": "minimize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_most", "target": 0, "tolerance": 0, "direction": "minimize" },
     "before": 10, "after": 5, "expect": "improved" },
   { "name": "at_most reaches zero",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_most", "target": 0, "tolerance": 0, "direction": "minimize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_most", "target": 0, "tolerance": 0, "direction": "minimize" },
     "before": 3, "after": 0, "expect": "accepted" },
   { "name": "equals starting below moves closer",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
     "before": 0, "after": 2, "expect": "improved" },
   { "name": "equals starting above moves closer",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
     "before": 8, "after": 6, "expect": "improved" },
   { "name": "equals moves away",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
     "before": 3, "after": 1, "expect": "unmet" },
   { "name": "equals reaches target",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "equals", "target": 4, "tolerance": 0, "direction": "maximize" },
     "before": 2, "after": 4, "expect": "accepted" },
   { "name": "already satisfied before the attempt",
-    "criterion": { "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.5, "tolerance": 0.000001, "direction": "maximize" },
+    "criterion": { "kind": "metric", "metric": "m", "scope_key": "", "operator": "at_least", "target": 0.5, "tolerance": 0.000001, "direction": "maximize" },
     "before": 0.7, "after": 0.7, "expect": "accepted" }
 ]
 ```
@@ -2034,7 +2040,7 @@ Create `fixtures/wire-contract/v1/arithmetic.json` covering wire contract §7: `
 Create `src/lib/workflow/acceptance.ts`:
 
 ```ts
-import { isMetricCriterion, type Criterion, type MetricCriterion, type MustImprove } from "../schema.js";
+import { isMetricCriterion, type Criterion, type MetricCriterion, type MustImprove, type VerificationCriterion } from "../schema.js";
 import type { ContractOutcome } from "./outcomes.js";
 import { snapshotKey } from "./observations.js";
 
@@ -2068,9 +2074,15 @@ export function absoluteProgress(criterion: MetricCriterion, before: number, aft
 }
 
 export type ContractInput = {
+  /** Both kinds. Partitioned below before anything numeric happens. */
   acceptance: Criterion[];
+  /** Metric objectives only. "Improve by 30% of the remaining gap" has no
+   * meaning for a check that either passes or does not. */
   must_improve: MustImprove[];
-  must_preserve: Criterion[];
+  /** Metric objectives only, for the same reason: preservation is measured as
+   * a value that must not regress. A verification that must keep passing is
+   * expressed as an acceptance criterion on the unit that could break it. */
+  must_preserve: MetricCriterion[];
   /** metric+scope -> value. Keys come from snapshotKey(). */
   before: Map<string, number>;
   after: Map<string, number>;
@@ -2079,9 +2091,39 @@ export type ContractInput = {
   pending: string[];
   /** Keys whose measurement failed outright. */
   unavailable: string[];
+  /** Verification outcomes recorded after the attempt, keyed by
+   * verificationKey(). A verification with no entry has not been re-run, which
+   * is measurement_failed rather than a pass. */
+  verifications: Map<string, VerificationOutcome>;
+};
+
+/** What the kernel knows about one verification. It never runs one itself and
+ * never interprets `verification_id`; the domain layer records this. */
+export type VerificationOutcome = {
+  passed: boolean;
+  /** What it ran against. A pass recorded against different inputs is stale
+   * and does not satisfy the criterion — the same freshness rule observations
+   * follow. */
+  input_digest: string;
 };
 
 const key = (criterion: { metric: string; scope_key: string }) => snapshotKey(criterion.metric, criterion.scope_key);
+
+/** Verification identity, kept separate from the metric keyspace so a
+ * verification_id can never collide with a metric name. */
+export const verificationKey = (criterion: VerificationCriterion): string =>
+  `verification:${criterion.verification_id}:${criterion.scope_key}`;
+
+/** A fresh, matching pass. Anything else — absent, stale, failed — is not a
+ * satisfied criterion. */
+function verificationSatisfied(
+  criterion: VerificationCriterion, outcomes: Map<string, VerificationOutcome>,
+): "satisfied" | "unsatisfied" | "missing" {
+  const outcome = outcomes.get(verificationKey(criterion));
+  if (!outcome) return "missing";
+  if (outcome.input_digest !== criterion.input_digest) return "missing";
+  return outcome.passed === criterion.expect_pass ? "satisfied" : "unsatisfied";
+}
 
 /** The kernel knows nothing about what any metric means; it compares numbers
  * against compiled criteria and returns a typed outcome. */
@@ -2090,6 +2132,13 @@ export function evaluateContract(input: ContractInput): ContractOutcome {
     return "not_applicable";
   }
 
+  // Partition once, before anything numeric happens. Every arithmetic path
+  // below sees only metric criteria, so a verification criterion can never
+  // reach snapshotKey() or satisfies().
+  const metricAcceptance = input.acceptance.filter(isMetricCriterion);
+  const verifyAcceptance = input.acceptance.filter(
+    (criterion): criterion is VerificationCriterion => criterion.kind === "verification");
+
   // A protected metric with no observation has not been preserved; it is
   // unknown. Reporting that as a pass is the failure this rule exists to stop.
   const protectedMissing = input.must_preserve.filter((criterion) => !input.after.has(key(criterion)));
@@ -2097,7 +2146,7 @@ export function evaluateContract(input: ContractInput): ContractOutcome {
     const after = input.after.get(key(criterion));
     return after !== undefined && !satisfies(criterion, after);
   });
-  const advanced = input.acceptance.some((criterion) => {
+  const advanced = metricAcceptance.some((criterion) => {
     const before = input.before.get(key(criterion));
     const after = input.after.get(key(criterion));
     if (before === undefined || after === undefined) return false;
@@ -2109,18 +2158,25 @@ export function evaluateContract(input: ContractInput): ContractOutcome {
   if (regressed) return advanced ? "partially_improved_with_regression" : "regressed";
   if (protectedMissing.length > 0) return "measurement_failed";
 
-  const required = [...input.acceptance, ...input.must_improve].map(key);
+  // must_improve names metric objectives, so its keys join the metric ones.
+  const required = [...metricAcceptance, ...input.must_improve].map(key);
   if (required.some((k) => input.unavailable.includes(k))) return "measurement_failed";
   if (required.some((k) => input.pending.includes(k))) return "pending_verification";
   if (required.some((k) => !input.after.has(k))) return "measurement_failed";
 
-  if (input.acceptance.every((criterion) => satisfies(criterion, input.after.get(key(criterion))!))) {
+  // A verification that was never re-run, or whose recorded pass is against
+  // stale inputs, is an unknown rather than a pass.
+  const verified = verifyAcceptance.map((criterion) => verificationSatisfied(criterion, input.verifications));
+  if (verified.includes("missing")) return "measurement_failed";
+
+  const metricsMet = metricAcceptance.every((criterion) => satisfies(criterion, input.after.get(key(criterion))!));
+  if (metricsMet && verified.every((state) => state === "satisfied")) {
     return "accepted";
   }
 
   let anyImproved = false;
   for (const policy of input.must_improve) {
-    const criterion = input.acceptance.find((candidate) => key(candidate) === key(policy));
+    const criterion = metricAcceptance.find((candidate) => key(candidate) === key(policy));
     if (!criterion) continue;
     const before = input.before.get(key(policy)) ?? 0;
     const after = input.after.get(key(policy))!;
@@ -4240,6 +4296,119 @@ Expected: PASS, 6 + 8 tests.
 ```bash
 git add src/lib/workflow/observations.ts src/lib/workflow/measurements.ts src/lib/workflow/attempts.ts tests/contract-observation-binding.test.ts
 git commit -m "feat(workflow): bind before and after observation records to each attempt"
+```
+
+---
+
+### Task 25: Verification results — a domain-neutral outcome contract
+
+**Files:**
+- Modify: `src/lib/schema.ts`
+- Create: `src/lib/workflow/verifications.ts`
+- Test: `tests/verification-results.test.ts`
+
+**Interfaces:**
+- Consumes: `VerificationCriterion` (Task 2); `appendObservation`/sequencing (Task 7).
+- Produces: `VerificationResult`; `VerificationEnvelope`; `appendVerification`; `verificationsFor`; `verificationKey`.
+
+A verification criterion is only as trustworthy as the record that satisfies
+it. Without a stored, sequenced outcome the kernel would have to take a
+verifier's word for a pass it never saw, which is exactly the gap the
+observation store closes for metrics.
+
+The kernel remains domain-neutral: `verification_id` is an opaque string it
+stores and compares, never interprets. It does not know what a gate is, cannot
+run one, and asks for one only through the domain dispatch protocol (Task 22).
+
+```ts
+export const VerificationResult = z.object({
+  verification_id: z.string().min(1),
+  scope_key: z.string().default(""),
+  status: z.enum(["passed", "failed", "unavailable", "deferred"]),
+  /** What it ran against. A result whose digest no longer matches the
+   * criterion is stale and satisfies nothing — the same rule §4 gives
+   * observations. */
+  input_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Identifies the verifier code, so a pass recorded by an older verifier is
+   * not silently treated as interchangeable with a newer one. */
+  verifier_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Operator prose. Never parsed, never routed on. */
+  diagnostic: z.string().max(8_000).optional(),
+  /** Required when status is unavailable, for the same reason a measurement
+   * must say why it could not be taken. */
+  reason: z.string().min(1).max(2_000).optional(),
+}).strict().superRefine((result, ctx) => {
+  if (result.status === "unavailable" && !result.reason) {
+    ctx.addIssue({ code: "custom", path: ["reason"], message: "an unavailable verification must state why" });
+  }
+});
+
+export const VerificationEnvelope = z.object({
+  version: z.literal(1),
+  results: z.array(VerificationResult).max(500),
+}).strict();
+```
+
+Storage mirrors observations exactly: append-only under
+`<observation_store>/verifications`, one sequence per `(verification_id,
+scope_key)` allocated by the kernel, never by the emitter. Ingestion rejects a
+result carrying a sequence, exactly as §2 requires for observations.
+
+- [ ] **Step 1: Write the failing test**
+
+Assert: an envelope with no sequence is accepted and sequenced on ingest; a
+result carrying its own sequence is rejected; `verificationsFor` returns the
+latest per `(verification_id, scope_key)`; a `deferred` result is never
+returned as an outcome to `evaluateContract`; an `unavailable` result without a
+reason is rejected; and a stored pass whose `input_digest` differs from the
+criterion's does not satisfy it.
+
+- [ ] **Step 2: Run it, then implement until it passes**
+
+- [ ] **Step 3: Feed results into contract evaluation**
+
+`runContract` builds `input.verifications` from `verificationsFor` over the
+unit's acceptance criteria, mapping `passed`/`failed` to a
+`VerificationOutcome` and leaving `deferred`/`unavailable` absent — absence is
+`measurement_failed`, which is the honest answer for a check nobody ran.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git commit -m "feat(kernel): store and sequence verification results alongside observations"
+```
+
+---
+
+### Task 26: Requesting a verification through the dispatch protocol
+
+**Files:**
+- Modify: `src/lib/workflow/domain-dispatch.ts` (Task 22)
+- Test: `tests/verification-dispatch.test.ts`
+
+The kernel cannot run a verification. It emits a `verify` request naming the
+`verification_id`, the `scope_key` and the `input_digest` it needs a result
+against, and waits for the domain layer to append one.
+
+A request whose `verification_id` the domain layer does not recognise is a
+**hard failure at dispatch**, not a silent skip: a criterion nobody can verify
+can never be satisfied, and discovering that at the end of a run is far worse
+than refusing at the start.
+
+- [ ] **Step 1: Write the failing test**
+
+Assert: a unit with a verification criterion emits exactly one `verify`
+request per `(verification_id, scope_key)`; the request carries the
+post-mutation `input_digest`, not the pre-mutation one; an unrecognised
+`verification_id` fails the dispatch with a message naming it; and a result
+appended for a different digest does not close the request.
+
+- [ ] **Step 2: Run it, then implement until it passes**
+
+- [ ] **Step 3: Commit**
+
+```bash
+git commit -m "feat(kernel): request verifications through the domain dispatch protocol"
 ```
 
 ---

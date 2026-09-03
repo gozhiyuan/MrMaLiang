@@ -242,10 +242,12 @@ describe("acceptance is per emitted finding, not per triple", () => {
     expect(find("recency")).toBe("cited_within_one_year_ratio");
     expect(find("acceptance")).toBe("accepted_cited_ratio");
     expect(find("venue-mix")).toBe("cited_arxiv_only_ratio");
-    // With no rendered PDF the density gate cannot be measured at all, so it
-    // reports a build failure rather than a citation shortfall; the
-    // citations_per_page binding is covered where a PDF exists.
-    expect(find("pdfinfo")).toBe("latex_build_status");
+    // With no rendered PDF the density gate cannot be measured at all. It is
+    // not a citation shortfall and not an operator problem either: the build
+    // stage that renders the PDF has simply not run, so nothing is emitted and
+    // the reason is carried on the check.
+    expect(find("citation-density")).toBeUndefined();
+    expect(find("pdfinfo")).toBeUndefined();
   });
 
   it("emits distinct acceptance metrics from one compound gate", async () => {

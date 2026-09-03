@@ -181,6 +181,16 @@ pins what the verification ran against, so a pass recorded before the artifacts
 changed cannot satisfy it afterwards — the same freshness rule §4 gives
 observations.
 
+`kind` is **always explicit**. A discriminated union reads the discriminant
+before applying any member's defaults, so a criterion omitting `kind` matches
+no arm and is rejected; the compiler emits it on every criterion it produces.
+
+`must_preserve` and `must_improve` carry metric criteria only. Preservation is
+measured as a value that must not regress and improvement as a fraction of a
+closed gap; neither has meaning for a check that passes or does not. A
+verification that must keep passing is expressed as an acceptance criterion on
+the unit that could break it.
+
 Arithmetic — gap closure, progress, tolerance — applies to metric criteria
 only. A verification criterion is satisfied or it is not; asking how much of it
 closed is meaningless, and a consumer must narrow on `kind` before computing.

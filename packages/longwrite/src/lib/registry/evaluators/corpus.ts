@@ -10,7 +10,18 @@ import type { ClassifiedSource } from "../../research/types.js";
 import { GLOBAL_SCOPE, scopeKey } from "../scope.js";
 
 export type EvaluatorContext = { workspaceDir: string; asOfDate: string };
-export type ScopedValue = { scope_key: string; value: number };
+export type ScopedValue = {
+  scope_key: string;
+  value: number;
+  /** The criterion this scope must meet, when only the evaluator can know it.
+   *
+   * A metric-wide target cannot serve a scope-varying objective:
+   * `citation_depth_per_section` has a different configured minimum for A, B
+   * and C, so the target belongs with the scope. Materialization reads it from
+   * the trusted observation rather than re-deriving it. */
+  operator?: "at_least" | "at_most" | "equals";
+  target?: number;
+};
 /** Returns an ARRAY of scoped values, so a scoped metric cannot accidentally
  * aggregate: reporting one number for a per-cell metric is not expressible. */
 export type EvaluatorFn = (ctx: EvaluatorContext) => Promise<ScopedValue[]>;
@@ -118,9 +129,12 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
     if (!config) throw new MeasurementUnavailable("longwrite.yaml is missing");
     const cited = await citedSources(ctx);
     const evidence = cited.filter(isCore);
+    const target = config.research.release_gates.min_cited_ab_sources_per_taxonomy_cell;
     return config.research.taxonomy.map((cell) => ({
       scope_key: scopeKey("taxonomy_cell", cell),
       value: evidence.filter((source) => sourceMatchesTaxonomy(source, cell)).length,
+      operator: "at_least" as const,
+      target,
     }));
   },
 
@@ -138,6 +152,8 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
       config.research.corpus_gates.min_sources_per_taxonomy_cell);
     return counts.map((row) => ({
       scope_key: scopeKey("taxonomy_cell", row.cell), value: row.source_count,
+      operator: "at_least" as const,
+      target: config.research.corpus_gates.min_sources_per_taxonomy_cell,
     }));
   },
 };

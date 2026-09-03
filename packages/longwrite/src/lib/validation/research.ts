@@ -4,6 +4,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { parseJsonl } from "../research/jsonl.js";
 import type { CitationPlanEntry, ClassifiedSource } from "../research/types.js";
+import type { PageCount } from "../registry/evaluators/manuscript.js";
 import { bibtexKey, bibtexKeys } from "../research/bibtex.js";
 import { computeCitationVerification, computeLiteratureQuality } from "../ops/research-quality.js";
 import { validateEvidenceLedger } from "../research/evidence.js";
@@ -219,14 +220,11 @@ export function isWithinOneCalendarYear(source: ClassifiedSource, asOf: string):
   return age >= 0 && age <= 1;
 }
 
-async function pdfPageCount(workspaceDir: string): Promise<number | null> {
-  try {
-    const { stdout } = await execFile("pdfinfo", [path.join(workspaceDir, "build", "manuscript.pdf")], { timeout: 10_000 });
-    const match = stdout.match(/^Pages:\s+(\d+)\s*$/m);
-    return match ? Number(match[1]) : null;
-  } catch {
-    return null;
-  }
+/** The same typed page-count the measurement path uses, so the gate and the
+ * observation agree about why a count could not be taken. */
+async function pdfPageCount(workspaceDir: string): Promise<PageCount> {
+  const { pdfPageCount: typed } = await import("../registry/evaluators/manuscript.js");
+  return typed(workspaceDir);
 }
 
 /** These gates deliberately inspect only sources actually cited in chapter
@@ -268,11 +266,18 @@ async function checkCitedLiteratureReleaseGates(
    * nothing better is more retrieval the right move. */
   const citeOrAcquire = (
     subject: string, metric: string, diagnostic: string, qualifies: (source: ClassifiedSource) => boolean,
+    needed = 1,
   ): Finding => {
-    const available = sources.some((source) => !cited.has(source.id) && qualifies(source));
-    return available
-      ? prose(subject, metric, `${diagnostic}; the corpus already holds uncited sources that would satisfy this`)
-      : corpus(subject, metric, `${diagnostic}; the corpus holds no uncited source that would satisfy this`);
+    const available = sources.filter((source) => !cited.has(source.id) && qualifies(source)).length;
+    // `needed` is exact for a count objective and 1 for a ratio, where any
+    // qualifying citation moves the numerator but the number required to reach
+    // the threshold depends on what else is cited. The diagnostic says only
+    // what was checked: enough to close the gap, or enough to improve.
+    return available >= needed
+      ? prose(subject, metric, needed > 1
+          ? `${diagnostic}; the corpus holds ${available} uncited qualifying source(s), enough to close this gap`
+          : `${diagnostic}; the corpus holds ${available} uncited qualifying source(s) that would improve this`)
+      : corpus(subject, metric, `${diagnostic}; the corpus holds ${available} uncited qualifying source(s), short of the ${needed} needed`);
   };
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   if (!config || !isFullResearchMode(config.project.mode)) {
@@ -289,8 +294,10 @@ async function checkCitedLiteratureReleaseGates(
   const cited = citedSourceIds(chapters);
   const citedSources = [...cited].map((id) => byId.get(id)).filter((source): source is ClassifiedSource => Boolean(source));
   const findings: Finding[] = [];
+  const unmeasured: string[] = [];
   if (citedSources.length < gates.min_cited_sources) {
-    findings.push(citeOrAcquire("cited-count", "cited_sources", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`, isCoreSource));
+    findings.push(citeOrAcquire("cited-count", "cited_sources", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`, isCoreSource,
+      gates.min_cited_sources - citedSources.length));
   }
   const accepted = citedSources.filter(isAcceptedSource).length;
   const acceptedRatio = accepted / Math.max(1, citedSources.length);
@@ -309,21 +316,34 @@ async function checkCitedLiteratureReleaseGates(
   }
   if (gates.min_citations_per_page > 0) {
     const pages = await pdfPageCount(workspaceDir);
-    if (pages === null) {
-      // Adding citations cannot fix a manuscript that was never rendered.
+    if (pages.kind === "missing_tool") {
+      // The one case an operator must act on: nothing here installs Poppler.
       findings.push(rFinding({
         gate: GATE, kind: "toolchain", effect: "repair_toolchain", subject: "pdfinfo",
         acceptance_metric: metricId("latex_build_status"), severity: "critical",
-        diagnostic: "cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf",
+        diagnostic: `citation density cannot be measured: ${pages.reason}`,
       }));
+    } else if (pages.kind === "invalid") {
+      // The PDF exists and is broken, which the build owns rather than an
+      // operator; the layout that produced it is the editable surface.
+      findings.push(rFinding({
+        gate: GATE, kind: "figure_spec", effect: "repair_artifact_placement", subject: "manuscript-pdf",
+        acceptance_metric: metricId("latex_build_status"),
+        diagnostic: `citation density cannot be measured: ${pages.reason}`,
+      }));
+    } else if (pages.kind !== "ok") {
+      // Not built yet, or a transient measurement failure. manuscript_build
+      // already owns "the PDF is missing"; re-reporting it here would pause a
+      // run for an operator on something the next build stage fixes itself.
+      unmeasured.push(`citation density not measured: ${pages.reason}`);
     } else {
       // This gate is explicitly configured as *citations* per page. Counting
       // unique bibliography entries here made a long paper require an
       // impossible number of distinct sources even when it cited its evidence
       // appropriately throughout the prose.
       const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
-      const density = citationCount / Math.max(1, pages);
-      if (density < gates.min_citations_per_page) findings.push(prose("citation-density", "citations_per_page", `citation density ${density.toFixed(2)} per page (${citationCount}/${pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`));
+      const density = citationCount / Math.max(1, pages.pages);
+      if (density < gates.min_citations_per_page) findings.push(prose("citation-density", "citations_per_page", `citation density ${density.toFixed(2)} per page (${citationCount}/${pages.pages}) is below configured ${gates.min_citations_per_page.toFixed(2)}`));
     }
   }
   for (const chapter of chapters) {
@@ -359,11 +379,14 @@ async function checkCitedLiteratureReleaseGates(
       }
     }
   }
-  const pages = gates.min_citations_per_page > 0 ? await pdfPageCount(workspaceDir) : null;
+  const measured = gates.min_citations_per_page > 0 ? await pdfPageCount(workspaceDir) : null;
+  const pages = measured?.kind === "ok" ? measured.pages : null;
   const citationCount = chapters.reduce((total, chapter) => total + markers(chapter.content).length, 0);
   const citationDensity = pages === null ? undefined : citationCount / Math.max(1, pages);
   const summary = `cited=${citedSources.length}; citations=${citationCount}; citation_density=${citationDensity === undefined ? "not measured" : citationDensity.toFixed(2)}; within_1yr=${withinOneYear}/${citedSources.length}; accepted=${accepted}/${citedSources.length}; arxiv_only=${arxivOnly}/${citedSources.length}; pages=${pages ?? "not measured"}`;
-  return checkOf(GATE, findings, summary);
+  // Anything that could not be measured is reported for the operator without
+  // being turned into a repair request for a defect nobody has observed.
+  return checkOf(GATE, findings, [summary, ...unmeasured].join("; "));
 }
 
 function sectionIdFromChapter(rel: string): string {

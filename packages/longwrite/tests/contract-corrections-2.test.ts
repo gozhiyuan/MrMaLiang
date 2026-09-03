@@ -170,14 +170,14 @@ describe("routes select actions that can move their metric", () => {
     expect(finding?.artifact.kind).toBe("corpus");
   });
 
-  it("treats an unreadable PDF as a build failure, not a citation shortfall", async () => {
+  it("treats an unreadable PDF as a build concern, not a citation shortfall", async () => {
     const ws = await citedWorkspace([source("a1", "A")], { "section-01.md": "[source:a1:p1]\n" },
       { min_citations_per_page: 3 });
-    const finding = (await findingsOf(ws, "cited_literature_release_gates"))
-      .find((f) => f.diagnostic.includes("pdfinfo"));
-    // Adding citations cannot fix a manuscript that was never rendered.
-    expect(finding?.artifact.kind).toBe("toolchain");
-    expect(finding?.required_effect).toBe("repair_toolchain");
+    const findings = await findingsOf(ws, "cited_literature_release_gates");
+    // Adding citations cannot fix a manuscript that was never rendered — and
+    // neither can an operator, when the build stage simply has not run yet.
+    expect(findings.some((f) => f.acceptance_metric === "citations_per_page")).toBe(false);
+    expect(findings.some((f) => f.artifact.kind === "toolchain")).toBe(false);
   });
 });
 

@@ -119,8 +119,15 @@ export async function buildEnvelope(
 
     try {
       const scoped = await evaluator({ workspaceDir, asOfDate: options.asOfDate });
-      for (const { scope_key, value } of scoped) {
-        measurements.push({ ...common, scope_key, status: "measured", value });
+      for (const result of scoped) {
+        // A scoped target overrides the metric-wide one. It is the only place
+        // a scope-varying objective can come from: A, B and C depth have
+        // different configured minima, so there is no single metric target.
+        measurements.push({
+          ...common, scope_key: result.scope_key, status: "measured", value: result.value,
+          ...(result.target === undefined ? {} : { target: result.target }),
+          ...(result.operator === undefined ? {} : { operator: result.operator }),
+        });
       }
     } catch (error) {
       if (!(error instanceof MeasurementUnavailable)) throw error;

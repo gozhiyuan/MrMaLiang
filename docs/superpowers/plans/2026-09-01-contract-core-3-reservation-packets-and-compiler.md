@@ -1160,6 +1160,20 @@ export async function writeRepairPacket(
 }
 ```
 
+**Targets travel with the observation.** A scoped evaluator result carries its
+own `operator` and `target` (Plan 1), because only the evaluator can know what
+a scope-varying objective requires. Materialization reads them from the trusted
+observation rather than re-deriving them, and refuses to compile a criterion
+for a scoped metric whose observation carries no target — a criterion with an
+invented target is worse than no action at all.
+
+**The packet renders both criterion arms.** The repair packet schema imports
+the wire `Criterion` union directly rather than restating a metric-only shape,
+and the prompt renderer narrows on `kind`: a metric criterion renders as
+"metric, operator, target, current value"; a verification criterion renders as
+"this check must pass again over these artifacts". Accessing `.metric` or
+`.target` unconditionally would reject or crash on the verification arm.
+
 `acceptanceForFindings` derives one criterion per distinct
 `(acceptance_metric, objective_scope_key)` pair carried by the findings —
 **never** one per gate.
@@ -1178,7 +1192,9 @@ routes have no registered metric, several reachable in a flagship run: figure
 references, publication layout, target length, page limits. These are real
 defects with no numeric objective, so they take a **verification criterion**
 rather than a metric criterion: the action is accepted when the emitting gate
-re-runs clean over the named artifacts. A packet may carry both kinds; it must
+re-runs clean over the named artifacts. `verification_id` is the gate id, and
+Task 21 registers one runnable verifier per such gate, with a coverage test
+that fails if any is missing and materialization refusing an unknown id. A packet may carry both kinds; it must
 never invent a metric for a `null` finding, and it must never be materialized
 with an empty acceptance list.
 
@@ -1943,7 +1959,7 @@ treats as a durable pause rather than a dispatchable repair.
 cast. `buildRepairPacket` filters operator targets out before that point, so the
 narrower type is the accurate one rather than an assertion.
 
-Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from each distinct `(acceptance_metric, objective_scope_key)` pair the findings carry — a metric criterion where the metric is non-null, a gate-re-run verification criterion where it is `null` — rejecting a packet that would carry no acceptance at all, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
+Create `action-instance.ts` implementing wire contract §8: resolve the template from the findings' triples, take `scope_key` from the findings' declared `objective_scope_key` (rejecting a set whose scopes disagree — **never** inferring it from an artifact path), narrow `owns` to the named artifact paths, compile `acceptance` from each distinct `(acceptance_metric, objective_scope_key)` pair the findings carry, taking `operator`, `target`, `tolerance` and `direction` from the **current trusted observation for that exact scope** — never from a metric-wide default, because a scope-varying objective such as `citation_depth_per_section` has a different configured minimum for A, B and C — and failing closed before dispatch when a scoped observation carries no target — a metric criterion where the metric is non-null, a gate-re-run verification criterion where it is `null` — rejecting a packet that would carry no acceptance at all, compile `must_preserve` from the template's protected metrics plus their current observations with `tolerance` and `direction` from the metric registry, set `reads` to the packet plus the owned artifacts plus the evidence they cite, and call `buildRepairPacket`/`writeRepairPacket`. Register `research materialize-action <workspace>` in `src/cli.ts`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -3101,6 +3117,105 @@ Expected: PASS.
 ```bash
 git add packages/longwrite/src/lib/research/reservation.ts packages/longwrite/src/lib/research/targets.ts packages/longwrite/src/lib/research/semantic-screen.ts packages/longwrite/src/lib/research/fulltext.ts packages/longwrite/src/lib/research/evidence.ts packages/longwrite/tests/selector-eligibility.test.ts
 git commit -m "feat(research): scope reservation by target lifecycle and section allocation"
+```
+
+---
+
+### Task 21: The verifier registry
+
+**Files:**
+- Create: `packages/longwrite/src/lib/registry/verifiers.ts`
+- Test: `packages/longwrite/tests/registry-verifiers.test.ts`
+
+**Interfaces:**
+- Consumes: `PRODUCERS`/`REGISTRY`; each producer's entry point.
+- Produces: `VERIFIERS: Record<string, VerifierFn>`; `VERIFIER_VERSION`; `runVerification`.
+
+Every finding whose `acceptance_metric` is `null` gets a verification
+criterion, and a verification criterion is worthless without something that can
+re-run it. Roughly twenty declared routes are in this position, several
+reachable in a flagship run.
+
+`verification_id` **is the gate id**. That is the only choice that keeps the
+criterion checkable: the thing being re-verified is precisely the gate that
+emitted the finding, and any other naming would need a second mapping that
+could drift from the first.
+
+```ts
+export type VerifierResult = { passed: boolean; diagnostic?: string };
+export type VerifierFn = (ctx: { workspaceDir: string; scopeKey: string }) => Promise<VerifierResult>;
+```
+
+A verifier runs its producer and reports whether that one gate passed. It never
+re-runs the whole validator's decision, and it never invents a pass for a gate
+it could not reach — an error is `unavailable`, not `failed`, because "the
+check could not run" and "the check found a defect" send a round in different
+directions.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/registry-verifiers.test.ts` asserting:
+
+```ts
+it("registers exactly one verifier for every gate that can emit a null-metric finding", () => {
+  const needsVerifier = new Set<string>();
+  for (const producer of PRODUCERS) {
+    for (const gate of producer.gates) {
+      for (const shape of gate.findings) {
+        if (shape.acceptance_metric === null) needsVerifier.add(String(gate.id));
+      }
+    }
+  }
+  const missing = [...needsVerifier].filter((gate) => typeof VERIFIERS[gate] !== "function").sort();
+  // A null-metric finding with no verifier produces an action whose acceptance
+  // nothing can ever satisfy.
+  expect(missing, `gates with no verifier: ${missing.join(", ")}`).toEqual([]);
+});
+
+it("registers no verifier for a gate that never emits a null-metric finding", () => {
+  // A verifier nobody can request is dead code that will drift.
+  const declared = new Set(PRODUCERS.flatMap((p) => p.gates
+    .filter((gate) => gate.findings.some((shape) => shape.acceptance_metric === null))
+    .map((gate) => String(gate.id))));
+  expect(Object.keys(VERIFIERS).filter((id) => !declared.has(id)).sort()).toEqual([]);
+});
+
+it("reports an unreachable verifier as unavailable, never as a pass", async () => {
+  await expect(runVerification("figure_references", { workspaceDir: bare, scopeKey: "" }))
+    .resolves.toMatchObject({ status: "unavailable" });
+});
+
+it("passes only when the gate it names actually passes", async () => {
+  expect((await runVerification("figure_references", { workspaceDir: clean, scopeKey: "" })).status).toBe("passed");
+  expect((await runVerification("figure_references", { workspaceDir: broken, scopeKey: "" })).status).toBe("failed");
+});
+```
+
+- [ ] **Step 2: Run it, then implement until it passes**
+
+If a gate turns out to have no runnable verifier, change its declaration to
+name a metric or stop emitting the finding — do not register a verifier that
+always passes. This test exists to force that decision.
+
+- [ ] **Step 3: Reject unknown verification ids at materialization**
+
+`materializeAction` refuses a packet whose verification criterion names an id
+absent from `VERIFIERS`, with a message naming the id and the gate. Failing at
+materialization is the last point where the run can still be told the truth.
+
+- [ ] **Step 4: End-to-end rehearsal**
+
+Add `packages/longwrite/tests/verification-round-trip.test.ts`: a workspace
+where `figure_references` fails → materialize the action → apply the repair to
+`figures/placement-plan.json` → re-run the verifier → the result carries the
+POST-repair `input_digest` and passes → contract evaluation accepts. Then
+assert the pre-repair pass, replayed against the post-repair digest, does
+**not** accept: a stale pass must never satisfy a fresh criterion.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit -m "feat(registry): add the verifier registry behind null-metric criteria"
 ```
 
 ---

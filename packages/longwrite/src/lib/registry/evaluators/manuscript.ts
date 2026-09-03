@@ -9,6 +9,7 @@ import {
 } from "../../research/landmark.js";
 import type { ClassifiedSource } from "../../research/types.js";
 import { GLOBAL_SCOPE, sectionDepthScope } from "../scope.js";
+import { loadProjectConfigIfExists } from "../../project-config.js";
 import { MeasurementUnavailable, type EvaluatorContext, type EvaluatorFn, type ScopedValue } from "./corpus.js";
 
 const global = (value: number): ScopedValue[] => [{ scope_key: GLOBAL_SCOPE, value }];
@@ -39,22 +40,41 @@ async function chapters(ctx: EvaluatorContext): Promise<Array<{ rel: string; con
   return found;
 }
 
-/** `pdfinfo` on a built manuscript. Absent means the measurement cannot be
- * taken, not that the density is zero — a paper with no PDF has no pages, and
- * dividing by that is a fabricated number rather than a small one. */
-async function pdfPageCount(workspaceDir: string): Promise<number> {
+/** Why a page count could not be taken, if it could not.
+ *
+ * Four different failures used to collapse into one null, and they need four
+ * different responses: an operator installs a tool, a build stage renders a
+ * PDF, a repair fixes a broken one, and a measurement failure is neither. A
+ * missing build that pauses for an operator is a run that stalls on something
+ * it could have done itself. */
+export type PageCount =
+  | { kind: "ok"; pages: number }
+  | { kind: "missing_tool"; reason: string }
+  | { kind: "not_built"; reason: string }
+  | { kind: "invalid"; reason: string }
+  | { kind: "error"; reason: string };
+
+export async function pdfPageCount(workspaceDir: string): Promise<PageCount> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const run = promisify(execFile);
   const pdf = path.join(workspaceDir, "build", "manuscript.pdf");
   if ((await fs.stat(pdf).catch(() => null)) === null) {
-    throw new MeasurementUnavailable("build/manuscript.pdf has not been rendered");
+    return { kind: "not_built", reason: "build/manuscript.pdf has not been rendered" };
   }
-  const { stdout } = await run("pdfinfo", [pdf], { timeout: 10_000 })
-    .catch(() => { throw new MeasurementUnavailable("pdfinfo could not read build/manuscript.pdf"); });
+  let stdout: string;
+  try {
+    ({ stdout } = await run("pdfinfo", [pdf], { timeout: 10_000 }));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { kind: "missing_tool", reason: "pdfinfo is not installed; install Poppler" };
+    if (code === "ETIMEDOUT" || code === "ABORT_ERR") return { kind: "error", reason: "pdfinfo timed out" };
+    // pdfinfo ran and refused the file: the PDF itself is the problem.
+    return { kind: "invalid", reason: `pdfinfo could not read build/manuscript.pdf: ${code ?? String(error)}` };
+  }
   const match = stdout.match(/^Pages:\s+(\d+)\s*$/m);
-  if (!match) throw new MeasurementUnavailable("pdfinfo reported no page count");
-  return Number(match[1]);
+  if (!match) return { kind: "invalid", reason: "pdfinfo reported no page count" };
+  return { kind: "ok", pages: Number(match[1]) };
 }
 
 /** The section id is the chapter filename without its extension, which is the
@@ -95,6 +115,10 @@ export const MANUSCRIPT_EVALUATORS: Record<string, EvaluatorFn> = {
    * and four B-depth citations both report four. */
   citation_depth_per_section: async (ctx) => {
     const byId = new Map((await sources(ctx.workspaceDir)).map((source) => [source.id, source]));
+    const config = await loadProjectConfigIfExists(ctx.workspaceDir);
+    // Each depth has its own configured minimum, so the target travels with
+    // the scope rather than being one number for the whole metric.
+    const targets = config?.research.release_gates.min_citation_depths_per_section ?? { A: 0, B: 0, C: 0 };
     return (await chapters(ctx)).flatMap((chapter) => {
       const cited = [...new Set(citationMarkers(chapter.content).map((marker) => marker.sourceId))]
         .map((id) => byId.get(id))
@@ -102,6 +126,8 @@ export const MANUSCRIPT_EVALUATORS: Record<string, EvaluatorFn> = {
       return (["A", "B", "C"] as const).map((depth) => ({
         scope_key: sectionDepthScope(sectionId(chapter.rel), depth),
         value: cited.filter((source) => source.citation_depth === depth).length,
+        operator: "at_least" as const,
+        target: targets[depth],
       }));
     });
   },
@@ -109,7 +135,9 @@ export const MANUSCRIPT_EVALUATORS: Record<string, EvaluatorFn> = {
   citations_per_page: async (ctx) => {
     const prose = await chapters(ctx);
     const total = prose.reduce((sum, chapter) => sum + citationMarkers(chapter.content).length, 0);
-    return global(ratio(total, await pdfPageCount(ctx.workspaceDir)));
+    const pages = await pdfPageCount(ctx.workspaceDir);
+    if (pages.kind !== "ok") throw new MeasurementUnavailable(pages.reason);
+    return global(ratio(total, pages.pages));
   },
 
   /** A gate status as a number the kernel can compare: 1 when every marker
