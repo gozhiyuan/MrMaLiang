@@ -83,16 +83,34 @@ describe("scoped criterion targets", () => {
 });
 
 describe("pdf page count failure categories", () => {
-  it("distinguishes a missing build from a missing tool", async () => {
+  /** A runner that fails the way a real one would, so each branch is exercised
+   * on any machine rather than only where Poppler happens to be installed. */
+  const failing = (code: string) => async () => {
+    const error: NodeJS.ErrnoException = new Error(`pdfinfo ${code}`);
+    error.code = code;
+    throw error;
+  };
+
+  it("reports a build that has not run, before ever invoking the tool", async () => {
     const ws = await workspace();
-    const notBuilt = await pdfPageCount(ws);
-    expect(notBuilt.kind).toBe("not_built");
+    let invoked = false;
+    const result = await pdfPageCount(ws, async () => { invoked = true; return ""; });
+    expect(result.kind).toBe("not_built");
+    // No point asking a tool about a file that is not there.
+    expect(invoked).toBe(false);
+  });
+
+  it("classifies each tool failure distinctly", async () => {
+    const ws = await workspace();
     await fs.mkdir(path.join(ws, "build"), { recursive: true });
     await fs.writeFile(path.join(ws, "build", "manuscript.pdf"), "not a pdf\n", "utf-8");
-    const broken = await pdfPageCount(ws);
-    // A corrupt PDF is a build defect; an absent one is a stage that has not
-    // run; neither is an operator installing software.
-    expect(["invalid", "missing_tool"]).toContain(broken.kind);
+    expect((await pdfPageCount(ws, failing("ENOENT"))).kind).toBe("missing_tool");
+    expect((await pdfPageCount(ws, failing("ETIMEDOUT"))).kind).toBe("error");
+    // pdfinfo ran and refused the file: the PDF itself is the problem.
+    expect((await pdfPageCount(ws, failing("EXIT1"))).kind).toBe("invalid");
+    // Ran fine but said nothing useful.
+    expect((await pdfPageCount(ws, async () => "Title: x\n")).kind).toBe("invalid");
+    expect(await pdfPageCount(ws, async () => "Pages:  12\n")).toEqual({ kind: "ok", pages: 12 });
   });
 
   it("does not ask an operator to fix a build that has not run yet", async () => {

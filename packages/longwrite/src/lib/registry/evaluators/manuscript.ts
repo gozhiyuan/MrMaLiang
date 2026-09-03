@@ -54,10 +54,21 @@ export type PageCount =
   | { kind: "invalid"; reason: string }
   | { kind: "error"; reason: string };
 
-export async function pdfPageCount(workspaceDir: string): Promise<PageCount> {
+/** Runs `pdfinfo`. Injectable so each failure branch can be tested without
+ * depending on whether the machine happens to have Poppler installed — the
+ * classification is the logic under test, not the local toolchain. */
+export type PdfInfoRunner = (pdfPath: string) => Promise<string>;
+
+async function defaultPdfInfo(pdfPath: string): Promise<string> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  const run = promisify(execFile);
+  const { stdout } = await promisify(execFile)("pdfinfo", [pdfPath], { timeout: 10_000 });
+  return stdout;
+}
+
+export async function pdfPageCount(
+  workspaceDir: string, runPdfInfo: PdfInfoRunner = defaultPdfInfo,
+): Promise<PageCount> {
   const pdf = path.join(workspaceDir, "build", "manuscript.pdf");
   try {
     await fs.stat(pdf);
@@ -72,7 +83,7 @@ export async function pdfPageCount(workspaceDir: string): Promise<PageCount> {
   }
   let stdout: string;
   try {
-    ({ stdout } = await run("pdfinfo", [pdf], { timeout: 10_000 }));
+    stdout = await runPdfInfo(pdf);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { kind: "missing_tool", reason: "pdfinfo is not installed; install Poppler" };

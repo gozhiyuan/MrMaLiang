@@ -172,11 +172,17 @@ verification request, the domain layer answers with the `input_digest` and
 `verifier_digest` it observed at that moment, and only a result bound to that
 request satisfies the criterion.
 
+A result carries the `request_id` it answers, and only the request this attempt
+issued can satisfy this attempt's criterion. Without that binding, a result
+recorded for the same gate and scope in an earlier attempt would satisfy a
+later one.
+
 Selecting a stored result resolves by `verification_id`, then `scope_key`, then
 results matching the CURRENT `input_digest`, then those matching the current
-`verifier_digest`, then the highest sequence. The digest steps are filters, not
-tie-breakers: inputs move A → B → A, and "the latest result" would return the
-stale B one while a currently valid A result sits behind it.
+`verifier_digest`, then the highest sequence among what remains. The digest
+steps are filters, not tie-breakers: inputs move A → B → A, so "the latest
+result" would return the stale B one while a currently valid A result sits
+behind it — and among several matching A results the newest is the answer.
 
 Not every real defect has a number. A missing figure reference, a layout fault,
 a page limit and an under-length manuscript are all repairable and none is

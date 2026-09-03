@@ -1191,9 +1191,11 @@ routes have no registered metric, several reachable in a flagship run: figure
 references, publication layout, target length, page limits. These are real
 defects with no numeric objective, so they take a **verification criterion**
 rather than a metric criterion: the action is accepted when the emitting gate
-re-runs clean over the named artifacts. `verification_id` is the gate id, and
-Task 21 registers one runnable verifier per such gate, with a coverage test
-that fails if any is missing and materialization refusing an unknown id. A packet may carry both kinds; it must
+re-runs clean over the named artifacts. `verification_id` is the gate id. Task 9a registers one runnable verifier per
+such gate — before the first materialization task, because
+`compileVerificationCriterion` and `materializeAction` both reference the
+registry — with a coverage test that fails if any is missing. Task 21 adds the
+materialization-time rejection of an unknown id and the round-trip rehearsal. A packet may carry both kinds; it must
 never invent a metric for a `null` finding, and it must never be materialized
 with an empty acceptance list.
 
@@ -1668,6 +1670,98 @@ git commit -m "feat(workflow): compile a diagnosis subflow reached by the diagno
 ---
 
 ## M5 — Templates and action instances
+
+### Task 9a: The verifier registry
+
+**Files:**
+- Create: `packages/longwrite/src/lib/registry/verifiers.ts`
+- Test: `packages/longwrite/tests/registry-verifiers.test.ts`
+
+**Interfaces:**
+- Consumes: `PRODUCERS`/`REGISTRY`; each producer's entry point.
+- Produces: `VERIFIERS: Record<string, VerifierFn>`; `VERIFIER_VERSION`; `runVerification`.
+
+**This task is a prerequisite for Task 10, not a follow-up.**
+`compileVerificationCriterion` and `materializeAction` both reference
+`VERIFIERS`, so building materialization first leaves the plan referring to a
+module that does not exist. It sits here, before the first materialization
+task, for that reason alone; the kernel-side integration and the end-to-end
+rehearsal stay in Task 21, which genuinely does depend on materialization.
+
+Every finding whose `acceptance_metric` is `null` gets a verification
+criterion, and a verification criterion is worthless without something that can
+re-run it. Roughly twenty declared routes are in this position, several
+reachable in a flagship run.
+
+`verification_id` **is the gate id**. That is the only choice that keeps the
+criterion checkable: the thing being re-verified is precisely the gate that
+emitted the finding, and any other naming would need a second mapping that
+could drift from the first.
+
+```ts
+export type VerifierResult = { passed: boolean; diagnostic?: string };
+export type VerifierFn = (ctx: { workspaceDir: string; scopeKey: string }) => Promise<VerifierResult>;
+```
+
+A verifier runs its producer and reports whether that one gate passed. It never
+re-runs the whole validator's decision, and it never invents a pass for a gate
+it could not reach — an error is `unavailable`, not `failed`, because "the
+check could not run" and "the check found a defect" send a round in different
+directions.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/longwrite/tests/registry-verifiers.test.ts` asserting:
+
+```ts
+it("registers exactly one verifier for every gate that can emit a null-metric finding", () => {
+  const needsVerifier = new Set<string>();
+  for (const producer of PRODUCERS) {
+    for (const gate of producer.gates) {
+      for (const shape of gate.findings) {
+        if (shape.acceptance_metric === null) needsVerifier.add(String(gate.id));
+      }
+    }
+  }
+  const missing = [...needsVerifier].filter((gate) => typeof VERIFIERS[gate] !== "function").sort();
+  // A null-metric finding with no verifier produces an action whose acceptance
+  // nothing can ever satisfy.
+  expect(missing, `gates with no verifier: ${missing.join(", ")}`).toEqual([]);
+});
+
+it("registers no verifier for a gate that never emits a null-metric finding", () => {
+  // A verifier nobody can request is dead code that will drift.
+  const declared = new Set(PRODUCERS.flatMap((p) => p.gates
+    .filter((gate) => gate.findings.some((shape) => shape.acceptance_metric === null))
+    .map((gate) => String(gate.id))));
+  expect(Object.keys(VERIFIERS).filter((id) => !declared.has(id)).sort()).toEqual([]);
+});
+
+it("reports an unreachable verifier as unavailable, never as a pass", async () => {
+  await expect(runVerification("figure_references", { workspaceDir: bare, scopeKey: "" }))
+    .resolves.toMatchObject({ status: "unavailable" });
+});
+
+it("passes only when the gate it names actually passes", async () => {
+  expect((await runVerification("figure_references", { workspaceDir: clean, scopeKey: "" })).status).toBe("passed");
+  expect((await runVerification("figure_references", { workspaceDir: broken, scopeKey: "" })).status).toBe("failed");
+});
+```
+
+- [ ] **Step 2: Run it, then implement until it passes**
+
+If a gate turns out to have no runnable verifier, change its declaration to
+name a metric or stop emitting the finding — do not register a verifier that
+always passes. This test exists to force that decision, and one or two gates
+are expected to surface here.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git commit -m "feat(registry): add the verifier registry behind null-metric criteria"
+```
+
+---
 
 ### Task 9: Capability templates
 
@@ -3155,105 +3249,6 @@ git commit -m "feat(research): scope reservation by target lifecycle and section
 
 ---
 
-### Task 21: The verifier registry
-
-**Files:**
-- Create: `packages/longwrite/src/lib/registry/verifiers.ts`
-- Test: `packages/longwrite/tests/registry-verifiers.test.ts`
-
-**Interfaces:**
-- Consumes: `PRODUCERS`/`REGISTRY`; each producer's entry point.
-- Produces: `VERIFIERS: Record<string, VerifierFn>`; `VERIFIER_VERSION`; `runVerification`.
-
-Every finding whose `acceptance_metric` is `null` gets a verification
-criterion, and a verification criterion is worthless without something that can
-re-run it. Roughly twenty declared routes are in this position, several
-reachable in a flagship run.
-
-`verification_id` **is the gate id**. That is the only choice that keeps the
-criterion checkable: the thing being re-verified is precisely the gate that
-emitted the finding, and any other naming would need a second mapping that
-could drift from the first.
-
-```ts
-export type VerifierResult = { passed: boolean; diagnostic?: string };
-export type VerifierFn = (ctx: { workspaceDir: string; scopeKey: string }) => Promise<VerifierResult>;
-```
-
-A verifier runs its producer and reports whether that one gate passed. It never
-re-runs the whole validator's decision, and it never invents a pass for a gate
-it could not reach — an error is `unavailable`, not `failed`, because "the
-check could not run" and "the check found a defect" send a round in different
-directions.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `packages/longwrite/tests/registry-verifiers.test.ts` asserting:
-
-```ts
-it("registers exactly one verifier for every gate that can emit a null-metric finding", () => {
-  const needsVerifier = new Set<string>();
-  for (const producer of PRODUCERS) {
-    for (const gate of producer.gates) {
-      for (const shape of gate.findings) {
-        if (shape.acceptance_metric === null) needsVerifier.add(String(gate.id));
-      }
-    }
-  }
-  const missing = [...needsVerifier].filter((gate) => typeof VERIFIERS[gate] !== "function").sort();
-  // A null-metric finding with no verifier produces an action whose acceptance
-  // nothing can ever satisfy.
-  expect(missing, `gates with no verifier: ${missing.join(", ")}`).toEqual([]);
-});
-
-it("registers no verifier for a gate that never emits a null-metric finding", () => {
-  // A verifier nobody can request is dead code that will drift.
-  const declared = new Set(PRODUCERS.flatMap((p) => p.gates
-    .filter((gate) => gate.findings.some((shape) => shape.acceptance_metric === null))
-    .map((gate) => String(gate.id))));
-  expect(Object.keys(VERIFIERS).filter((id) => !declared.has(id)).sort()).toEqual([]);
-});
-
-it("reports an unreachable verifier as unavailable, never as a pass", async () => {
-  await expect(runVerification("figure_references", { workspaceDir: bare, scopeKey: "" }))
-    .resolves.toMatchObject({ status: "unavailable" });
-});
-
-it("passes only when the gate it names actually passes", async () => {
-  expect((await runVerification("figure_references", { workspaceDir: clean, scopeKey: "" })).status).toBe("passed");
-  expect((await runVerification("figure_references", { workspaceDir: broken, scopeKey: "" })).status).toBe("failed");
-});
-```
-
-- [ ] **Step 2: Run it, then implement until it passes**
-
-If a gate turns out to have no runnable verifier, change its declaration to
-name a metric or stop emitting the finding — do not register a verifier that
-always passes. This test exists to force that decision.
-
-- [ ] **Step 3: Reject unknown verification ids at materialization**
-
-`materializeAction` refuses a packet whose verification criterion names an id
-absent from `VERIFIERS`, with a message naming the id and the gate. Failing at
-materialization is the last point where the run can still be told the truth.
-
-- [ ] **Step 4: End-to-end rehearsal**
-
-Add `packages/longwrite/tests/verification-round-trip.test.ts`: a workspace
-where `figure_references` fails → materialize the action → apply the repair to
-`figures/placement-plan.json` → re-run the verifier → the result carries the
-POST-repair `input_digest` and passes → contract evaluation accepts. Then
-assert the pre-repair pass, replayed against the post-repair digest, does
-**not** accept: a stale pass must never satisfy a fresh criterion.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git commit -m "feat(registry): add the verifier registry behind null-metric criteria"
-```
-
----
-
 ### Task 20: Wire the domain into the kernel dispatch protocol
 
 Reachability, budget, diagnosis and materialization all exist as domain helper
@@ -3424,3 +3419,39 @@ Task 22. Tasks 1–4 and 14 need only Plan 1. **Task 5 requires Task 9**, becaus
 packet derives its protected metrics from a capability template — and Task 9
 requires Plan 2, so repair packets are not Plan-1-only work despite appearing
 early in the milestone order. Tasks 7–13 and 15–17 need Plan 2 released as MalaClaw 3.0; Task 16 additionally needs Plan 2 Task 20, which ships the corpus. Task 9 precedes Task 10. Task 14 changes emitted prompt text, so it should land before Tasks 8, 11 and 12 regenerate the compiled golden fixtures, or the same fixtures regenerate twice.
+
+---
+
+### Task 21: Verifier integration and round-trip rehearsal
+
+**Files:**
+- Modify: `packages/longwrite/src/lib/ops/action-instance.ts` (Task 10)
+- Test: `packages/longwrite/tests/verification-round-trip.test.ts`
+
+Depends on Task 9a for the registry and Task 10 for materialization.
+
+- [ ] **Step 1: Reject unknown verification ids at materialization**
+
+`materializeAction` refuses a packet whose verification criterion names an id
+absent from `VERIFIERS`, with a message naming the id and the gate. Failing at
+materialization is the last point where the run can still be told the truth.
+
+- [ ] **Step 2: End-to-end rehearsal**
+
+Add `packages/longwrite/tests/verification-round-trip.test.ts`: a workspace
+where `figure_references` fails → materialize the action → apply the repair to
+`figures/placement-plan.json` → the kernel issues a post-effect verification
+request → the verifier answers it carrying that `request_id` and the
+post-repair `input_digest` → contract evaluation accepts.
+
+Then assert the two ways it must NOT accept: a result carrying an earlier
+attempt's `request_id` does not satisfy this attempt, and the pre-repair pass
+replayed against the post-repair inputs is not selected at all.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git commit -m "feat(ops): reject unknown verification ids and rehearse the repair round trip"
+```
+
+---
