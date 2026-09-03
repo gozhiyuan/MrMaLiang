@@ -26,7 +26,8 @@ describe("metric registry", () => {
   });
 
   it("declares a scope kind so scoped metrics emit one entry per scope", () => {
-    expect(metricDefinition(metricId("citation_depth_per_section")).scope_kind).toBe("section");
+    // Section AND depth: the gate reads a separate minimum for A, B and C.
+    expect(metricDefinition(metricId("citation_depth_per_section")).scope_kind).toBe("section_depth");
     expect(metricDefinition(metricId("taxonomy_cell_ab_sources")).scope_kind).toBe("taxonomy_cell");
     expect(metricDefinition(metricId("core_sources")).scope_kind).toBe("global");
   });

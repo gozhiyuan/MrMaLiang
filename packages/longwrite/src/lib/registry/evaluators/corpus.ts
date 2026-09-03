@@ -5,6 +5,7 @@ import {
 } from "../../validation/research.js";
 import { loadProjectConfigIfExists } from "../../project-config.js";
 import { isRecentSource, sourceTypeDiversity, taxonomyCellCounts } from "../../research/corpus-gates.js";
+import { sourceMatchesTaxonomy } from "../../research/taxonomy.js";
 import type { ClassifiedSource } from "../../research/types.js";
 import { GLOBAL_SCOPE, scopeKey } from "../scope.js";
 
@@ -105,6 +106,22 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
   cited_arxiv_only_ratio: async (ctx) => {
     const cited = await citedSources(ctx);
     return global(ratio(cited.filter(isArxivOnlySource).length, cited.length));
+  },
+
+  /** What the manuscript actually USES per cell, as against what the corpus
+   * holds. The woven-coverage gate fails when prose cites too few A/B sources
+   * for a cell, and that is repaired by citing them — a repair which cannot
+   * move taxonomy_cell_ab_sources, whose inputs are only the corpus and the
+   * configuration. */
+  cited_taxonomy_cell_ab_sources: async (ctx) => {
+    const config = await loadProjectConfigIfExists(ctx.workspaceDir);
+    if (!config) throw new MeasurementUnavailable("longwrite.yaml is missing");
+    const cited = await citedSources(ctx);
+    const evidence = cited.filter(isCore);
+    return config.research.taxonomy.map((cell) => ({
+      scope_key: scopeKey("taxonomy_cell", cell),
+      value: evidence.filter((source) => sourceMatchesTaxonomy(source, cell)).length,
+    }));
   },
 
   /** One entry per configured cell. The previous design reported the minimum

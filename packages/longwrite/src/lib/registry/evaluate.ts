@@ -7,11 +7,18 @@ import type { MetricId } from "./ids.js";
 import { METRIC_REGISTRY, metricDefinition, type MetricDefinition } from "./metrics.js";
 import { MeasurementEnvelopeSchema, type MeasurementEntry, type MeasurementEnvelope } from "./records.js";
 
-/** Stands in for instructions that have not been chosen yet. A model metric is
- * reported `deferred` here, so no judgment has been taken and there is no real
- * prompt to digest. The acquisition stage passes the actual prompt and gets a
- * different identity, which is exactly what must happen. */
+/** Stand-ins for inputs that do not exist yet.
+ *
+ * A model or external metric is reported `deferred` here: no judgment has been
+ * taken and no toolchain has run, so there is no real prompt or toolchain to
+ * digest. The acquisition stage supplies the actual one and gets a different
+ * identity, which is exactly what must happen — a deferred entry must never be
+ * reusable as a measurement.
+ *
+ * They are distinct constants so a deferred model entry and a deferred
+ * external entry never collide either. */
 const DEFERRED_PROMPT = "0".repeat(64);
+const DEFERRED_TOOLCHAIN = "1".repeat(64);
 
 export type EvaluateOptions = {
   metrics?: MetricId[];
@@ -22,6 +29,8 @@ export type EvaluateOptions = {
    * the model fixed while rewriting the prompt must not reuse the earlier
    * judgment, so the prompt is part of the measurement's identity. */
   promptDigest?: string;
+  /** Toolchain and configuration an external measurement ran under. */
+  toolchainDigest?: string;
   /** Test-only: proves the missing-evaluator path reports unavailable rather
    * than deferred, which would hide the gap behind a legitimate-looking
    * status. */
@@ -81,7 +90,12 @@ export async function buildEnvelope(
       evaluator_digest: evaluatorDigest(definition.evaluator, EVALUATOR_VERSION),
       input_digest: await computeInputDigest(workspaceDir, definition, {
         asOfDate: options.asOfDate, model: options.modelConfig,
+        // Supplied per kind. computeInputDigest demands a prompt for a model
+        // measurement and a toolchain fingerprint for an external one, and
+        // handing it the wrong stand-in threw before the entry could be
+        // marked deferred at all.
         promptDigest: options.promptDigest ?? DEFERRED_PROMPT,
+        toolchainDigest: options.toolchainDigest ?? DEFERRED_TOOLCHAIN,
       }),
       measurement_kind: definition.measurement_kind,
     };

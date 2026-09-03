@@ -8,7 +8,7 @@ import {
   LandmarkCandidates, computeLandmarkCoverage, matchLandmarksToCorpus,
 } from "../../research/landmark.js";
 import type { ClassifiedSource } from "../../research/types.js";
-import { GLOBAL_SCOPE } from "../scope.js";
+import { GLOBAL_SCOPE, sectionDepthScope } from "../scope.js";
 import { MeasurementUnavailable, type EvaluatorContext, type EvaluatorFn, type ScopedValue } from "./corpus.js";
 
 const global = (value: number): ScopedValue[] => [{ scope_key: GLOBAL_SCOPE, value }];
@@ -88,12 +88,23 @@ async function landmarkCoverage(ctx: EvaluatorContext): Promise<{ evidence: numb
 }
 
 export const MANUSCRIPT_EVALUATORS: Record<string, EvaluatorFn> = {
-  /** One entry per section. An aggregate hides which section is short, and
-   * lets a repair in one section appear to satisfy another. */
-  citation_depth_per_section: async (ctx) => (await chapters(ctx)).map((chapter) => ({
-    scope_key: sectionId(chapter.rel),
-    value: new Set(citationMarkers(chapter.content).map((marker) => marker.sourceId)).size,
-  })),
+  /** One entry per section AND depth.
+   *
+   * The gate reads a separate minimum for A, B and C in every section, so a
+   * per-section total cannot answer it: two A-depth plus two B-depth citations
+   * and four B-depth citations both report four. */
+  citation_depth_per_section: async (ctx) => {
+    const byId = new Map((await sources(ctx.workspaceDir)).map((source) => [source.id, source]));
+    return (await chapters(ctx)).flatMap((chapter) => {
+      const cited = [...new Set(citationMarkers(chapter.content).map((marker) => marker.sourceId))]
+        .map((id) => byId.get(id))
+        .filter((source): source is ClassifiedSource => Boolean(source));
+      return (["A", "B", "C"] as const).map((depth) => ({
+        scope_key: sectionDepthScope(sectionId(chapter.rel), depth),
+        value: cited.filter((source) => source.citation_depth === depth).length,
+      }));
+    });
+  },
 
   citations_per_page: async (ctx) => {
     const prose = await chapters(ctx);

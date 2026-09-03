@@ -217,6 +217,13 @@ git commit -m "feat(workflow): separate execution outcomes from contract outcome
 
 **Interfaces:**
 - Consumes: nothing.
+**Criteria are a discriminated union.** `MetricCriterion` carries a number,
+tolerance and direction; `VerificationCriterion` carries an opaque
+`verification_id`, a scope, an input digest and an expected pass status. Every
+consumer of `acceptance` and `must_preserve` narrows with `isMetricCriterion`
+before doing arithmetic, and treats a verification criterion as satisfied only
+by a recorded pass whose `input_digest` still matches.
+
 - Produces: on every work unit — `kind: "plain" | "mutation" | "measurement"` (default `"plain"`), `reads: string[]`, **`writes: string[]`**, `owns: string[]`, `writes_observations: string[]`, `evaluate_with: string[]`, `acceptance: Criterion[]`, `must_preserve: Criterion[]`, `must_improve: MustImprove[]`, `strategy?: Strategy`. On `WorkflowDef` — `observation_store: string` (default `.malaclaw/observations`) and a **required** `ir_version` literal 2. Exports `matchesEnvelope(pattern, filePath)`.
 
 `writes` is the field every test and example uses; the previous draft omitted it and could not compile. `outputs` keeps its existing meaning — artifacts that must exist and validate — while `writes` names paths expected to *change*.
@@ -327,8 +334,17 @@ Add to `src/lib/schema.ts`, above `workUnitFields`:
 
 ```ts
 /** A criterion compiled by the domain layer, carrying tolerance and direction
- * so the kernel needs no metric registry (wire contract §5). */
-export const Criterion = z.object({
+ * so the kernel needs no metric registry (wire contract §5).
+ *
+ * Two kinds, discriminated on `kind`. Not every objective is a number: a
+ * defect can be real, repairable and have no registered metric — a figure
+ * reference that is missing, a page limit, a layout fault. The domain layer
+ * emits a verification criterion for those, satisfied when a named check
+ * re-runs clean over the same inputs. The kernel stays domain-neutral: it
+ * knows `verification_id` is an opaque string it hands back to the domain
+ * layer, and nothing about what a paper "gate" is. */
+export const MetricCriterion = z.object({
+  kind: z.literal("metric").default("metric"),
   metric: z.string().min(1),
   /** Canonical scope; the empty string means workspace-global. */
   scope_key: z.string().default(""),
@@ -346,7 +362,35 @@ export const Criterion = z.object({
       message: "at_least fights a minimize direction; the compiler must not emit it" });
   }
 });
+export type MetricCriterion = z.infer<typeof MetricCriterion>;
+
+/** Satisfied when a named verification re-runs clean over the same inputs.
+ *
+ * `verification_id` is opaque to the kernel: it identifies whatever the domain
+ * layer will re-run, and the kernel only compares the recorded outcome to
+ * `expect_pass`. `input_digest` pins what it ran against, so a pass recorded
+ * before the artifacts changed cannot satisfy it afterwards — the same
+ * freshness rule metric observations follow. */
+export const VerificationCriterion = z.object({
+  kind: z.literal("verification"),
+  verification_id: z.string().min(1),
+  /** Canonical scope; the empty string means workspace-global. */
+  scope_key: z.string().default(""),
+  /** Identity of the inputs the verification must run against. */
+  input_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  expect_pass: z.boolean().default(true),
+}).strict();
+export type VerificationCriterion = z.infer<typeof VerificationCriterion>;
+
+export const Criterion = z.discriminatedUnion("kind", [MetricCriterion, VerificationCriterion]);
 export type Criterion = z.infer<typeof Criterion>;
+
+/** Narrows to the numeric half. Arithmetic — gap closure, progress, tolerance
+ * — applies only to metric criteria; a verification criterion is satisfied or
+ * it is not, and asking how much of it closed is meaningless. */
+export function isMetricCriterion(criterion: Criterion): criterion is MetricCriterion {
+  return criterion.kind === "metric";
+}
 
 export const MustImprove = z.object({
   metric: z.string().min(1),
@@ -1990,11 +2034,13 @@ Create `fixtures/wire-contract/v1/arithmetic.json` covering wire contract §7: `
 Create `src/lib/workflow/acceptance.ts`:
 
 ```ts
-import type { Criterion, MustImprove } from "../schema.js";
+import { isMetricCriterion, type Criterion, type MetricCriterion, type MustImprove } from "../schema.js";
 import type { ContractOutcome } from "./outcomes.js";
 import { snapshotKey } from "./observations.js";
 
-export function satisfies(criterion: Criterion, value: number): boolean {
+/** Metric criteria only. A verification criterion has no value to compare;
+ * the kernel reads its recorded outcome instead. */
+export function satisfies(criterion: MetricCriterion, value: number): boolean {
   if (criterion.operator === "at_least") return value >= criterion.target - criterion.tolerance;
   if (criterion.operator === "at_most") return value <= criterion.target + criterion.tolerance;
   // Exact float equality is never the right test for a ratio or a score.
@@ -2004,7 +2050,7 @@ export function satisfies(criterion: Criterion, value: number): boolean {
 /** `equals` is two-sided and measured as closed DISTANCE. Treating it like
  * `at_least` reports movement in the wrong direction whenever the value starts
  * above the target. */
-export function closedGapFraction(criterion: Criterion, before: number, after: number): number {
+export function closedGapFraction(criterion: MetricCriterion, before: number, after: number): number {
   if (criterion.operator === "equals") {
     const gap = Math.abs(criterion.target - before);
     return gap === 0 ? 1 : (gap - Math.abs(criterion.target - after)) / gap;
@@ -2014,7 +2060,7 @@ export function closedGapFraction(criterion: Criterion, before: number, after: n
   return (criterion.operator === "at_most" ? before - after : after - before) / gap;
 }
 
-export function absoluteProgress(criterion: Criterion, before: number, after: number): number {
+export function absoluteProgress(criterion: MetricCriterion, before: number, after: number): number {
   if (criterion.operator === "equals") {
     return Math.abs(criterion.target - before) - Math.abs(criterion.target - after);
   }

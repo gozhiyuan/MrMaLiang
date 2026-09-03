@@ -12,7 +12,7 @@ import { sourceMatchesTaxonomy } from "../research/taxonomy.js";
 import { loadProjectConfig } from "../project-config.js";
 import { EDITABLE_KIND_PATHS, OPERATOR_TARGET_KINDS, gateId, metricId, slugify, type ArtifactKind, type MetricId, type RequiredEffect } from "../registry/ids.js";
 import { FindingSchema, type Finding, type StructuredCheck } from "../registry/records.js";
-import { GLOBAL_SCOPE, scopeKey } from "../registry/scope.js";
+import { GLOBAL_SCOPE, scopeKey, sectionDepthScope } from "../registry/scope.js";
 import { paperProfile } from "../paper-profiles.js";
 import { validateImportedExperiment } from "../research/experiment.js";
 import { validateLatexWorkspace } from "./latex.js";
@@ -249,10 +249,31 @@ async function checkCitedLiteratureReleaseGates(
   const corpus = (subject: string, metric: string, diagnostic: string): Finding => rFinding({
     gate: GATE, kind: "corpus", effect: "upgrade_source_quality", subject,
     acceptance_metric: metricId(metric), diagnostic });
-  const prose = (subject: string, metric: string, diagnostic: string, chapterPath?: string): Finding => rFinding({
+  const prose = (subject: string, metric: string, diagnostic: string, chapterPath?: string, scope?: string): Finding => rFinding({
     gate: GATE, kind: "chapter_prose", effect: "add_supporting_citation", subject,
     acceptance_metric: metricId(metric), diagnostic,
+    ...(scope === undefined ? {} : { scope }),
     ...(chapterPath === undefined ? {} : { path: chapterPath }) });
+
+  /** A/B depth is what this gate counts as usable evidence. */
+  const isCoreSource = (source: ClassifiedSource): boolean =>
+    source.citation_depth === "A" || source.citation_depth === "B";
+
+  /** Chooses between citing what is already held and going out to find more.
+   *
+   * Every cited-literature shortfall was previously emitted as corpus
+   * expansion, but retrieving more sources does not change which sources the
+   * prose cites. When the corpus already holds uncited records that would
+   * satisfy the gate, the repair is to weave them in; only when it holds
+   * nothing better is more retrieval the right move. */
+  const citeOrAcquire = (
+    subject: string, metric: string, diagnostic: string, qualifies: (source: ClassifiedSource) => boolean,
+  ): Finding => {
+    const available = sources.some((source) => !cited.has(source.id) && qualifies(source));
+    return available
+      ? prose(subject, metric, `${diagnostic}; the corpus already holds uncited sources that would satisfy this`)
+      : corpus(subject, metric, `${diagnostic}; the corpus holds no uncited source that would satisfy this`);
+  };
   const config = await loadProjectConfig(workspaceDir).catch(() => null);
   if (!config || !isFullResearchMode(config.project.mode)) {
     return note(GATE, true, "not a full research release mode; cited-literature gates are informational");
@@ -269,7 +290,7 @@ async function checkCitedLiteratureReleaseGates(
   const citedSources = [...cited].map((id) => byId.get(id)).filter((source): source is ClassifiedSource => Boolean(source));
   const findings: Finding[] = [];
   if (citedSources.length < gates.min_cited_sources) {
-    findings.push(corpus("cited-count", "cited_sources", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`));
+    findings.push(citeOrAcquire("cited-count", "cited_sources", `cited sources ${citedSources.length} is below configured minimum ${gates.min_cited_sources}`, isCoreSource));
   }
   const accepted = citedSources.filter(isAcceptedSource).length;
   const acceptedRatio = accepted / Math.max(1, citedSources.length);
@@ -278,18 +299,23 @@ async function checkCitedLiteratureReleaseGates(
   const arxivOnly = citedSources.filter(isArxivOnlySource).length;
   const arxivOnlyRatio = arxivOnly / Math.max(1, citedSources.length);
   if (withinOneYearRatio < gates.min_cited_within_one_year_ratio) {
-    findings.push(corpus("recency", "cited_within_one_year_ratio", `within-one-calendar-year cited-source ratio ${withinOneYearRatio.toFixed(3)} (${withinOneYear}/${citedSources.length}) is below configured ${gates.min_cited_within_one_year_ratio.toFixed(3)}`));
+    findings.push(citeOrAcquire("recency", "cited_within_one_year_ratio", `within-one-calendar-year cited-source ratio ${withinOneYearRatio.toFixed(3)} (${withinOneYear}/${citedSources.length}) is below configured ${gates.min_cited_within_one_year_ratio.toFixed(3)}`, (source) => isWithinOneCalendarYear(source, asOfDate)));
   }
   if (acceptedRatio < gates.min_accepted_cited_ratio) {
-    findings.push(corpus("acceptance", "accepted_cited_ratio", `accepted cited-source ratio ${acceptedRatio.toFixed(3)} (${accepted}/${citedSources.length}) is below configured ${gates.min_accepted_cited_ratio.toFixed(3)}`));
+    findings.push(citeOrAcquire("acceptance", "accepted_cited_ratio", `accepted cited-source ratio ${acceptedRatio.toFixed(3)} (${accepted}/${citedSources.length}) is below configured ${gates.min_accepted_cited_ratio.toFixed(3)}`, isAcceptedSource));
   }
   if (arxivOnlyRatio > gates.max_cited_arxiv_only_ratio) {
-    findings.push(corpus("venue-mix", "cited_arxiv_only_ratio", `arXiv-only cited-source ratio ${arxivOnlyRatio.toFixed(3)} (${arxivOnly}/${citedSources.length}) exceeds configured ${gates.max_cited_arxiv_only_ratio.toFixed(3)}`));
+    findings.push(citeOrAcquire("venue-mix", "cited_arxiv_only_ratio", `arXiv-only cited-source ratio ${arxivOnlyRatio.toFixed(3)} (${arxivOnly}/${citedSources.length}) exceeds configured ${gates.max_cited_arxiv_only_ratio.toFixed(3)}`, (source) => !isArxivOnlySource(source)));
   }
   if (gates.min_citations_per_page > 0) {
     const pages = await pdfPageCount(workspaceDir);
     if (pages === null) {
-      findings.push(prose("citation-density", "citations_per_page", "cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf"));
+      // Adding citations cannot fix a manuscript that was never rendered.
+      findings.push(rFinding({
+        gate: GATE, kind: "toolchain", effect: "repair_toolchain", subject: "pdfinfo",
+        acceptance_metric: metricId("latex_build_status"), severity: "critical",
+        diagnostic: "cited sources per page cannot be checked because pdfinfo could not read build/manuscript.pdf",
+      }));
     } else {
       // This gate is explicitly configured as *citations* per page. Counting
       // unique bibliography entries here made a long paper require an
@@ -306,7 +332,14 @@ async function checkCitedLiteratureReleaseGates(
       const required = gates.min_citation_depths_per_section[depth];
       if (required === 0) continue;
       const found = chapterSources.filter((source) => source.citation_depth === depth).length;
-      if (found < required) findings.push(prose(`${sectionIdFromChapter(chapter.rel)}-${depth}`, "citation_depth_per_section", `${chapter.rel} has ${found} ${depth}-depth cited sources; configured minimum is ${required}`, chapter.rel));
+      if (found < required) {
+        // Scoped to the section AND the depth, matching how the observation is
+        // recorded; a global finding could never be matched to the measurement
+        // that would satisfy it.
+        findings.push(prose(`${sectionIdFromChapter(chapter.rel)}-${depth}`, "citation_depth_per_section",
+          `${chapter.rel} has ${found} ${depth}-depth cited sources; configured minimum is ${required}`,
+          chapter.rel, sectionDepthScope(sectionIdFromChapter(chapter.rel), depth)));
+      }
     }
   }
   if (gates.min_cited_ab_sources_per_taxonomy_cell > 0) {
@@ -318,7 +351,9 @@ async function checkCitedLiteratureReleaseGates(
         findings.push(rFinding({
           gate: GATE, kind: "chapter_prose", effect: "add_supporting_citation",
           subject: `cell-${slugify(cell)}`, scope: scopeKey("taxonomy_cell", cell),
-          acceptance_metric: metricId("taxonomy_cell_ab_sources"),
+          // The manuscript's use of the cell, not the corpus's supply of it:
+          // a prose repair cannot move corpus availability.
+          acceptance_metric: metricId("cited_taxonomy_cell_ab_sources"),
           diagnostic: `taxonomy cell "${cell}" has ${found} woven A/B-depth sources; configured minimum is ${gates.min_cited_ab_sources_per_taxonomy_cell}`,
         }));
       }
@@ -1068,15 +1103,31 @@ export const PRODUCER = defineProducer({
     // code names which, and requireDeclaredFinding rejects any other pairing.
     { id: "cited_literature_release_gates", class: "manuscript",
       observes: ["cited_sources", "citation_depth_per_section", "citations_per_page",
-        "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio"], findings: [
+        "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio",
+        "cited_taxonomy_cell_ab_sources"], findings: [
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
         acceptance_metric: "citation_depth_per_section" },
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
         acceptance_metric: "citations_per_page" },
+      // Woven coverage is what the manuscript uses, not what the corpus holds.
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
-        acceptance_metric: "taxonomy_cell_ab_sources" },
+        acceptance_metric: "cited_taxonomy_cell_ab_sources" },
+      // Each of these can be repaired either by citing evidence already held
+      // or, when none is held, by retrieving more. Both routes are declared so
+      // the gate can choose the one that can actually move the metric.
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "cited_sources" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "cited_within_one_year_ratio" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "accepted_cited_ratio" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "cited_arxiv_only_ratio" },
       { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
         acceptance_metric: "cited_sources" },
+      // A manuscript that never rendered cannot be fixed by citing more.
+      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification",
+        acceptance_metric: "latex_build_status" },
       { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
         acceptance_metric: "cited_sources" },
       { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",

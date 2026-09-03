@@ -137,8 +137,13 @@ B one; selecting by sequence alone returns the stale value.
 MrMaLiang compiles criteria with tolerance and direction already resolved, so
 the kernel needs no metric registry and no domain knowledge:
 
+A criterion is one of two kinds, discriminated on `kind`.
+
+**Metric criterion** — an objective with a number behind it:
+
 ```json
 {
+  "kind": "metric",
   "metric": "landmark_coverage_ratio",
   "scope_key": "",
   "operator": "at_least",
@@ -147,6 +152,38 @@ the kernel needs no metric registry and no domain knowledge:
   "direction": "maximize"
 }
 ```
+
+**Verification criterion** — an objective with no registered metric, satisfied
+when a named check re-runs clean over the same inputs:
+
+```json
+{
+  "kind": "verification",
+  "verification_id": "figure_references",
+  "scope_key": "",
+  "input_digest": "9f2c…",
+  "expect_pass": true
+}
+```
+
+Not every real defect has a number. A missing figure reference, a layout fault,
+a page limit and an under-length manuscript are all repairable and none is
+tracked by a registered metric; roughly twenty declared routes carry
+`acceptance_metric: null` for exactly this reason, several of them reachable in
+a flagship run. Forcing them into a metric criterion would mean inventing a
+metric, and dropping them would mean materializing an action with no acceptance
+at all.
+
+`verification_id` is **opaque to the kernel**. It identifies whatever the
+domain layer will re-run; the kernel compares the recorded outcome to
+`expect_pass` and knows nothing about what a paper "gate" is. `input_digest`
+pins what the verification ran against, so a pass recorded before the artifacts
+changed cannot satisfy it afterwards — the same freshness rule §4 gives
+observations.
+
+Arithmetic — gap closure, progress, tolerance — applies to metric criteria
+only. A verification criterion is satisfied or it is not; asking how much of it
+closed is meaningless, and a consumer must narrow on `kind` before computing.
 
 Compilation **rejects** an operator that fights the metric's direction:
 `at_least` on a minimized defect count, or `at_most` on a maximized coverage

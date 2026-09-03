@@ -6,6 +6,7 @@ import { stringify } from "yaml";
 import { MeasurementUnavailable } from "../src/lib/registry/evaluators/corpus.js";
 import { MANUSCRIPT_EVALUATORS } from "../src/lib/registry/evaluators/manuscript.js";
 import { ARTIFACT_EVALUATORS } from "../src/lib/registry/evaluators/artifacts.js";
+import { sectionDepthScope } from "../src/lib/registry/scope.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -72,11 +73,14 @@ describe("manuscript evaluators", () => {
       chapters: { "section-03.md": "[source:a:p1]\n", "section-06.md": "" },
     });
     const values = await MANUSCRIPT_EVALUATORS.citation_depth_per_section(ctx(ws));
+    const by = Object.fromEntries(values.map((v) => [v.scope_key, v.value]));
     // Aggregating hides which section is short, and lets a repair in one
-    // section appear to satisfy another.
-    expect(values.map((v) => v.scope_key).sort()).toEqual(["section-03", "section-06"]);
-    expect(Object.fromEntries(values.map((v) => [v.scope_key, v.value])))
-      .toEqual({ "section-03": 1, "section-06": 0 });
+    // section appear to satisfy another. Depth is part of the scope too,
+    // because the gate reads a separate minimum for A, B and C.
+    expect(by[sectionDepthScope("section-03", "A")]).toBe(1);
+    expect(by[sectionDepthScope("section-03", "B")]).toBe(0);
+    expect(by[sectionDepthScope("section-06", "A")]).toBe(0);
+    expect(values).toHaveLength(6);
   });
 
   it("fails the measurement when a required build artifact is absent", async () => {

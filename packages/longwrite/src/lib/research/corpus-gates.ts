@@ -4,6 +4,7 @@ import { loadProjectConfig } from "../project-config.js";
 import { parseJsonl } from "./jsonl.js";
 import { loadSearchPlan, matchingTaxonomyCell } from "./search-plan.js";
 import { sourceMatchesTaxonomy } from "./taxonomy.js";
+import { isWithinOneCalendarYear } from "../validation/research.js";
 import type { ClassifiedSource } from "./types.js";
 import { gateId, taxonomyGateId, type GateId } from "../registry/ids.js";
 import { FindingSchema, type Finding, type MeasurementEntry, type StructuredCheck } from "../registry/records.js";
@@ -45,12 +46,16 @@ function isCore(source: ClassifiedSource): boolean {
   return source.citation_depth === "A" || source.citation_depth === "B";
 }
 
-/** The recency window this product means by "recent". Exported so the
- * recent_source_ratio evaluator and this gate share one definition: the gate
- * previously used a two-year window while the metric would have used one, and
- * a gate that disagrees with its own observation cannot be repaired against. */
+/** The recency window this product means by "recent": one calendar year, the
+ * same window the cited-recency gate uses.
+ *
+ * Shared so the gate and the recent_source_ratio evaluator cannot disagree —
+ * and delegating to isWithinOneCalendarYear rather than restating it means the
+ * corpus gate and the cited-literature gate cannot disagree either. The
+ * earlier two-year window removed the drift by standardising on the looser of
+ * two definitions, which is not the one the plan froze. */
 export function isRecentSource(source: ClassifiedSource, asOfDate: string): boolean {
-  return source.year >= new Date(asOfDate).getUTCFullYear() - 2;
+  return isWithinOneCalendarYear(source, asOfDate);
 }
 
 /** Distinct retrieval providers a corpus was drawn from.

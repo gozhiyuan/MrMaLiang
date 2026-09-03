@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { slugify } from "./ids.js";
 
-export type ScopeKind = "global" | "section" | "taxonomy_cell";
+export type ScopeKind = "global" | "section" | "taxonomy_cell" | "section_depth";
 export const GLOBAL_SCOPE = "";
 
 /** A machine-safe key for a human label the operator configured. Reuses the
@@ -16,9 +16,19 @@ export function scopeKey(kind: ScopeKind, label: string): string {
 
 export const ScopeRecord = z.object({
   key: z.string().min(1),
-  kind: z.enum(["section", "taxonomy_cell"]),
+  kind: z.enum(["section", "taxonomy_cell", "section_depth"]),
   label: z.string().min(1),
 }).strict();
+
+/** One section at one citation depth.
+ *
+ * The gate decides A, B and C independently per section, so a section-scoped
+ * observation cannot answer it: four cited sources at B-depth and two at each
+ * of A and B report the same total while meaning different things. The depth
+ * is part of the objective's identity, not a detail of the diagnostic. */
+export function sectionDepthScope(section: string, depth: "A" | "B" | "C"): string {
+  return scopeKey("section_depth", `${section}|${depth}`);
+}
 
 const INDEX = path.join("reports", "scope-index.json");
 

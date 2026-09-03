@@ -5,7 +5,7 @@ export type MetricDefinition = {
   /** Emits one entry per scope. A `section` or `taxonomy_cell` metric must
    * never report an aggregate: the previous taxonomy_cell_ab_sources reported
    * the minimum across cells, which cannot tell a repair which cell to fix. */
-  scope_kind: "global" | "section" | "taxonomy_cell";
+  scope_kind: "global" | "section" | "taxonomy_cell" | "section_depth";
   direction: "maximize" | "minimize";
   target_type: "ratio" | "count" | "boolean" | "score";
   tolerance: number;
@@ -78,9 +78,12 @@ const ACCEPTANCE: Draft[] = [
     // The rendered PDF is a genuine input: page count is what the ratio divides by.
     dependencies: [...CITED, "build/manuscript.pdf"],
     raw_output: ["reports/metrics/citation-density.json"], estimated_cost: CHEAP },
-  { metric: "citation_depth_per_section", scope_kind: "section", direction: "maximize", target_type: "count",
+  // Scoped by section AND depth: the gate decides A, B and C separately, so a
+  // section-scoped total cannot say which depth is short.
+  { metric: "citation_depth_per_section", scope_kind: "section_depth", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
-    evaluator: "citation_depth_per_section", reducer: "per_scope", dependencies: ["chapters/"],
+    evaluator: "citation_depth_per_section", reducer: "per_scope",
+    dependencies: ["chapters/", "sources/classified_sources.jsonl"],
     raw_output: ["reports/metrics/citation-depth.json"], estimated_cost: CHEAP },
   { metric: "taxonomy_cell_ab_sources", scope_kind: "taxonomy_cell", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
@@ -177,6 +180,16 @@ const ACCEPTANCE: Draft[] = [
  * manuscript — but every one of these must still be measurable, or a gate that
  * fails on it has no observation to explain itself with. */
 const OBSERVATIONS: Draft[] = [
+  // What the manuscript USES per taxonomy cell, as against taxonomy_cell_ab_sources
+  // which is what the corpus HOLDS. A prose repair can move this one and can
+  // never move that one. Registered but not planner-selectable: the 22
+  // acceptance metrics an action plan may promise are a frozen list, and this
+  // exists so a woven-coverage finding has an objective it can actually name.
+  { metric: "cited_taxonomy_cell_ab_sources", scope_kind: "taxonomy_cell", direction: "maximize", target_type: "count",
+    tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
+    evaluator: "cited_taxonomy_cell_ab_sources", reducer: "per_scope",
+    dependencies: ["chapters/", "sources/classified_sources.jsonl", "longwrite.yaml"],
+    raw_output: ["reports/metrics/cited-taxonomy-coverage.json"], estimated_cost: CHEAP },
   { metric: "candidate_count", scope_kind: "global", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "unit", measurement_kind: "script",
     evaluator: "candidate_count", reducer: "identity",
