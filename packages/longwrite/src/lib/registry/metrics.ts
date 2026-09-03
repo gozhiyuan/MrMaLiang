@@ -114,8 +114,12 @@ const ACCEPTANCE: Draft[] = [
     tolerance: 0, time_dependent: false, measurement_tier: "release", measurement_kind: "model",
     evaluator: "rendered_visual_review", producer: "render_and_describe_pdf",
     validator: "visual_review_schema", reducer: "adjudicated_consensus",
-    dependencies: ["paper/main.tex", "paper/sections/", "figures/placement-plan.json"],
-    raw_output: ["reports/visual-review.json"], estimated_cost: { model_calls: 3, render_required: true } },
+    // What the reviewer actually looks at: the rendered PDF and the manifest
+    // of pages taken from it. Omitting those meant a rebuilt manuscript kept
+    // the previous visual judgment, which is the reuse this digest prevents.
+    dependencies: ["paper/main.tex", "paper/sections/", "figures/placement-plan.json",
+      "build/manuscript.pdf", "reports/visual-render-manifest.json"],
+    raw_output: ["reviews/visual-qa.json"], estimated_cost: { model_calls: 3, render_required: true } },
   { metric: "empirical_trials", scope_kind: "global", direction: "maximize", target_type: "count",
     tolerance: 0, time_dependent: false, measurement_tier: "round", measurement_kind: "script",
     evaluator: "empirical_trials", reducer: "identity",

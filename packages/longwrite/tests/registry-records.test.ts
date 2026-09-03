@@ -12,6 +12,7 @@ const finding = {
   location: "paragraph preceding the float generated at paper/sections/section-03.tex",
   objective_scope_key: "",
   required_effect: "add_explicit_artifact_reference",
+  acceptance_metric: null,
   severity: "major",
   diagnostic: "Figure 1 is not named before its placement.",
 };
@@ -135,6 +136,11 @@ describe("structured records", () => {
       id: "figure_references", pass: false, measurements: [entry], findings: [finding],
       diagnostic: "figure-1 is not embedded in paper/sections/section-03.tex",
     }).success).toBe(true);
+    // A finding travelling inside a check that names a different gate would be
+    // routed against a gate that never declared it.
+    expect(StructuredCheckSchema.safeParse({
+      id: "figure_manifest", pass: false, findings: [finding],
+    }).success).toBe(false);
   });
 
   it("rejects a failed check that nothing could act on", () => {

@@ -95,6 +95,7 @@ export async function checkVisualReviewReleaseGate(workspaceDir: string, require
     location: `rendered page ${finding.page}`,
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: "repair_artifact_placement",
+    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(GATE), "figure_spec", "repair_artifact_placement"),
     severity: finding.severity === "critical" ? "critical" : "major",
     diagnostic: `page ${finding.page}: ${finding.summary} → ${finding.remediation}`,
   }));
@@ -102,7 +103,7 @@ export async function checkVisualReviewReleaseGate(workspaceDir: string, require
     diagnostic: "visual QA reported blocking defects" };
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 import { gateId } from "../registry/ids.js";
 import { FindingSchema } from "../registry/records.js";
 import { GLOBAL_SCOPE } from "../registry/scope.js";
@@ -115,10 +116,14 @@ export const PRODUCER = defineProducer({
   gates: [
     { id: "visual_review_contract", class: "measurement", findings: [] },
     { id: "rendered_visual_review", class: "manuscript", observes: ["rendered_visual_review"], findings: [
-      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
-      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
     ] },
   ],
 });

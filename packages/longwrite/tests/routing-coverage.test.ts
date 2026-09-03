@@ -68,11 +68,37 @@ describe("routing coverage", () => {
     }
   });
 
-  it("drives at least one real producer, so the probe is not vacuous", async () => {
-    // A probe that silently emitted nothing everywhere would pass every
-    // assertion above while checking nothing at all.
-    const emitted = await Promise.all(PRODUCERS.map((p) => probeProducer(p.module)));
-    const withGates = emitted.filter((result) => result.gateIds.length > 0);
-    expect(withGates.length, "no producer emitted any gate id under the probe").toBeGreaterThan(0);
+  it("drives EVERY producer, so no producer is silently unexercised", async () => {
+    // Requiring one producer globally was too weak: research, survey-contract
+    // and preflight each threw and emitted nothing while this passed, leaving
+    // the largest producer entirely unchecked.
+    const silent: string[] = [];
+    for (const producer of PRODUCERS) {
+      const emitted = await probeProducer(producer.module);
+      if (emitted.gateIds.length === 0) {
+        silent.push(`${producer.module}${emitted.error ? ` (threw: ${emitted.error})` : " (emitted nothing)"}`);
+      }
+    }
+    expect(silent, `producers not exercised by the probe:\n  ${silent.join("\n  ")}`).toEqual([]);
+  });
+
+  it("reports a producer that could not run at all", async () => {
+    const failed: string[] = [];
+    for (const producer of PRODUCERS) {
+      const emitted = await probeProducer(producer.module);
+      if (emitted.error) failed.push(`${producer.module}: ${emitted.error}`);
+    }
+    expect(failed, `producers that threw:\n  ${failed.join("\n  ")}`).toEqual([]);
+  });
+
+  it("emits an acceptance metric on every finding, matching what was declared", async () => {
+    for (const producer of PRODUCERS) {
+      for (const finding of (await probeProducer(producer.module)).findings) {
+        const artifact = finding.artifact as { kind: never };
+        expect(finding, `${producer.module}/${String(finding.id)}`).toHaveProperty("acceptance_metric");
+        expect(finding.acceptance_metric ?? null, `${producer.module}/${String(finding.id)}`)
+          .toBe(REGISTRY.acceptanceMetric(gateId(String(finding.gate_id)), artifact.kind, finding.required_effect as never));
+      }
+    }
   });
 });

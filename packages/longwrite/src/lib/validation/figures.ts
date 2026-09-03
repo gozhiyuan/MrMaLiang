@@ -60,6 +60,7 @@ function finding(args: {
     ...(args.location === undefined ? {} : { location: args.location }),
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: args.effect,
+    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(args.gate), args.kind, args.effect),
     severity: args.severity ?? "major",
     diagnostic: args.diagnostic,
   });
@@ -360,7 +361,7 @@ export async function validateFigureWorkspace(workspaceDir: string): Promise<Str
   return { pass: checks.every((item) => item.pass), checks };
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -369,26 +370,41 @@ export const PRODUCER = defineProducer({
   module: "figures",
   gates: [
     { id: "figure_manifest", class: "manuscript", observes: ["figures", "tables"], findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
     ] },
     { id: "figure_artifacts", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
-      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "tables" },
     ] },
     { id: "full_mode_visual_contract", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
-      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "tables" },
     ] },
     { id: "publication_layout", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
     ] },
     { id: "diagram_connectivity", class: "manuscript", observes: ["diagram_connectivity"], findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "diagram_connectivity" },
     ] },
     { id: "figure_references", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
-      { kind: "table_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
-      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
+      // Emitted when the manifest itself cannot be read: the defect is in the
+      // spec's content, not in where an artifact was placed. The acceptance
+      // lookup surfaced this triple as undeclared.
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
+      { kind: "table_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
   ],
 });

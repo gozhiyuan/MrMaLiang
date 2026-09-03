@@ -40,6 +40,7 @@ function lfFinding(gate: string, index: number, diagnostic: string): Finding {
     artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: route.effect,
+    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
     severity: "major",
     diagnostic,
   });
@@ -374,7 +375,7 @@ export async function writeLongformValidationReport(
   return ["reports/longwrite-validation.json", "reports/longwrite-validation.md"];
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -386,33 +387,42 @@ export const PRODUCER = defineProducer({
     // capability in the catalog creates one.
     { id: "required_artifacts", class: "environment", findings: [] },
     { id: "outline_chapter_arcs", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "chapter_contracts", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "chapter_contract_coverage", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     { id: "chapter_continuity_coverage", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections",
+        acceptance_metric: "claim_contradictions" },
     ] },
     { id: "character_continuity", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections",
+        acceptance_metric: "claim_contradictions" },
     ] },
     // A code sample that does not run makes the prose around it unsupported.
     { id: "code_validation", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     // Also declared by the research validator, which owns the failing form of
     // this gate. The check here is advisory, but a gate means one thing
     // wherever it is emitted, so the declaration is identical.
     { id: "target_length", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
-      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections",
+        acceptance_metric: null },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     { id: "style_drift", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections",
+        acceptance_metric: "prose_redundancy" },
     ] },
   ],
 });

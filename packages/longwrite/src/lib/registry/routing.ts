@@ -1,4 +1,4 @@
-import { gateFamily, type ArtifactKind, type CapabilityId, type GateClass, type GateId, type RequiredEffect } from "./ids.js";
+import { gateFamily, type ArtifactKind, type CapabilityId, type GateClass, type GateId, type MetricId, type RequiredEffect } from "./ids.js";
 import type { ProducerDefinition } from "./producer-types.js";
 
 export type RouteKey = { gate: GateId; kind: ArtifactKind; effect: RequiredEffect };
@@ -18,6 +18,8 @@ export type Registry = {
   legalTriples(gate: GateId): readonly Triple[];
   routedTripleKeys(): Set<string>;
   resolveCapability(key: RouteKey): CapabilityId;
+  /** The acceptance metric a triple moves, or null when it moves none. */
+  acceptanceMetric(gate: GateId, kind: ArtifactKind, effect: RequiredEffect): MetricId | null;
   producerOf(gate: GateId): string;
   capabilities(): Set<CapabilityId>;
 };
@@ -36,6 +38,7 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
   const classes = new Map<GateId, GateClass>();
   const triples = new Map<GateId, Triple[]>();
   const routes = new Map<string, CapabilityId>();
+  const metrics = new Map<string, MetricId | null>();
   const owners = new Map<GateId, string>();
 
   const modules = new Set<string>();
@@ -52,9 +55,24 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
         // long-form one. What must never differ is what it means, so an
         // identical re-declaration is accepted and a conflicting one is not.
         const first = { class: classes.get(gate.id), triples: triples.get(gate.id) ?? [] };
+        // Capability and acceptance metric are part of what a gate MEANS.
+        // Comparing only class and triples accepted two modules routing one
+        // triple to different capabilities, and silently kept whichever
+        // registered first — so which repair ran depended on import order.
+        const declared = gate.findings.map((f) => ({
+          kind: f.kind, effect: f.effect, capability: String(f.capability),
+          acceptance_metric: f.acceptance_metric === null ? null : String(f.acceptance_metric),
+        }));
+        const held_ = (triples.get(gate.id) ?? []).map((triple) => ({
+          kind: triple.kind, effect: triple.effect,
+          capability: String(routes.get(tripleKey(gate.id, triple.kind, triple.effect))),
+          acceptance_metric: (() => {
+            const metric = metrics.get(tripleKey(gate.id, triple.kind, triple.effect));
+            return metric === null || metric === undefined ? null : String(metric);
+          })(),
+        }));
         const same = first.class === gate.class
-          && JSON.stringify(first.triples)
-             === JSON.stringify(gate.findings.map((f) => ({ kind: f.kind, effect: f.effect })));
+          && JSON.stringify(held_) === JSON.stringify(declared);
         if (!same) {
           throw new Error(
             `gate ${gate.id} is declared differently by ${held} and ${producer.module}; ` +
@@ -68,6 +86,7 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
         triples.set(gate.id, gate.findings.map((finding) => ({ kind: finding.kind, effect: finding.effect })));
         for (const finding of gate.findings) {
           routes.set(tripleKey(gate.id, finding.kind, finding.effect), finding.capability);
+          metrics.set(tripleKey(gate.id, finding.kind, finding.effect), finding.acceptance_metric);
         }
       }
     }
@@ -96,6 +115,11 @@ export function registerProducers(definitions: readonly ProducerDefinition[]): R
       const found = owners.get(gateFamily(gate));
       if (!found) throw new Error(`unclassified gate: ${gate}. Declare it on its producer.`);
       return found;
+    },
+    acceptanceMetric: (gate, kind, effect) => {
+      const key = tripleKey(gateFamily(gate), kind, effect);
+      if (!metrics.has(key)) throw new UnroutedFindingError({ gate, kind, effect });
+      return metrics.get(key) ?? null;
     },
     capabilities: () => new Set(routes.values()),
   };

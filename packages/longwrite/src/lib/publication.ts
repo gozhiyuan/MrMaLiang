@@ -31,6 +31,7 @@ function pubCheck(gate: string, route: PubRoute, diagnostics: string[], passing?
       artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
       objective_scope_key: GLOBAL_SCOPE,
       required_effect: route.effect,
+      acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
       severity: "major",
       diagnostic,
     })),
@@ -224,7 +225,7 @@ export async function writeUnpackagedSubmissionNotice(workspaceDir: string, reas
   return path.relative(root, manifestPath);
 }
 
-import { defineProducer } from "./registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "./registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -233,22 +234,28 @@ export const PRODUCER = defineProducer({
   module: "publication",
   gates: [
     { id: "publication_article_layout", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
     ] },
     { id: "publication_release_gates", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
     ] },
     { id: "publication_required_sections", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "publication_custom_template", class: "manuscript", findings: [
-      { kind: "publication_template", effect: "repair_template", capability: "revise_visual_plan" },
+      { kind: "publication_template", effect: "repair_template", capability: "revise_visual_plan",
+        acceptance_metric: null },
     ] },
     { id: "publication_page_limit", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     { id: "publication_min_pages", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
   ],
 });

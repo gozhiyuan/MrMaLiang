@@ -45,6 +45,7 @@ function surveyCheck(entry: { id: string; pass: boolean; detail: string }): Stru
       artifact: { kind: route.kind, path: ROUTE_PATHS[route.kind] },
       objective_scope_key: GLOBAL_SCOPE,
       required_effect: route.effect,
+      acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(entry.id), route.kind, route.effect),
       severity: "major",
       diagnostic: entry.detail,
     })],
@@ -272,7 +273,7 @@ export async function evaluateSurveyContract(workspaceDir: string): Promise<{ re
   return { report, written };
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -281,29 +282,38 @@ export const PRODUCER = defineProducer({
   module: "survey-contract",
   gates: [
     { id: "introduction_gap_contributions", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "multi_axis_taxonomy", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "method_family_chapters", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "related_work_differentiation", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "limitations_future_work", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "section_evidence_requirements", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "chapter_outline_identity", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "related_work_matrix", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
-      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "comparative_tables" },
     ] },
   ],
 });

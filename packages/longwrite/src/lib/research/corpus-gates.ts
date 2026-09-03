@@ -53,6 +53,24 @@ export function isRecentSource(source: ClassifiedSource, asOfDate: string): bool
   return source.year >= new Date(asOfDate).getUTCFullYear() - 2;
 }
 
+/** What this product means by source-type diversity: retrieval providers plus
+ * the identifier systems the records resolve in. Exported so the
+ * source_type_diversity_count evaluator computes the same number the gate
+ * decided on — counting providers alone gave one workspace two different
+ * values for one objective. */
+export function sourceTypeDiversity(sources: ClassifiedSource[]): number {
+  const providerTypes = sources.map((source) => source.source).filter(Boolean);
+  const identifierTypes = sources.flatMap((source) => [
+    source.identifiers?.doi ? "doi" : undefined,
+    source.identifiers?.arxiv_id ? "arxiv" : undefined,
+    source.identifiers?.semantic_scholar_id ? "semantic_scholar" : undefined,
+    source.identifiers?.dblp_key ? "dblp" : undefined,
+    source.identifiers?.openalex_id ? "openalex" : undefined,
+    source.identifiers?.openreview_id ? "openreview" : undefined,
+  ].filter((value): value is string => Boolean(value)));
+  return new Set([...providerTypes, ...identifierTypes]).size;
+}
+
 export type TaxonomyCellCount = {
   cell: string;
   source_count: number;
@@ -102,16 +120,7 @@ export async function evaluateCorpusGates(
   const gates = config.research.corpus_gates;
   const sources = await readJsonl<ClassifiedSource>(workspaceDir, "sources/classified_sources.jsonl");
   const recentRatio = sources.filter((source) => isRecentSource(source, asOfDate)).length / Math.max(1, sources.length);
-  const providerTypes = new Set(sources.map((source) => source.source));
-  const identifierTypes = new Set(sources.flatMap((source) => [
-    source.identifiers?.doi ? "doi" : undefined,
-    source.identifiers?.arxiv_id ? "arxiv" : undefined,
-    source.identifiers?.semantic_scholar_id ? "semantic_scholar" : undefined,
-    source.identifiers?.dblp_key ? "dblp" : undefined,
-    source.identifiers?.openalex_id ? "openalex" : undefined,
-    source.identifiers?.openreview_id ? "openreview" : undefined,
-  ].filter((value): value is string => Boolean(value))));
-  const sourceTypeCount = new Set([...providerTypes, ...identifierTypes]).size;
+  const sourceTypeCount = sourceTypeDiversity(sources);
   const coreSourceCount = sources.filter(isCore).length;
   const taxonomy = await taxonomyCellCounts(workspaceDir, sources, config.research.taxonomy, gates.min_sources_per_taxonomy_cell);
 
@@ -142,6 +151,7 @@ export async function evaluateCorpusGates(
       artifact: { kind: "corpus", path: "sources/" },
       objective_scope_key: args.scopeKey,
       required_effect: args.effect ?? "acquire_additional_evidence",
+      acceptance_metric: acceptanceMetricOf(PRODUCER, args.gate, "corpus", args.effect ?? "acquire_additional_evidence"),
       severity: "major",
       diagnostic: args.detail,
     })];
@@ -235,7 +245,7 @@ export async function writeCorpusGateReport(workspaceDir: string, report: Corpus
   return [jsonRel, mdRel];
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -244,22 +254,28 @@ export const PRODUCER = defineProducer({
   module: "corpus-gates",
   gates: [
     { id: "total_candidates", class: "manuscript", observes: ["candidate_count"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "candidate_count" },
     ] },
     { id: "core_sources", class: "manuscript", observes: ["core_sources"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "core_sources" },
       // A corpus short on A/B depth needs better sources, not merely more of
       // them; the research validator already routes this effect the same way.
-      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "core_sources" },
     ] },
     { id: "freshness", class: "manuscript", observes: ["recent_source_ratio"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "recent_source_ratio" },
     ] },
     { id: "source_type_diversity", class: "manuscript", observes: ["source_type_diversity_count"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "source_type_diversity_count" },
     ] },
     { id: "taxonomy", class: "manuscript", observes: ["taxonomy_cell_ab_sources"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
     ] },
   ],
 });

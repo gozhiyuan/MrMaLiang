@@ -64,6 +64,7 @@ function rFinding(args: {
     ...(args.location === undefined ? {} : { location: args.location }),
     objective_scope_key: args.scope ?? GLOBAL_SCOPE,
     required_effect: args.effect,
+    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(args.gate), args.kind, args.effect),
     severity: args.severity ?? "major",
     diagnostic: args.diagnostic,
   });
@@ -963,7 +964,7 @@ export async function writeValidationReport(workspaceDir: string, report: Valida
   return [jsonRel, markdownRel, gatesRel];
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -976,96 +977,152 @@ export const PRODUCER = defineProducer({
   module: "research",
   gates: [
     { id: "source_coverage", class: "manuscript", findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "cited_sources" },
     ] },
     { id: "evidence_coverage", class: "manuscript", findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
-      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
     ] },
     { id: "literature_quality_score", class: "manuscript", findings: [
-      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "core_sources" },
     ] },
     { id: "research_policy", class: "manuscript", findings: [
-      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "recent_source_ratio" },
     ] },
     { id: "landmark_coverage", class: "manuscript", observes: ["landmark_coverage_ratio"], findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "landmark_coverage_ratio" },
     ] },
     { id: "codebase_evidence", class: "manuscript", findings: [
-      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: null },
     ] },
     { id: "taxonomy_direct_evidence", class: "manuscript", findings: [
-      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
-      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "taxonomy_cell_ab_sources" },
     ] },
     { id: "research_artifacts_present", class: "manuscript", findings: [
-      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
+        acceptance_metric: "candidate_count" },
     ] },
     { id: "citation_url_liveness", class: "manuscript", findings: [
-      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "full_source_identity", class: "manuscript", findings: [
-      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "bibliography_consistent", class: "manuscript", findings: [
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "landmark_citation_coverage", class: "manuscript", observes: ["landmark_citation_coverage_ratio"], findings: [
-      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "landmark_citation_coverage_ratio" },
     ] },
     { id: "cited_literature_release_gates", class: "manuscript", observes: ["cited_sources", "citation_depth_per_section"], findings: [
-      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections" },
-      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
-      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion" },
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: "citation_depth_per_section" },
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
+        acceptance_metric: "cited_sources" },
+      { kind: "corpus", effect: "upgrade_source_quality", capability: "targeted_research_expansion",
+        acceptance_metric: "accepted_cited_ratio" },
     ] },
     { id: "citation_markers_present", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "citation_evidence_ledger", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "citation_verification", class: "manuscript", observes: ["citation_verification_status"], findings: [
-      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections" },
-      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
+        acceptance_metric: "citation_verification_status" },
+      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
+        acceptance_metric: "citation_verification_status" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
+        acceptance_metric: "citation_verification_status" },
     ] },
     { id: "claim_support", class: "manuscript", observes: ["claim_support"], findings: [
-      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
+        acceptance_metric: "claim_support" },
     ] },
     { id: "claim_contradictions", class: "manuscript", observes: ["claim_contradictions"], findings: [
-      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections" },
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections",
+        acceptance_metric: "claim_contradictions" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "claim_contradictions" },
     ] },
     { id: "prose_redundancy", class: "manuscript", observes: ["prose_redundancy"], findings: [
-      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections",
+        acceptance_metric: "prose_redundancy" },
     ] },
     { id: "target_length", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections" },
-      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections" },
+      { kind: "chapter_prose", effect: "expand_argument", capability: "revise_sections",
+        acceptance_metric: null },
+      { kind: "chapter_prose", effect: "remove_redundant_prose", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     { id: "review_target", class: "manuscript", observes: ["review_score"], findings: [
-      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections" },
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
+        acceptance_metric: "review_score" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "review_score" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "review_score" },
     ] },
     { id: "full_research_contracts", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: null },
     ] },
     { id: "publication_figures", class: "manuscript", observes: ["figures", "tables"], findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
     ] },
     { id: "publication_latex", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: "latex_build_status" },
     ] },
     { id: "publication_artifact_contract", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "figures" },
     ] },
     { id: "manuscript_build", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
-      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: "latex_build_status" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
+        acceptance_metric: "latex_build_status" },
+      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification",
+        acceptance_metric: "latex_build_status" },
     ] },
     { id: "full_claim_double_review", class: "measurement", findings: [] },
+    // Re-reads of another producer's report. Measurement class: satisfied by
+    // re-running that producer, never by editing an artifact, and the routable
+    // findings already reach the kernel from corpus-gates and survey-contract.
+    { id: "full_corpus_gates", class: "measurement", findings: [] },
+    { id: "full_survey_contract", class: "measurement", findings: [] },
+    // Emitted here too, by the release-gate helper this validator calls. It is
+    // re-declared identically to the visual-review producer, which
+    // registerProducers accepts and a conflicting re-declaration would not.
+    { id: "rendered_visual_review", class: "manuscript", observes: ["rendered_visual_review"], findings: [
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
+      { kind: "table_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
+        acceptance_metric: "rendered_visual_review" },
+    ] },
     { id: "empirical_experiment", class: "environment", findings: [] },
   ],
 });

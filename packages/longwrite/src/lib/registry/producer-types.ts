@@ -4,12 +4,28 @@ import {
   GENERATED_KINDS, MetricIdSchema, OPERATOR_CAPABILITY, OPERATOR_TARGET_KINDS,
   RequiredEffectSchema,
 } from "./ids.js";
+import { METRIC_REGISTRY } from "./metrics.js";
+import { gateFamily, type ArtifactKind, type GateId, type MetricId, type RequiredEffect } from "./ids.js";
 
 export const FindingShape = z.object({
   kind: ArtifactKindSchema,
   effect: RequiredEffectSchema,
   capability: CapabilityIdSchema,
+  /** The acceptance metric this finding moves, or `null` when it moves none.
+   *
+   * Required, never inferred from the gate. A compound gate such as
+   * `cited_literature_release_gates` decides on several different metrics, so
+   * "the gate's metric" is not a function and acceptance could not be derived
+   * from a finding without this. `null` is a statement, not an omission: it
+   * says the defect is real and no registered metric tracks it. */
+  acceptance_metric: MetricIdSchema.nullable(),
 }).strict().superRefine((shape, ctx) => {
+  if (shape.acceptance_metric !== null && !METRIC_REGISTRY.has(shape.acceptance_metric)) {
+    ctx.addIssue({
+      code: "custom", path: ["acceptance_metric"],
+      message: `unknown metric ${shape.acceptance_metric}; register it in metrics.ts or declare null`,
+    });
+  }
   if (GENERATED_KINDS.includes(shape.kind)) {
     ctx.addIssue({
       code: "custom", path: ["kind"],
@@ -60,6 +76,26 @@ export type FindingShape = z.infer<typeof FindingShape>;
 
 /** Declared beside the checks that emit these gates, so a reviewer sees the
  * declaration and the code together. */
-export function defineProducer(definition: unknown): ProducerDefinition {
+/** Typed rather than `unknown`, so a producer that omits a required field —
+ * `acceptance_metric` above all — is a compile error at its own declaration
+ * site rather than a runtime failure at registry construction. */
+export function defineProducer(definition: z.input<typeof ProducerDefinition>): ProducerDefinition {
   return ProducerDefinition.parse(definition);
+}
+
+/** The acceptance metric a producer declared for one of its triples.
+ *
+ * Each module looks this up against its OWN producer definition, so no module
+ * has to import the registry and no import cycle appears. Throws rather than
+ * returning undefined: an emitted triple that was never declared is the defect
+ * routing-coverage exists to catch, and guessing here would hide it. */
+export function acceptanceMetricOf(
+  producer: ProducerDefinition, gate: GateId, kind: ArtifactKind, effect: RequiredEffect,
+): MetricId | null {
+  const family = gateFamily(gate);
+  const declared = producer.gates.find((entry) => entry.id === family);
+  if (!declared) throw new Error(`${producer.module} emits gate ${gate} without declaring it`);
+  const shape = declared.findings.find((finding) => finding.kind === kind && finding.effect === effect);
+  if (!shape) throw new Error(`${producer.module} gate ${gate} never declared (${kind}, ${effect})`);
+  return shape.acceptance_metric;
 }

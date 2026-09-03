@@ -7,12 +7,12 @@ const sample = defineProducer({
   module: "sample",
   gates: [
     { id: "visual_review", class: "manuscript", findings: [
-      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+      { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections", acceptance_metric: "core_sources" },
+      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan", acceptance_metric: "core_sources" },
     ] },
     { id: "compiler_present", class: "environment", findings: [] },
     { id: "taxonomy", class: "manuscript", findings: [
-      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion" },
+      { kind: "corpus", effect: "acquire_additional_evidence", capability: "targeted_research_expansion", acceptance_metric: "core_sources" },
     ] },
   ],
 });
@@ -85,7 +85,7 @@ describe("generated routing", () => {
   it("rejects an environment or measurement gate that declares findings", () => {
     expect(() => defineProducer({
       module: "bad", gates: [{ id: "env", class: "environment", findings: [
-        { kind: "corpus", effect: "acquire_additional_evidence", capability: "x" },
+        { kind: "corpus", effect: "acquire_additional_evidence", capability: "x", acceptance_metric: "core_sources" },
       ] }],
     })).toThrow(/environment.*must declare no findings/i);
   });
@@ -100,8 +100,8 @@ describe("generated routing", () => {
     const other = defineProducer({
       module: "other",
       gates: [{ id: "visual_review", class: "manuscript", findings: [
-        { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections" },
-        { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan" },
+        { kind: "chapter_prose", effect: "add_explicit_artifact_reference", capability: "revise_sections", acceptance_metric: "core_sources" },
+        { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan", acceptance_metric: "core_sources" },
       ] }],
     });
     expect(() => registerProducers([sample, other])).not.toThrow();
@@ -111,7 +111,7 @@ describe("generated routing", () => {
     const conflicting = defineProducer({
       module: "other",
       gates: [{ id: "visual_review", class: "manuscript", findings: [
-        { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+        { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline", acceptance_metric: "core_sources" },
       ] }],
     });
     expect(() => registerProducers([sample, conflicting]))
@@ -121,7 +121,7 @@ describe("generated routing", () => {
   it("rejects a generated kind as a finding's artifact", () => {
     expect(() => defineProducer({
       module: "bad", gates: [{ id: "g", class: "manuscript", findings: [
-        { kind: "latex_layout", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+        { kind: "latex_layout", effect: "repair_artifact_placement", capability: "revise_visual_plan", acceptance_metric: null },
       ] }],
     })).toThrow(/generated/i);
   });
@@ -129,7 +129,7 @@ describe("generated routing", () => {
   it("accepts an operator-target kind when an operator capability owns it", () => {
     expect(() => defineProducer({
       module: "ok", gates: [{ id: "g", class: "manuscript", findings: [
-        { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+        { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification", acceptance_metric: null },
       ] }],
     })).not.toThrow();
   });
@@ -138,7 +138,7 @@ describe("generated routing", () => {
     // Nothing this product owns can install a LaTeX compiler.
     expect(() => defineProducer({
       module: "bad", gates: [{ id: "g", class: "manuscript", findings: [
-        { kind: "toolchain", effect: "repair_toolchain", capability: "revise_visual_plan" },
+        { kind: "toolchain", effect: "repair_toolchain", capability: "revise_visual_plan", acceptance_metric: null },
       ] }],
     })).toThrow(/only request_operator_clarification/i);
   });

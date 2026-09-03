@@ -70,17 +70,19 @@ describe("input digests", () => {
   it("includes nested model configuration for a model pipeline", async () => {
     const ws = await workspace();
     const definition = metricDefinition(metricId("review_score"));
-    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "high" } }))
-      .not.toBe(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "low" } }));
+    const prompt = "c".repeat(64);
+    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "high" }, promptDigest: prompt }))
+      .not.toBe(await computeInputDigest(ws, definition, { asOfDate: AS_OF, model: { name: "opus", effort: "low" }, promptDigest: prompt }));
   });
 
   it("does not include the producer's raw output", async () => {
     const ws = await workspace();
     const definition = metricDefinition(metricId("review_score"));
-    const before = await computeInputDigest(ws, definition, { asOfDate: AS_OF });
+    const context = { asOfDate: AS_OF, promptDigest: "c".repeat(64) };
+    const before = await computeInputDigest(ws, definition, context);
     await fs.mkdir(path.join(ws, "reviews"), { recursive: true });
     await fs.writeFile(path.join(ws, "reviews", "scorecard.json"), "{}", "utf-8");
-    expect(await computeInputDigest(ws, definition, { asOfDate: AS_OF })).toBe(before);
+    expect(await computeInputDigest(ws, definition, context)).toBe(before);
   });
 
   it("changes the evaluator digest when its version changes", () => {

@@ -50,6 +50,11 @@ export const FindingSchema = z.object({
    * objective ambiguous. `GLOBAL_SCOPE` for a workspace-wide objective. */
   objective_scope_key: z.string(),
   required_effect: RequiredEffectSchema,
+  /** The acceptance metric this finding moves, copied from the producer's own
+   * declaration. Required, never inferred from the gate: a compound gate
+   * decides on several metrics, so acceptance cannot be derived from the gate
+   * alone. `null` says no registered metric tracks this defect. */
+  acceptance_metric: MetricIdSchema.nullable(),
   severity: z.enum(["minor", "major", "critical"]),
   /** For operators. Never parsed, never routed on. */
   diagnostic: z.string().min(1).max(8_000),
@@ -148,6 +153,25 @@ export const StructuredCheckSchema = z.object({
   if (!check.pass && check.findings.length === 0 && !check.requires_diagnosis) {
     ctx.addIssue({ code: "custom", path: ["findings"],
       message: `${check.id} failed with no finding and no requires_diagnosis; nothing could act on it` });
+  }
+  // A finding is a repair request. Attaching one to a satisfied gate would
+  // dispatch work nobody asked for, and the kernel has no way to tell that
+  // from a real one.
+  if (check.pass && check.findings.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["findings"],
+      message: `${check.id} passed but carries ${check.findings.length} finding(s); a satisfied gate has nothing to repair` });
+  }
+  if (check.pass && check.requires_diagnosis) {
+    ctx.addIssue({ code: "custom", path: ["requires_diagnosis"],
+      message: `${check.id} passed but requests diagnosis` });
+  }
+  // A finding travels inside its check. One naming a different gate would be
+  // routed against a gate that never declared it.
+  for (const [index, finding] of check.findings.entries()) {
+    if (finding.gate_id !== check.id) {
+      ctx.addIssue({ code: "custom", path: ["findings", index, "gate_id"],
+        message: `finding ${finding.id} names gate ${finding.gate_id} but travels inside ${check.id}` });
+    }
   }
 });
 export type StructuredCheck = z.infer<typeof StructuredCheckSchema>;

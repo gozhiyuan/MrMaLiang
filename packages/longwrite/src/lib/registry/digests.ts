@@ -4,8 +4,8 @@ import path from "node:path";
 import { canonicalJson } from "./canonical.js";
 import type { MetricDefinition } from "./metrics.js";
 
-function sha256(text: string): string {
-  return crypto.createHash("sha256").update(text).digest("hex");
+function sha256(value: string | Buffer): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 /** Identifies the code that produced a measurement. A change of version is a
@@ -41,11 +41,14 @@ async function digestOfDependency(workspaceDir: string, dependency: string): Pro
     }
     const parts: string[] = [];
     for (const file of files) {
-      parts.push(file, sha256(await fs.readFile(path.join(target, file), "utf-8").catch(() => "")));
+      parts.push(file, sha256(await fs.readFile(path.join(target, file)).catch(() => Buffer.alloc(0))));
     }
     return sha256(canonicalJson(parts));
   }
-  const content = await fs.readFile(target, "utf-8").catch(() => null);
+  // Hashed as raw bytes, never decoded first. A PDF read as UTF-8 collapses
+  // every invalid sequence to the same replacement character, so two different
+  // manuscripts hashed identically and a stale measurement looked fresh.
+  const content = await fs.readFile(target).catch(() => null);
   return content === null ? "absent" : `present:${sha256(content)}`;
 }
 
@@ -55,7 +58,7 @@ async function digestOfDependency(workspaceDir: string, dependency: string): Pro
  * static measurement would invalidate daily. It never covers `raw_output`. */
 export async function computeInputDigest(
   workspaceDir: string, definition: MetricDefinition,
-  context: { asOfDate: string; model?: Record<string, unknown> },
+  context: { asOfDate: string; model?: Record<string, unknown>; promptDigest?: string },
 ): Promise<string> {
   const parts: unknown[] = [
     definition.metric, definition.evaluator, definition.reducer, definition.scope_kind,
@@ -65,6 +68,16 @@ export async function computeInputDigest(
     parts.push(dependency, await digestOfDependency(workspaceDir, dependency));
   }
   if (definition.time_dependent) parts.push({ as_of_date: context.asOfDate });
-  if (definition.measurement_kind !== "script") parts.push({ model: context.model ?? null });
+  if (definition.measurement_kind !== "script") {
+    // Wire contract §B11: instructions are an input. Holding the model fixed
+    // while rewriting the review prompt produced the same digest, so a
+    // judgment taken under the old instructions was reused as if fresh.
+    if (!context.promptDigest) {
+      throw new Error(
+        `${definition.metric} is a ${definition.measurement_kind} measurement and needs a prompt digest; ` +
+        `its identity depends on the instructions it was taken under`);
+    }
+    parts.push({ model: context.model ?? null, prompt: context.promptDigest });
+  }
   return sha256(canonicalJson(parts));
 }

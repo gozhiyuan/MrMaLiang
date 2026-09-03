@@ -8,7 +8,15 @@ import { stringify } from "yaml";
  * `findings` stays empty for a producer that still returns prose findings; the
  * gate-id assertions bite from the start, and each migration task makes the
  * finding assertions meaningful for its own module. */
-export type ProbeResult = { gateIds: string[]; findings: Array<Record<string, unknown>> };
+export type ProbeResult = {
+  gateIds: string[];
+  findings: Array<Record<string, unknown>>;
+  /** Why the producer emitted nothing, when it threw. Previously an exception
+   * was silently converted into zero emissions, so three producers — including
+   * the largest — were entirely unexercised while the suite reported the
+   * coverage assertions as passing. */
+  error?: string;
+};
 
 const created: string[] = [];
 
@@ -38,8 +46,22 @@ async function probeWorkspace(module: string): Promise<string> {
     },
     writing: { target_length_words: 8000 },
   }), "utf-8");
-  await fs.writeFile(path.join(dir, "sources", "classified_sources.jsonl"),
-    JSON.stringify({ id: "s1", citation_depth: "C", source: "arxiv", title: "A", abstract: "x", year: 2020, topics: [] }), "utf-8");
+  await fs.writeFile(path.join(dir, "sources", "classified_sources.jsonl"), [
+    { id: "s1", citation_depth: "C", source: "arxiv", title: "A", abstract: "x", year: 2020, topics: [],
+      venue: "arXiv", authors: ["Ada Lovelace"], url: "https://example.invalid/s1", identifiers: {},
+      quality_score: 1, score_rationale: "probe", citation_depth_rationale: "probe" },
+  ].map((record) => JSON.stringify(record)).join("\n"), "utf-8");
+  await fs.writeFile(path.join(dir, "sources", "citation_plan.jsonl"),
+    JSON.stringify({ section_id: "section-01", section_title: "One", source_ids: ["ghost"] }), "utf-8");
+  await fs.writeFile(path.join(dir, "sources", "bibliography.bib"), "@article{other, title={Other}}\n", "utf-8");
+  // The survey contract reads an outline, and preflight reads the generated
+  // manifest. Without them those producers threw before emitting anything.
+  await fs.writeFile(path.join(dir, "outline.json"),
+    JSON.stringify({ sections: [{ id: "section-01", title: "One" }] }), "utf-8");
+  await fs.writeFile(path.join(dir, "malaclaw.yaml"), stringify({
+    version: 1,
+    workflow: { stages: [{ id: "draft_sections", max_parallel: 8, steps: [{ id: "draft", runtime: "script" }] }] },
+  }), "utf-8");
   await fs.writeFile(path.join(dir, "chapters", "section-01.md"), "# One\n\nProse with no markers.\n", "utf-8");
   await fs.writeFile(path.join(dir, "paper", "main.tex"), "\\documentclass{article}\n", "utf-8");
   // A figure and a table that are declared but never rendered, labeled or
@@ -119,9 +141,10 @@ export async function probeProducer(module: string): Promise<ProbeResult> {
   };
   try {
     return collect(await run());
-  } catch {
-    // Absent input is expected in a probe workspace. Emitting nothing is a
-    // weaker signal than emitting something undeclared, and never a failure.
-    return { gateIds: [], findings: [] };
+  } catch (error) {
+    // Reported, never swallowed. A producer that cannot run has not been
+    // checked at all, and the per-producer assertion below turns that into a
+    // failure rather than a silent pass.
+    return { gateIds: [], findings: [], error: error instanceof Error ? error.message.split("\n")[0] : String(error) };
   }
 }

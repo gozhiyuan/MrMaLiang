@@ -24,6 +24,7 @@ function lFinding(gate: string, route: Route, subject: string, diagnostic: strin
     ...(location === undefined ? {} : { location }),
     objective_scope_key: GLOBAL_SCOPE,
     required_effect: route.effect,
+    acceptance_metric: acceptanceMetricOf(PRODUCER, gateId(gate), route.kind, route.effect),
     severity: "major",
     diagnostic,
   });
@@ -211,7 +212,7 @@ export async function validateLatexWorkspace(workspaceDir: string): Promise<Vali
   return { pass: checks.every((check) => check.pass), checks };
 }
 
-import { defineProducer } from "../registry/producer-types.js";
+import { defineProducer, acceptanceMetricOf } from "../registry/producer-types.js";
 
 /** Gate declarations, kept beside the checks that emit them so a reviewer
  * sees a gate's repair semantics and its code together. The class table,
@@ -220,22 +221,29 @@ export const PRODUCER = defineProducer({
   module: "latex",
   gates: [
     { id: "latex_sources", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
       // Most of what this gate detects is a bibliography that does not resolve
       // against what main.tex cites. Layout defects in generated TeX have no
       // owner in the capability vocabulary and request diagnosis instead.
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
+        acceptance_metric: null },
     ] },
     { id: "latex_outline_structure", class: "manuscript", findings: [
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline" },
+      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
+        acceptance_metric: "outline_readiness" },
     ] },
     { id: "latex_build", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography" },
-      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: "latex_build_status" },
+      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
+        acceptance_metric: "latex_build_status" },
+      { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification",
+        acceptance_metric: "latex_build_status" },
     ] },
     { id: "reader_facing_publication", class: "manuscript", findings: [
-      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan" },
+      { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
+        acceptance_metric: null },
     ] },
   ],
 });

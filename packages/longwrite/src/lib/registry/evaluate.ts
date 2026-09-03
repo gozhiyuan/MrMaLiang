@@ -7,11 +7,21 @@ import type { MetricId } from "./ids.js";
 import { METRIC_REGISTRY, metricDefinition, type MetricDefinition } from "./metrics.js";
 import { MeasurementEnvelopeSchema, type MeasurementEntry, type MeasurementEnvelope } from "./records.js";
 
+/** Stands in for instructions that have not been chosen yet. A model metric is
+ * reported `deferred` here, so no judgment has been taken and there is no real
+ * prompt to digest. The acquisition stage passes the actual prompt and gets a
+ * different identity, which is exactly what must happen. */
+const DEFERRED_PROMPT = "0".repeat(64);
+
 export type EvaluateOptions = {
   metrics?: MetricId[];
   tier?: MetricDefinition["measurement_tier"];
   asOfDate: string;
   modelConfig?: Record<string, unknown>;
+  /** Digest of the instructions a model measurement is taken under. Holding
+   * the model fixed while rewriting the prompt must not reuse the earlier
+   * judgment, so the prompt is part of the measurement's identity. */
+  promptDigest?: string;
   /** Test-only: proves the missing-evaluator path reports unavailable rather
    * than deferred, which would hide the gap behind a legitimate-looking
    * status. */
@@ -71,6 +81,7 @@ export async function buildEnvelope(
       evaluator_digest: evaluatorDigest(definition.evaluator, EVALUATOR_VERSION),
       input_digest: await computeInputDigest(workspaceDir, definition, {
         asOfDate: options.asOfDate, model: options.modelConfig,
+        promptDigest: options.promptDigest ?? DEFERRED_PROMPT,
       }),
       measurement_kind: definition.measurement_kind,
     };

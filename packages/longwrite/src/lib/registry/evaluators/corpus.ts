@@ -4,7 +4,7 @@ import {
   chapterFiles, citedSourceIds, isAcceptedSource, isArxivOnlySource, isWithinOneCalendarYear,
 } from "../../validation/research.js";
 import { loadProjectConfigIfExists } from "../../project-config.js";
-import { isRecentSource, taxonomyCellCounts } from "../../research/corpus-gates.js";
+import { isRecentSource, sourceTypeDiversity, taxonomyCellCounts } from "../../research/corpus-gates.js";
 import type { ClassifiedSource } from "../../research/types.js";
 import { GLOBAL_SCOPE, scopeKey } from "../scope.js";
 
@@ -79,10 +79,11 @@ export const CORPUS_EVALUATORS: Record<string, EvaluatorFn> = {
       sources.filter((source) => isRecentSource(source, ctx.asOfDate)).length, sources.length));
   },
 
-  source_type_diversity_count: async (ctx) => {
-    const sources = await loadSources(ctx.workspaceDir);
-    return global(new Set(sources.map((source) => source.source).filter(Boolean)).size);
-  },
+  /** Shares sourceTypeDiversity with the gate that reads this value. Counting
+   * providers here while the gate counted providers plus identifier systems
+   * gave one workspace two different values for one objective. */
+  source_type_diversity_count: async (ctx) =>
+    global(sourceTypeDiversity(await loadSources(ctx.workspaceDir))),
 
   cited_sources: async (ctx) => global((await citedSources(ctx)).length),
 
