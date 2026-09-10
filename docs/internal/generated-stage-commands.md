@@ -24,9 +24,12 @@ resulting manifests still invoke the same subcommands.
 | `evidence audit` | — | `evidence_audit` |
 | `evidence consolidate` | — | `citation_ledger`, `consolidate_citations` |
 | `evidence index` | — | `corpus_recovery_evidence_index`, `evidence_index`, `quality_evidence_index_refresh` |
+| `metrics acquire` | `--metric` | `acquire_claim_support`, `acquire_latex_build_status`, `acquire_rendered_visual_review`, `acquire_review_score` |
+| `metrics evaluate` | `--tier` | `measure_round_metrics`, `measure_unit_metrics` |
 | `publication package` | — | `package_submission` |
 | `research assess` | — | `assess`, `final_release_assess_research` |
 | `research assess-final-release-progress` | — | `final_release_progress` |
+| `research assess-reachability` | — | `assess_reachability` |
 | `research backfill-validated-evidence-history` | — | `quality_backfill_validated_evidence_history` |
 | `research citation-repair-packet` | — | `citation_repair_packet` |
 | `research cited-source-upgrade-packet` | — | `cited_source_upgrade_packet` |
@@ -42,9 +45,14 @@ resulting manifests still invoke the same subcommands.
 | `research fulltext` | `--max-sources` `--no-pdf-download` | `corpus_recovery_fulltext`, `fulltext`, `quality_fulltext_refresh` |
 | `research gate-reachability` | — | `gate_reachability` |
 | `research generate-final-release-plan` | — | `final_release_plan` |
+| `research import-experiment` | `--manifest` | `experiment_import` |
 | `research prepare-experiment` | — | `experiment_evidence_prepare` |
 | `research recall` | `--provider` `--query-budget` `--target-candidates` `--topic` | `recall` |
 | `research reconcile-identities` | — | `identity_reconcile` |
+| `research reconcile-targets` | — | `reconcile_targets` |
+| `research repair-bibliography` | — | `repair_bibliography` |
+| `research repair-citation-plan` | — | `repair_citation_plan` |
+| `research repair-source-metadata` | — | `repair_source_metadata` |
 | `research score` | — | `score` |
 | `research select-semantic-candidates` | — | `semantic_candidate_select` |
 | `research select-source-evidence-candidates` | — | `corpus_recovery_source_candidate_select`, `quality_source_evidence_candidate_select`, `source_evidence_candidate_select` |
@@ -52,7 +60,9 @@ resulting manifests still invoke the same subcommands.
 | `research survey-contract` | — | `outline_initial_survey_contract`, `outline_recheck_survey_contract`, `quality_outline_survey_contract`, `survey_contract` |
 | `research venue-upgrade` | — | `venue_upgrade` |
 | `research verify` | `--max-sources` `--section` | `final_release_verify_citations`, `verify_citations`, `verify_section_citations` |
+| `review assess-disagreement` | — | `assess_review_disagreement` |
 | `review claims` | — | `claim_score` |
+| `review diagnose-objective` | — | `build_diagnosis_packet` |
 | `review outline-approval` | — | `outline_approval_gate` |
 | `review request-clarification` | `--action-plan` | `request_operator_clarification` |
 | `review score-outline-readiness` | — | `outline_initial_readiness_score`, `outline_recheck_readiness_score` |

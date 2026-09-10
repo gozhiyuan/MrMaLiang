@@ -104,3 +104,52 @@ npm run release:check
 
 The component’s TypeScript source lives in `src/`; its CLI compatibility entry
 point exists only for generated workflow stages and integration tests.
+
+## Contract enforcement
+
+### The target ledger
+
+`research/target-ledger.json` records every research target through the whole
+pipeline — `retrieval_pending`, `retrieved`, `identity_verified`,
+`fulltext_ingested`, `evidence_validated`, `allocated`, `cited` — plus the
+typed reasons a target may leave it (`fulltext_unavailable`,
+`insufficient_claim_bearing_evidence`, `outside_revised_scope`, and so on). A
+target is keyed by its own key, not by a source id, so a landmark that is found
+late is the same target that was requested early rather than a new one.
+
+Selectors reserve before they rank, and each reserves only the targets whose
+lifecycle state it can act on: a `cited` target stops consuming screening
+capacity, and a target with no ingested full text is not seeded into evidence
+extraction. Section allocation reserves **per section**, so one section's
+landmarks cannot make another section's packet infeasible.
+
+### Repair packets
+
+A repair packet is built by the engine from registered findings, the current
+scoped observations and the capability's declared reads — never assembled by a
+caller, which could omit the protected metrics and produce a packet with no
+invariants at all. Excerpts are bounded and centred on the finding's location;
+secrets are redacted before the packet is written, not before it is displayed;
+and externally retrieved material is rendered inside a delimited region the
+prompt states is data, never instructions, with every instruction above it.
+
+### Diagnosis
+
+When an objective cannot be met, the kernel dispatches `diagnose_objective`.
+It reads a packet carrying the objective's whole history — every strategy
+already tried, every value already measured, and whether the target is
+reachable at all — and writes a decision: a different effect, a different
+capability, an operator question, or a verdict that the target is unreachable.
+It cannot lower a target. That is why every other unit may reject a repeated
+strategy strictly: the escape hatch is diagnosis, not a relaxed rule elsewhere.
+
+### Templates versus action instances
+
+The tool catalog holds **capability templates**. A template declares what a
+capability is, the maximum envelope it may ever touch, and the metrics it must
+not break — but no `acceptance`, because the gate and scope a repair answers to
+are known only when a finding is dispatched. The dispatcher materializes a
+per-finding **action instance**: its envelope narrows to the artifacts the
+findings name, its criterion comes from those findings' own metric and scope,
+and a finding whose metric is `null` takes a verification criterion instead —
+the gate that emitted it must run again and come back clean.

@@ -66,7 +66,7 @@ Only customize what the interview surfaced. The high-leverage knobs:
 | User says | Edit |
 | --- | --- |
 | "I want to approve X before it proceeds" | `requires_human_approval: true` on that stage |
-| "Keep revising until it's good" | `max_rounds: N` + `stop_when: review_score >= T` on the revise stage (metrics come from `reports/metrics.json`) |
+| "Keep revising until it's good" | `max_rounds: N` + `stop_when: review_score >= T` on the revise stage (the engine evaluates the latest accepted observation, produced through a declared measurement stage) |
 | "Draft sections in parallel" | the `foreach` stage's `max_parallel` |
 | "This step is deterministic" | `runtime: script` + a structured `command:` (no shell) |
 | "Use a cheaper model for X" | per-stage `runtime:`/`model:` override |

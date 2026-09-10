@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Contract IR v2 integration with MalaClaw 3.** Generated workflows now use
+  the explicit IR-v2 contract and the engine-owned observation store, with
+  MalaClaw `>=3.0.0 <4.0.0` required by preflight and release tooling.
+- **Structured findings and target reservation.** Findings carry the declared
+  gate, artifact, effect, scope, and acceptance route; target reservations keep
+  competing repairs from silently spending the same evidence or objective.
+- **Repair packets and verifier dispatch.** A dispatched repair receives its
+  bounded packet and is judged by its declared metric or exact gate verifier,
+  rather than by a generic aggregate signal.
+
+### Changed
+
+- **Declared effects and corrective execution.** Action instances, producer
+  refresh, measurement acquisition, and corrective blocks now run through the
+  MalaClaw 3 transactional/declared-effects protocol. This makes stale
+  observations, undeclared writes, and operator-required work explicit rather
+  than ordinary worker failures.
+
 ## 0.4.0 — 2026-08-03
 
 Seven changes, every one of them found by measuring a live flagship run rather

@@ -1173,8 +1173,10 @@ maliang writing feedback add my-survey --message "Make section 3 more technical.
 That appends to `feedback/user-feedback.md`. Novel and technical-book workflows
 consume it in their bounded `quality_loop`, produce
 `feedback/revision-request.json`, `reviews/revision-plan.md`,
-`reviews/revision-report.md`, and update `reports/metrics.json` so MalaClaw can
-evaluate the loop stop condition.
+`reviews/revision-report.md`, and run their declared measurement stage. The
+engine ingests its `reports/measurements.json` envelope into the IR-v2
+observation store; loop conditions read that stored observation rather than a
+mutable `reports/metrics.json` file.
 
 Mapping:
 
@@ -1209,6 +1211,10 @@ Mapping:
 | `--max-recorded-tokens` | `run_limits.max_recorded_tokens`. | Optional telemetry guardrail. It pauses between units and is not a provider billing or subscription meter. |
 
 ## Extension Guidance
+
+See [Mode Extension Authoring](./mode-extension-authoring.md) for the public
+readiness boundary: the architecture is reusable, while the current flagship
+examples and release evidence are paper-focused.
 
 To add a new writing mode:
 

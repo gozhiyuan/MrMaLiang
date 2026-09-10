@@ -96,7 +96,9 @@ Choose the research action. MrMaLiang resolves it into internal declarations and
 | `paper.empirical-import` | An existing audited manifest, optional repository | Runs no experiment; verifies and imports the bundle before writing |
 
 Also available: `writing.novel` and `writing.technical-book` (LongWrite only, no research gates), and `experiment.*`
-for an audited suite with no manuscript.
+for an audited suite with no manuscript. The public flagship examples remain paper-focused; see the
+[mode-extension authoring guide](packages/longwrite/docs/mode-extension-authoring.md) before presenting a new
+domain mode as production-ready.
 
 > **Supplying a repository never selects experiment mode.** With `paper.survey` it only changes the evidence profile
 > from literature to repository and creates no LongExperiment component. New execution happens only when you
@@ -183,7 +185,7 @@ duplicates before Git pins anything.
 
 ## ⚡ Quick Start
 
-**Requires Node.js 22+ and [MalaClaw](https://github.com/gozhiyuan/MalaClaw) `>=2.3.0 <3.0.0` on `PATH`.**
+**Requires Node.js 22+ and [MalaClaw](https://github.com/gozhiyuan/MalaClaw) `>=3.0.0 <4.0.0` on `PATH`.**
 
 ```bash
 git clone https://github.com/gozhiyuan/MrMaLiang.git && cd MrMaLiang
@@ -312,7 +314,7 @@ before the run, never to make an unchanged scope pass. See
 <details>
 <summary><b>Prerequisites</b></summary>
 
-**Everything:** Node.js 22+, MalaClaw `>=2.3.0 <3.0.0` on `PATH`, Git.
+**Everything:** Node.js 22+, MalaClaw `>=3.0.0 <4.0.0` on `PATH`, Git.
 
 **A real manuscript run:** an authenticated `codex` runtime (recommended — the most exercised configuration, and
 what this repository is developed against) or `claude-code`; a LaTeX engine (`tectonic` or `latexmk`); plus
@@ -338,11 +340,13 @@ key is reported by preflight rather than silently worked around.
 | Broad scholarly recall | Deep surveys (recommended) | `OPENALEX_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY` |
 | GitHub metadata / private repos | Repository studies | `GITHUB_TOKEN` |
 | Embedding retrieval or a direct API worker | Only when enabled in `longwrite.yaml` | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` |
-| Nano Banana illustration | Only when explicitly enabled **and** approved | `LONGWRITE_NANOBANANA_API_KEY` or `GEMINI_API_KEY` |
+| Nano Banana illustration | Generic projects: disabled by default. Flagship paper presets: configured/enabled, but still approval- and budget-gated. | `LONGWRITE_NANOBANANA_API_KEY` or `GEMINI_API_KEY` |
 | Remote GPU experiments | The Modal runner, after its adapter smoke test | Modal login — **never** in workspace `.env`, YAML, or Git |
 
-Nano Banana is optional, off by default, and limited to a non-evidentiary orienting illustration. It must never
-stand in for a source-grounded diagram, comparison table, metadata plot, or experimental result.
+Nano Banana is limited to a non-evidentiary orienting illustration. Generic projects leave it disabled; flagship
+paper presets configure it with a small budget so the operator can choose to use it. In either case, paid generation
+does nothing without an API key, a remaining budget, and explicit workspace approval. It must never stand in for a
+source-grounded diagram, comparison table, metadata plot, or experimental result.
 
 </details>
 

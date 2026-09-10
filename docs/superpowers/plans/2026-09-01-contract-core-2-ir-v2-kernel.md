@@ -217,21 +217,25 @@ git commit -m "feat(workflow): separate execution outcomes from contract outcome
 
 **Interfaces:**
 - Consumes: nothing.
-**Migrating criterion literals is not a text substitution.** `{ metric, scope_key, ... }`
-is the shape of a metric criterion, a `MustImprove` policy, an observation
-record, a measurement entry and a journal binding alike; only the first carries
-`kind`. Classify every literal by the schema it is parsed against before
-touching it — a pattern-based pass adds the discriminator to four strict
-schemas that reject it.
+- Produces: on every work unit — `kind: "plain" | "mutation" | "measurement"` (default `"plain"`), `reads: string[]`, **`writes: string[]`**, `owns: string[]`, `writes_observations: string[]`, `evaluate_with: string[]`, `acceptance: Criterion[]`, `must_preserve: Criterion[]`, `must_improve: MustImprove[]`, `strategy?: Strategy`. On `WorkflowDef` — `observation_store: string` (default `.malaclaw/observations`) and a **required** `ir_version` literal 2. Exports `matchesEnvelope(pattern, filePath)`.
 
 **Criteria are a discriminated union.** `MetricCriterion` carries a number,
-tolerance and direction; `VerificationCriterion` carries an opaque
-`verification_id`, a scope, an input digest and an expected pass status. Every
-consumer of `acceptance` and `must_preserve` narrows with `isMetricCriterion`
-before doing arithmetic, and treats a verification criterion as satisfied only
-by a recorded pass whose `input_digest` still matches.
+tolerance and direction. `VerificationCriterion` carries an opaque
+`verification_id`, a scope and an expected pass status — and deliberately **no
+digest**, because it is compiled before the repair runs and the bytes it must
+be checked against do not exist yet. Freshness is bound after the effects are
+applied, by the verification request (Task 26): a criterion is satisfied only
+by a result carrying that request's id.
 
-- Produces: on every work unit — `kind: "plain" | "mutation" | "measurement"` (default `"plain"`), `reads: string[]`, **`writes: string[]`**, `owns: string[]`, `writes_observations: string[]`, `evaluate_with: string[]`, `acceptance: Criterion[]`, `must_preserve: Criterion[]`, `must_improve: MustImprove[]`, `strategy?: Strategy`. On `WorkflowDef` — `observation_store: string` (default `.malaclaw/observations`) and a **required** `ir_version` literal 2. Exports `matchesEnvelope(pattern, filePath)`.
+Every consumer of `acceptance` narrows with `isMetricCriterion` before doing
+arithmetic. `must_preserve` and `must_improve` are metric-only.
+
+**Migrating criterion literals is not a text substitution.** `{ metric, scope_key, ... }`
+is equally the shape of a metric criterion, a `MustImprove` policy, an
+observation record, a measurement entry and a journal binding; only the first
+carries `kind`. Classify every literal by the schema it is parsed against before
+touching it — a pattern-based pass adds the discriminator to four strict
+schemas that reject it.
 
 `writes` is the field every test and example uses; the previous draft omitted it and could not compile. `outputs` keeps its existing meaning — artifacts that must exist and validate — while `writes` names paths expected to *change*.
 

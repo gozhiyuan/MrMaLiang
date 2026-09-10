@@ -361,21 +361,28 @@ diagram.
 
 ### Runtime and model selection
 
-The default full-mode manifest selects the **`codex` runtime**, but deliberately
-does not pin a Codex model ID. Each `[LLM]` stage therefore runs `codex exec`
-and inherits the model and reasoning settings from the authenticated Codex
-CLI's own configuration/account. This is why a newly created workspace and the
-dashboard can show `runtime: codex` but no model name. Check the active local
-selection with:
+The default full-mode manifest selects the **`codex` runtime** and the
+workspace records its execution policy in `longwrite.yaml`. New flagships use
+`execution.default_model` and `execution.default_model_reasoning_effort` for
+ordinary LLM units, with `execution.stage_overrides` for stronger planning,
+review, and visual stages. LongWrite compiles these values into the manifest
+and passes them to Codex workers, so a reproducible workspace does **not**
+depend on the user's mutable `~/.codex/config.toml`.
 
-```bash
-rg -n '^\s*model\s*=|^\s*model_reasoning_effort\s*=' ~/.codex/config.toml
+```yaml
+execution:
+  default_model: gpt-5.6-luna
+  default_model_reasoning_effort: medium
+  stage_overrides:
+    outline:
+      model: gpt-5.6-terra
+      model_reasoning_effort: high
 ```
 
-If this prints `model = "gpt-5.6-terra"` and high reasoning, the default Codex
-stages in this workspace will use Terra at high reasoning. On a different
-machine, inspect its own Codex configuration rather than assuming it uses the
-same model.
+The local Codex account must still be authenticated and allowed to use the
+selected model. After changing this policy, run `maliang writing sync
+<workspace>` and `maliang writing validate config <workspace>` before starting
+or resuming a run.
 
 The default LLM-owned units are `intake`, `search_planner`, `outline`,
 `draft_sections.draft`, `abstract`, and `visual_plan`, plus `baseline_review`,
@@ -406,7 +413,7 @@ argument remains LLM-authored.
 
 | Goal | Supported configuration | Important boundary |
 | --- | --- | --- |
-| Keep one Codex model for all Codex stages | Set `model` and `model_reasoning_effort` in the user's Codex configuration. | This is a personal machine default, not a workspace setting. |
+| Keep one Codex model for all Codex stages | Set `execution.default_model` and `execution.default_model_reasoning_effort` in `longwrite.yaml`. | This is compiled workspace policy; a local CLI default is only a fallback when the workspace leaves it unset. |
 | Pin a Codex model for one workspace stage | Add `execution.stage_overrides.<stage>.model` in `longwrite.yaml`; LongWrite compiles it to `codex exec -m <model>`. | Keep the runtime unset to retain `codex`. Script stages reject model overrides. |
 | Use Claude Code for selected judgment stages | Choose the bundled `codex_first` or `claude_first` runtime profile, or set a stage's `runtime: claude-code` and a model accepted by that CLI/account. | Requires Claude Code authentication; it is not enabled by the default profile. |
 | Use a direct API model | Set both `runtime: openai-api` (or another API runtime) and `model`. | API runtimes can produce only one concrete output, so use them only for compatible units such as `search_planner`, `visual_plan`, or `quality_loop.claim_judge`, never multi-file outline/revision stages. |
@@ -417,7 +424,7 @@ locked script stage:
 
 | Profile | Full-mode LLM setup | Use for this demo? |
 | --- | --- | --- |
-| `default` | Every LLM-owned stage uses the runtime chosen at launch (`codex` here) and its Codex CLI model setting (Terra/high on this machine). | Yes. This is the recommended first flagship configuration. |
+| `default` | Every LLM-owned stage uses the runtime chosen at launch (`codex` here) and the workspace's execution defaults/overrides. | Yes. This is the recommended first flagship configuration. |
 | `codex_first` | Codex remains primary. Its bundled advisor/reviewer tiers route `intake` and `outline` to Claude Code's advisor tier, `review` to its reviewer tier, and `revise` to the advisor tier; unassigned LLM stages remain on Codex. | Only after Claude Code is authenticated and you intentionally want a mixed-provider comparison. |
 | `claude_first` | Claude Code becomes primary for all non-script LLM stages, with its advisor/reviewer tier assignments for planning and review. | Not for the baseline Codex/Terra run. Use only when you want Claude Code to own the LLM work. |
 

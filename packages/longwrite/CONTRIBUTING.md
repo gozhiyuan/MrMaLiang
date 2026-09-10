@@ -159,7 +159,8 @@ When adding an example, include:
 
 - `README.md` with exact commands, runtime/model, provider, and human actions,
 - final artifact under `build/`,
-- metrics under `reports/metrics.json`,
+- measurement envelopes under `reports/measurements.json` and the corresponding
+  engine-owned observation history,
 - validation reports,
 - flow event trace or a summarized trace,
 - known failure modes and whether they are fixed or still open.

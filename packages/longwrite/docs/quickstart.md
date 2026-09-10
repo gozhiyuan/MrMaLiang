@@ -184,8 +184,10 @@ before execution with the full list.
 ## Optional: Nano Banana generated figures
 
 Deterministic figures (SVG chart, tables, mermaid/python sources) always
-build free. Generated concept art is the only paid backend — off by
-default, budget-gated, approval-gated:
+build free. Generated concept art is the only paid backend. Generic projects
+leave it disabled by default; flagship paper presets configure it with a small
+budget. Neither setting spends anything until a key, available budget, and
+explicit approval are present:
 
 ```yaml
 # longwrite.yaml
