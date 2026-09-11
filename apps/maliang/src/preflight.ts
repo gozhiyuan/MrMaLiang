@@ -127,11 +127,15 @@ export function foldWritingReport(rawReport: string | null, outcome: Pick<Captur
     return { status: "fail", checks: [{ id: "writing_preflight", pass: false, finding: "longwrite preflight report did not match the expected schema" }] };
   }
   const checks = (parsed as { checks: unknown[] }).checks;
-  if (!checks.every((check) => check && typeof check === "object" && typeof (check as { id?: unknown }).id === "string" && typeof (check as { pass?: unknown }).pass === "boolean" && typeof (check as { finding?: unknown }).finding === "string")) {
+  if (!checks.every((check) => check && typeof check === "object" && typeof (check as { id?: unknown }).id === "string" && typeof (check as { pass?: unknown }).pass === "boolean" && (typeof (check as { finding?: unknown }).finding === "string" || typeof (check as { diagnostic?: unknown }).diagnostic === "string"))) {
     return { status: "fail", checks: [{ id: "writing_preflight", pass: false, finding: "longwrite preflight report contained an invalid check" }] };
   }
   if (!fresh) return { status: "fail", checks: [{ id: "writing_preflight", pass: false, finding: "longwrite preflight did not produce a fresh report for this invocation" }] };
-  const report = parsed as { pass: boolean; checks: Array<{ id: string; pass: boolean; finding: string }> };
+  const componentChecks = checks.map((check) => {
+    const entry = check as { id: string; pass: boolean; finding?: string; diagnostic?: string };
+    return { id: entry.id, pass: entry.pass, finding: entry.finding ?? entry.diagnostic! };
+  });
+  const report = parsed as { pass: boolean };
   // A component preflight legitimately exits non-zero when *its report*
   // contains a failing check. Preserve those detailed checks for the unified
   // report. A passing report paired with a failed process, on the other hand,
@@ -139,7 +143,7 @@ export function foldWritingReport(rawReport: string | null, outcome: Pick<Captur
   if (report.pass && ((outcome.code !== 0 && outcome.code !== null) || outcome.signal || outcome.error)) {
     return { status: "fail", checks: [{ id: "writing_preflight", pass: false, finding: `longwrite preflight exited unsuccessfully (${outcome.error ?? outcome.signal ?? `exit ${outcome.code}`})` }] };
   }
-  return { status: report.pass ? "pass" : "fail", checks: report.checks };
+  return { status: report.pass ? "pass" : "fail", checks: componentChecks };
 }
 
 /** Spawns `longwrite preflight` for the writing component and folds its generated report. */

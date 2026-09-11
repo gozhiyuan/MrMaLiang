@@ -27,6 +27,13 @@ describe("foldWritingReport", () => {
     expect(foldWritingReport(JSON.stringify({ pass: false, checks }), { code: 1, signal: null }, true)).toEqual({ status: "fail", checks });
   });
 
+  it("normalizes Contract IR v2 structured-check diagnostics", () => {
+    const checks = [{ id: "worker_runtime", pass: true, diagnostic: "codex is available" }];
+    expect(foldWritingReport(JSON.stringify({ pass: true, checks }), success, true)).toEqual({
+      status: "pass", checks: [{ id: "worker_runtime", pass: true, finding: "codex is available" }],
+    });
+  });
+
   it("folds a null (crashed, no file) report to status fail with a writing_preflight finding mentioning the exit code", () => {
     const result = foldWritingReport(null, { code: 1, signal: null }, false);
     expect(result.status).toBe("fail");

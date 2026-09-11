@@ -220,7 +220,7 @@ describe("maliang command surface", () => {
     expect(project.research).toEqual({ paperKind: "empirical", evidenceProfile: "literature", experimentSource: "run", experimentAuthoring: "prescribed" });
     const experiment = parse(await fs.readFile(path.join(workspace, "experiment", "experiment.yaml"), "utf8")) as any;
     expect(experiment.authoring.mode).toBe("prescribed");
-    expect(experiment.runner).toEqual({ kind: "command" });
+    expect(experiment.runner).toEqual({ kind: "command", input_files: [] });
   });
 
   it("treats a repository supplied to paper.survey only as code evidence", async () => {

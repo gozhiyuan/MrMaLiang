@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 — 2026-09-10
+
+- Fix unified preflight parsing for Contract IR v2 structured checks, so a valid flagship workspace can enter its paid runtime only after its real component checks pass.
+
 ## 0.5.0 — 2026-09-10
 
 ### Added
