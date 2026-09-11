@@ -110,6 +110,10 @@ function studyExecution(config: ExperimentConfig): Record<string, unknown> {
   };
 }
 
+function runnerInputFiles(config: ExperimentConfig): string[] {
+  return config.runner.kind === "command" ? config.runner.input_files : [];
+}
+
 /** Compile the declared study graph into dependency levels. Each level is a
  * real MalaClaw foreach fan-out; an item's audit must pass before any
  * dependent level starts. Optional studies appear only when explicitly enabled
@@ -295,11 +299,11 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
       foreach: `runs/study-level-${index + 1}.items`, item_name: "study", max_parallel: config.execution.max_parallel_trials,
       steps: [
         {
-          id: "execute", owner: "methodologist", inputs: ["runs/suite-plan.json", "inputs/locks.json", config.authoring.mode === "agentic" ? "agent/candidate/manifest.json" : "worktrees/manifest.json"],
+          id: "execute", owner: "methodologist", inputs: ["runs/suite-plan.json", "inputs/locks.json", config.authoring.mode === "agentic" ? "agent/candidate/manifest.json" : "worktrees/manifest.json", ...runnerInputFiles(config)],
           outputs: ["results/studies/{{item.id}}/raw-results.json", "logs/studies/{{item.id}}/runner.log"], validators: ["required_output_exists"], ...execution,
         },
         {
-          id: "audit", owner: "result-auditor", inputs: ["results/studies/{{item.id}}/raw-results.json", "inputs/locks.json"], outputs: ["results/studies/{{item.id}}/audit.json"],
+          id: "audit", owner: "result-auditor", inputs: ["results/studies/{{item.id}}/raw-results.json", "inputs/locks.json", "runs/suite-plan.json"], outputs: ["results/studies/{{item.id}}/audit.json"],
           runtime: "script", command: longexperimentCommand(["stage", "audit-study", ".", "{{item.id}}"]), validators: ["required_output_exists"],
           instructions: ["Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."],
         },
@@ -308,7 +312,7 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
   }
   stages.push(
     scriptStage({
-      id: "aggregate_results", title: "Aggregate paired study results", owner: "result-auditor", inputs: ["runs/suite-plan.json", "inputs/locks.json", "results/studies/*/audit.json"],
+      id: "aggregate_results", title: "Aggregate paired study results", owner: "result-auditor", inputs: ["runs/suite-plan.json", "inputs/locks.json", "results/studies/**"],
       outputs: ["results/raw-results.json"], runtime: "script", command: longexperimentCommand(["stage", "aggregate", "."]), validators: ["required_output_exists"],
       instructions: ["Compute result comparisons only from completed, audited trial records. The aggregate performs a deterministic paired bootstrap; it never accepts a runner-supplied statistical conclusion."],
     }),
@@ -342,20 +346,116 @@ export function compileExperimentToManifest(config: ExperimentConfig): Record<st
   return assembleManifest(config, stages);
 }
 
+/** Declares the effects each output-producing unit was already having.
+ *
+ * These manifests set `require_declared_effects: true` — the promise that
+ * transaction isolation is real for this workflow — while every
+ * output-producing stage declared no `kind`, `owns` or `writes`. The engine
+ * therefore refused all six of them at startup: shape-only tests passed, and
+ * nothing anybody generated could actually be run.
+ *
+ * The declaration is derived, not invented: a stage that promises an output IS
+ * a stage that writes it, and its envelope is the outputs it promised, widened
+ * to the containing directory for a templated path whose concrete form the
+ * engine resolves per item. Reads are everything the stage already says it
+ * consumes, because the isolated copy is built from `reads` and a stage that
+ * cannot open its own declared input cannot run.
+ *
+ * A write outside this envelope is now a loud `undeclared_write` at the stage
+ * that made it, instead of a manifest that never starts. */
+function withDeclaredEffects(
+  stages: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const declare = (stage: Record<string, unknown>): Record<string, unknown> => {
+    if (Array.isArray(stage.steps)) {
+      return { ...stage, steps: (stage.steps as Array<Record<string, unknown>>).map(declare) };
+    }
+    if (Array.isArray(stage.stages)) {
+      return { ...stage, stages: (stage.stages as Array<Record<string, unknown>>).map(declare) };
+    }
+    if (String(stage.type ?? "") === "action_dispatch") return stage;
+    const outputs = ((stage.outputs as Array<string | { path: string }> | undefined) ?? [])
+      .map((entry) => typeof entry === "string" ? entry : entry.path);
+    if (outputs.length === 0) return stage;
+    const declared = (stage.kind !== undefined && stage.kind !== "plain")
+      || ((stage.owns as string[] | undefined)?.length ?? 0) > 0
+      || ((stage.writes as string[] | undefined)?.length ?? 0) > 0;
+    if (declared) return stage;
+
+    // A `{{study.id}}` output is resolved per item by the engine, and an
+    // envelope written in unresolved template syntax matches nothing the item
+    // writes. Its containing directory is the honest envelope: the item writes
+    // inside it, and the concrete output is checked against the resolved path.
+    const envelope = [...new Set(outputs.map((entry) =>
+      entry.includes("{{") ? `${entry.slice(0, entry.indexOf("{{"))}**` : entry))].sort();
+    const concrete = outputs.filter((entry) => !entry.includes("{{"));
+    return {
+      ...stage,
+      kind: "mutation",
+      owns: envelope,
+      writes: envelope,
+      corrective_capability: "operator",
+      reads: [...new Set([
+        ...((stage.reads as string[] | undefined) ?? []),
+        ...((stage.inputs as string[] | undefined) ?? []),
+        ...((stage.optional_inputs as string[] | undefined) ?? []),
+        ...((stage.skills as string[] | undefined) ?? []),
+        // Its own outputs: a stage that appends to a record it wrote in an
+        // earlier round needs the previous copy, and an isolated workspace
+        // without it turns an append into a truncation.
+        ...concrete,
+        "experiment.yaml",
+      ])].sort(),
+    };
+  };
+  return stages.map(declare);
+}
+
 /** One envelope for every pilot: run limits and parallelism are engine policy,
  * not per-pilot policy, so they must not drift between compilation paths. */
+/** Every owner the compiled stages name.
+ *
+ * Compilation adds stages the pilot config never listed, so the roster has to
+ * be derived from what was actually emitted. An owner absent from
+ * `attached_agents` is a semantic-validation error the shape check cannot see:
+ * the manifest parses and the engine refuses it at startup. */
+function declaredOwners(stages: Array<Record<string, unknown>>): string[] {
+  const owners = new Set<string>();
+  const walk = (list: Array<Record<string, unknown>>): void => {
+    for (const stage of list) {
+      if (typeof stage.owner === "string") owners.add(stage.owner);
+      if (Array.isArray(stage.stages)) walk(stage.stages as Array<Record<string, unknown>>);
+      if (Array.isArray(stage.steps)) walk(stage.steps as Array<Record<string, unknown>>);
+    }
+  };
+  walk(stages);
+  return [...owners].sort();
+}
+
 function assembleManifest(config: ExperimentConfig, stages: Array<Record<string, unknown>>): Record<string, unknown> {
   return {
     version: 1,
     project: {
       id: config.project.id,
       description: `LongExperiment: ${config.hypothesis}`,
-      attached_agents: ["experiment-lead", "methodologist", "result-auditor", "experiment-reporter"],
+      // Every owner the compiled stages actually name. `source-curator` owns
+      // the agentic research-context stage, and its absence made that whole
+      // manifest fail semantic validation at startup — a shape-only test could
+      // not see it.
+      attached_agents: [...new Set([
+        "experiment-lead", "methodologist", "result-auditor", "experiment-reporter",
+        ...declaredOwners(stages),
+      ])].sort(),
     },
     workflow: {
+      // Required and never defaulted from MalaClaw 3.0. A v1 manifest is
+      // refused rather than reinterpreted, because the two generations
+      // disagree about what a completed unit record means.
+      ir_version: 2,
+      require_declared_effects: true,
       external_inputs: ["experiment.yaml", "experiment_brief.md"], max_parallel: config.execution.max_parallel_trials,
       run_limits: { max_active_run_minutes: config.execution.max_active_run_minutes, ...(config.execution.max_recorded_tokens ? { max_recorded_tokens: config.execution.max_recorded_tokens } : {}), on_limit: "pause" },
-      stages,
+      stages: withDeclaredEffects(stages),
     },
   };
 }

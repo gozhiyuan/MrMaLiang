@@ -7,8 +7,8 @@ import { dedupeSources } from "./dedupe.js";
 import { scoreSources } from "./score.js";
 import { classifySources } from "./classify.js";
 import { writeBibtex } from "./bibtex.js";
-import { buildCitationPlan } from "./citation-plan.js";
-import type { RawSource, ResearchArtifacts } from "./types.js";
+
+import type { CitationPlanEntry, RawSource, ResearchArtifacts } from "./types.js";
 import { loadSearchPlan, applyExclusions, plannedQueries, SEARCH_PLAN_PATH } from "./search-plan.js";
 import { resolveWorkspaceReferenceSeeds } from "./reference-seeds.js";
 
@@ -47,7 +47,12 @@ export function buildResearchArtifactsFromSources(
   const deduped = dedupeSources(raw);
   const scored = scoreSources(deduped);
   const classified = classifySources(scored);
-  const citationPlan = buildCitationPlan(classified);
+  // EMPTY at research time, deliberately. A citation plan names outline
+  // sections, and no outline exists yet; the two generic entries this used to
+  // emit matched no real section, so every section past the second was drafted
+  // from section one's sources. The evidence-depth finalization stage builds
+  // the real plan once the outline is on disk.
+  const citationPlan: CitationPlanEntry[] = [];
   const bibliographyBibtex = writeBibtex(classified);
   const reportMarkdown =
     `# Research Tooling Report\n\n` +
@@ -208,7 +213,12 @@ export async function classifyWorkspaceSources(workspaceDir: string, topic: stri
     workspaceDir, "sources/scored_sources.jsonl",
   );
   const classified = classifySources(scored);
-  const citationPlan = buildCitationPlan(classified);
+  // EMPTY at research time, deliberately. A citation plan names outline
+  // sections, and no outline exists yet; the two generic entries this used to
+  // emit matched no real section, so every section past the second was drafted
+  // from section one's sources. The evidence-depth finalization stage builds
+  // the real plan once the outline is on disk.
+  const citationPlan: CitationPlanEntry[] = [];
   const providerUsed = (scored[0] as { provenance?: { provider?: string } })?.provenance?.provider ?? "unknown";
   const reportMarkdown =
     `# Research Tooling Report\n\n` +

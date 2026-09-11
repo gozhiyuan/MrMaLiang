@@ -5,12 +5,15 @@
     "description": "LongExperiment: Memory helps planning.",
     "attached_agents": [
       "experiment-lead",
+      "experiment-reporter",
       "methodologist",
       "result-auditor",
-      "experiment-reporter"
+      "source-curator"
     ]
   },
   "workflow": {
+    "ir_version": 2,
+    "require_declared_effects": true,
     "external_inputs": [
       "experiment.yaml",
       "experiment_brief.md"
@@ -46,7 +49,19 @@
             "pin-inputs",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "inputs/locks.json"
+        ],
+        "writes": [
+          "inputs/locks.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json"
+        ]
       },
       {
         "id": "experiment_search_plan",
@@ -73,7 +88,21 @@
         ],
         "retry": {
           "max_attempts": 2
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "agent/search-plan.json"
+        ],
+        "writes": [
+          "agent/search-plan.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/search-plan.json",
+          "experiment.yaml",
+          "experiment_brief.md",
+          "inputs/locks.json"
+        ]
       },
       {
         "id": "experiment_research_context",
@@ -102,7 +131,24 @@
             "research-context",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "agent/code-context.md",
+          "agent/literature-context.json"
+        ],
+        "writes": [
+          "agent/code-context.md",
+          "agent/literature-context.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/code-context.md",
+          "agent/literature-context.json",
+          "agent/search-plan.json",
+          "experiment.yaml",
+          "inputs/locks.json"
+        ]
       },
       {
         "type": "loop",
@@ -143,7 +189,23 @@
             ],
             "retry": {
               "max_attempts": 2
-            }
+            },
+            "kind": "mutation",
+            "owns": [
+              "agent/experiment-proposal.json"
+            ],
+            "writes": [
+              "agent/experiment-proposal.json"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/code-context.md",
+              "agent/experiment-proposal.json",
+              "agent/literature-context.json",
+              "agent/proposal-validation.json",
+              "experiment.yaml",
+              "experiment_brief.md"
+            ]
           },
           {
             "id": "validate",
@@ -172,7 +234,30 @@
                 "validate-proposal",
                 "."
               ]
-            }
+            },
+            "kind": "mutation",
+            "owns": [
+              "agent/proposal-validation.json",
+              "reports/experiment-design.md",
+              "reports/metrics.json",
+              "runs/trial-plan.json"
+            ],
+            "writes": [
+              "agent/proposal-validation.json",
+              "reports/experiment-design.md",
+              "reports/metrics.json",
+              "runs/trial-plan.json"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/experiment-proposal.json",
+              "agent/literature-context.json",
+              "agent/proposal-validation.json",
+              "experiment.yaml",
+              "reports/experiment-design.md",
+              "reports/metrics.json",
+              "runs/trial-plan.json"
+            ]
           }
         ]
       },
@@ -202,7 +287,22 @@
             ".",
             "design"
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/design-approval.md"
+        ],
+        "writes": [
+          "reports/design-approval.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/validated-proposal.json",
+          "experiment.yaml",
+          "reports/design-approval.md",
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ]
       },
       {
         "type": "loop",
@@ -248,7 +348,25 @@
             ],
             "retry": {
               "max_attempts": 2
-            }
+            },
+            "kind": "mutation",
+            "owns": [
+              "agent/candidate-bundle.json"
+            ],
+            "writes": [
+              "agent/candidate-bundle.json"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate-bundle.json",
+              "agent/candidate-test.json",
+              "agent/code-context.md",
+              "agent/smoke-results.json",
+              "agent/validated-proposal.json",
+              "experiment.yaml",
+              "reports/agentic-readiness.md",
+              "reports/candidate-materialization.md"
+            ]
           },
           {
             "id": "materialize_candidate",
@@ -274,7 +392,24 @@
                 "materialize-candidate",
                 "."
               ]
-            }
+            },
+            "kind": "mutation",
+            "owns": [
+              "agent/candidate/manifest.json",
+              "reports/candidate-materialization.md"
+            ],
+            "writes": [
+              "agent/candidate/manifest.json",
+              "reports/candidate-materialization.md"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate-bundle.json",
+              "agent/candidate/manifest.json",
+              "experiment.yaml",
+              "inputs/locks.json",
+              "reports/candidate-materialization.md"
+            ]
           },
           {
             "id": "candidate_execution_approval",
@@ -304,7 +439,21 @@
                 ".",
                 "candidate"
               ]
-            }
+            },
+            "kind": "mutation",
+            "owns": [
+              "reports/candidate-approval.md"
+            ],
+            "writes": [
+              "reports/candidate-approval.md"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate/manifest.json",
+              "experiment.yaml",
+              "reports/candidate-approval.md",
+              "reports/candidate-materialization.md"
+            ]
           },
           {
             "id": "test_candidate",
@@ -329,6 +478,22 @@
             },
             "validators": [
               "required_output_exists"
+            ],
+            "kind": "mutation",
+            "owns": [
+              "agent/candidate-test.json",
+              "logs/agent-candidate-tests.log"
+            ],
+            "writes": [
+              "agent/candidate-test.json",
+              "logs/agent-candidate-tests.log"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate-test.json",
+              "agent/candidate/manifest.json",
+              "experiment.yaml",
+              "logs/agent-candidate-tests.log"
             ]
           },
           {
@@ -356,6 +521,26 @@
             },
             "validators": [
               "required_output_exists"
+            ],
+            "kind": "mutation",
+            "owns": [
+              "agent/smoke-results.json",
+              "reports/agentic-readiness.md",
+              "reports/metrics.json"
+            ],
+            "writes": [
+              "agent/smoke-results.json",
+              "reports/agentic-readiness.md",
+              "reports/metrics.json"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate-test.json",
+              "agent/smoke-results.json",
+              "agent/validated-proposal.json",
+              "experiment.yaml",
+              "reports/agentic-readiness.md",
+              "reports/metrics.json"
             ]
           }
         ]
@@ -386,7 +571,22 @@
             ".",
             "revision"
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/revision-approval.md"
+        ],
+        "writes": [
+          "reports/revision-approval.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/candidate/manifest.json",
+          "agent/smoke-results.json",
+          "experiment.yaml",
+          "reports/agentic-readiness.md",
+          "reports/revision-approval.md"
+        ]
       },
       {
         "id": "suite_plan",
@@ -414,7 +614,28 @@
             "suite-plan",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json"
+        ],
+        "writes": [
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/candidate/manifest.json",
+          "experiment.yaml",
+          "inputs/locks.json",
+          "reports/experiment-design.md",
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json"
+        ]
       },
       {
         "type": "foreach",
@@ -453,6 +674,22 @@
             "instructions": [
               "Execute only the schema-validated candidate entrypoint materialized under agent/candidate/project. Bind the approved study, conditions, seeds, metric, immutable inputs, and budget from experiment.yaml.",
               "A candidate process may report measurements and workspace-relative artifacts only; it cannot certify statistics or publication eligibility."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "writes": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate/manifest.json",
+              "experiment.yaml",
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ]
           },
           {
@@ -460,7 +697,8 @@
             "owner": "result-auditor",
             "inputs": [
               "results/studies/{{item.id}}/raw-results.json",
-              "inputs/locks.json"
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ],
             "outputs": [
               "results/studies/{{item.id}}/audit.json"
@@ -481,6 +719,20 @@
             ],
             "instructions": [
               "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "results/studies/**"
+            ],
+            "writes": [
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "results/studies/{{item.id}}/raw-results.json",
+              "runs/suite-plan.json"
             ]
           }
         ]
@@ -522,6 +774,22 @@
             "instructions": [
               "Execute only the schema-validated candidate entrypoint materialized under agent/candidate/project. Bind the approved study, conditions, seeds, metric, immutable inputs, and budget from experiment.yaml.",
               "A candidate process may report measurements and workspace-relative artifacts only; it cannot certify statistics or publication eligibility."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "writes": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "agent/candidate/manifest.json",
+              "experiment.yaml",
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ]
           },
           {
@@ -529,7 +797,8 @@
             "owner": "result-auditor",
             "inputs": [
               "results/studies/{{item.id}}/raw-results.json",
-              "inputs/locks.json"
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ],
             "outputs": [
               "results/studies/{{item.id}}/audit.json"
@@ -550,6 +819,20 @@
             ],
             "instructions": [
               "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "results/studies/**"
+            ],
+            "writes": [
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "results/studies/{{item.id}}/raw-results.json",
+              "runs/suite-plan.json"
             ]
           }
         ]
@@ -562,7 +845,7 @@
         "inputs": [
           "runs/suite-plan.json",
           "inputs/locks.json",
-          "results/studies/*/audit.json"
+          "results/studies/**"
         ],
         "outputs": [
           "results/raw-results.json"
@@ -581,7 +864,22 @@
             "aggregate",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "results/raw-results.json"
+        ],
+        "writes": [
+          "results/raw-results.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "results/raw-results.json",
+          "results/studies/**",
+          "runs/suite-plan.json"
+        ]
       },
       {
         "id": "audit_results",
@@ -607,7 +905,24 @@
             "audit",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ],
+        "writes": [
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "reports/result-audit.md",
+          "results/experiment-manifest.json",
+          "results/raw-results.json"
+        ]
       },
       {
         "id": "interpret_results",
@@ -634,7 +949,22 @@
         ],
         "retry": {
           "max_attempts": 2
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "agent/result-interpretation.json"
+        ],
+        "writes": [
+          "agent/result-interpretation.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/result-interpretation.json",
+          "agent/validated-proposal.json",
+          "experiment.yaml",
+          "results/experiment-manifest.json",
+          "results/raw-results.json"
+        ]
       },
       {
         "id": "validate_result_interpretation",
@@ -660,7 +990,24 @@
             "validate-result-interpretation",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "agent/result-interpretation-validation.json",
+          "reports/result-interpretation.md"
+        ],
+        "writes": [
+          "agent/result-interpretation-validation.json",
+          "reports/result-interpretation.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "agent/result-interpretation-validation.json",
+          "agent/result-interpretation.json",
+          "experiment.yaml",
+          "reports/result-interpretation.md",
+          "results/raw-results.json"
+        ]
       },
       {
         "id": "report",
@@ -685,7 +1032,21 @@
             "report",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/experiment-report.md"
+        ],
+        "writes": [
+          "reports/experiment-report.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "reports/experiment-report.md",
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ]
       }
     ]
   }

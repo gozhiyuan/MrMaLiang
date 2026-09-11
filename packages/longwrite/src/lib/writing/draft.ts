@@ -37,7 +37,18 @@ export async function draftSectionWorkspace(workspaceDir: string, outputs: strin
     readEvidencePacket(workspaceDir, sectionId),
   ]);
   const sourceById = new Map(sources.map((source) => [source.id, source]));
-  const plan = citationPlan.find((entry) => entry.section_id === sectionId) ?? citationPlan[0];
+  // No fallback. `?? citationPlan[0]` gave every section the FIRST section's
+  // sources, so a six-section manuscript was written from one section's
+  // allocation and the missing allocation was invisible — the drafter simply
+  // produced a plausible chapter about the wrong papers.
+  const plan = citationPlan.find((entry) => entry.section_id === sectionId);
+  if (!plan) {
+    throw new Error(
+      `sources/citation_plan.jsonl has no allocation for ${sectionId}; ` +
+      `${citationPlan.length === 0 ? "no citation plan has been built yet" :
+        `it allocates ${citationPlan.map((entry) => entry.section_id).join(", ")}`}. ` +
+      `Run evidence-depth finalization after the outline so every section has its own sources`);
+  }
   const chunks = evidence?.chunks.slice(0, 8) ?? [];
   if (chunks.length === 0) {
     throw new Error(`no evidence chunks available for ${sectionId}; run full-text indexing and evidence allocation before drafting`);

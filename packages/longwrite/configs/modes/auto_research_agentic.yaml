@@ -18,6 +18,11 @@ default_agents:
   - skeptical-reviewer
   - editor
   - artifact-builder
+  # Owns the empirical-import and evidence-verification stages the compiler adds
+  # for a paper with an audited experiment bundle. An owner the project does not
+  # attach is a semantic-validation error, so the manifest was unrunnable rather
+  # than merely unusual.
+  - result-auditor
 artifacts:
   required:
     - project_brief.md
@@ -610,6 +615,7 @@ workflow:
             - "Judge the exact evidence packet/chunk locators, not source metadata. Any disagreement must be routed to human review or revision before release."
           outputs:
             - reviews/claim-judgments.jsonl
+            - reviews/claim-judgments.jsonl.pre-normalization.json
             - reports/claim-judgment-repair.md
           validators:
             - required_output_exists

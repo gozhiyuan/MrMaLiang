@@ -27,6 +27,7 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "..");
 const maliang = path.join(root, "apps", "maliang", "dist", "cli.js");
+const longexperiment = path.join(root, "packages", "longexperiment", "dist", "cli.js");
 const malaclaw = process.env.MALACLAW_SOURCE_DIR
   ? path.join(path.resolve(process.env.MALACLAW_SOURCE_DIR), "dist", "cli.js")
   : null;
@@ -116,7 +117,7 @@ suite:
       kind: inference_comparison
       conditions: [baseline, candidate]
       acceptance_criteria: [candidate improves success_rate over baseline]
-runner: { kind: command, command: node runner.mjs }
+runner: { kind: command, command: node runner.mjs, input_files: [runner.mjs] }
 execution:
   max_trials: 12
   max_active_run_minutes: 30
@@ -128,11 +129,36 @@ execution:
 outputs: {}
 `);
 
+  // init compiles the scaffold before the test replaces its configuration.
+  // Regenerate the manifest so the study stage receives this deterministic
+  // runner instead of the scaffold's intentionally empty runner command.
+  const synced = await cli(longexperiment, ["sync", "."], workspace);
+  if (synced.failed) {
+    check(false, "configured experiment regenerates its workflow");
+    console.log(`       ${`${synced.stdout}${synced.stderr}`.trim().split("\n").slice(-3).join("\n       ")}`);
+    return;
+  }
+
   check(!(await cli(malaclaw, ["validate"], workspace)).failed, "configured experiment passes malaclaw validate");
-  await cli(malaclaw, ["flow", "run", "--runtime", "script"], workspace);
-  await cli(malaclaw, ["flow", "approve", "approve-design-001"], workspace);
+  const initial = await cli(malaclaw, ["flow", "run", "--runtime", "script"], workspace);
+  if (initial.failed) console.log(`       initial flow run failed: ${`${initial.stdout}${initial.stderr}`.trim().split("\n").slice(-3).join(" | ")}`);
+  const approved = await cli(malaclaw, ["flow", "approve", "approve-design-001"], workspace);
+  if (approved.failed) console.log(`       design approval failed: ${`${approved.stdout}${approved.stderr}`.trim().split("\n").slice(-3).join(" | ")}`);
   const finished = await cli(malaclaw, ["flow", "run", "--runtime", "script"], workspace);
   const status = `${finished.stdout}${finished.stderr}`;
+  if (finished.failed) {
+    console.log(`       completion failed: ${status.trim().split("\n").slice(-8).join(" | ")}`);
+    const runnerLog = await fs.readFile(path.join(workspace, ".malaclaw", "flow", "logs", "study_level_1.execute[primary]-attempt2.log"), "utf8").catch(() => "");
+    if (runnerLog) console.log(`       study runner error: ${runnerLog.trim().split("\n").slice(-3).join(" | ")}`);
+    const studyLog = await fs.readFile(path.join(workspace, "logs", "studies", "primary", "runner.log"), "utf8").catch(() => "");
+    if (studyLog) console.log(`       runner output: ${studyLog.trim().split("\n").slice(-5).join(" | ")}`);
+    const auditLog = await fs.readFile(path.join(workspace, ".malaclaw", "flow", "logs", "study_level_1.audit[primary]-attempt2.log"), "utf8").catch(() => "");
+    if (auditLog) console.log(`       study audit error: ${auditLog.trim().split("\n").slice(-3).join(" | ")}`);
+    const aggregateLog = await fs.readFile(path.join(workspace, ".malaclaw", "flow", "logs", "aggregate_results-attempt2.log"), "utf8").catch(() => "");
+    if (aggregateLog) console.log(`       aggregation error: ${aggregateLog.trim().split("\n").slice(-3).join(" | ")}`);
+    const certificationLog = await fs.readFile(path.join(workspace, ".malaclaw", "flow", "logs", "audit_results-attempt2.log"), "utf8").catch(() => "");
+    if (certificationLog) console.log(`       certification error: ${certificationLog.trim().split("\n").slice(-3).join(" | ")}`);
+  }
 
   check(/Flow status: completed/.test(status), "experiment flow reaches completed");
   const raw = await fs.readFile(path.join(workspace, "results", "studies", "primary", "raw-results.json"), "utf8").catch(() => null);

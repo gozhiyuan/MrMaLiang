@@ -66,7 +66,12 @@ async function configuredTargets(workspaceDir: string): Promise<Map<string, Targ
 function select(options: EvaluateOptions): MetricDefinition[] {
   if (options.metrics) return options.metrics.map(metricDefinition);
   const all = [...METRIC_REGISTRY.values()];
-  return options.tier ? all.filter((definition) => definition.measurement_tier === options.tier) : all;
+  // Tier evaluators own deterministic metrics only. Model and external values
+  // have dedicated acquisition stages; emitting their deferred placeholders
+  // here would make this stage falsely claim observations it cannot produce.
+  return options.tier
+    ? all.filter((definition) => definition.measurement_tier === options.tier && definition.measurement_kind === "script")
+    : all;
 }
 
 /** Emits measurement entries. It does NOT store them, sequence them, or decide

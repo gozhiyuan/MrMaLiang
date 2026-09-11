@@ -71,7 +71,9 @@ describe("draftSectionWorkspace", () => {
   it("refuses to scaffold factual research prose without an evidence packet", async () => {
     const ws = await makeWorkspace();
     await fs.writeFile(path.join(ws, "sources/classified_sources.jsonl"), "", "utf-8");
-    await fs.writeFile(path.join(ws, "sources/citation_plan.jsonl"), "", "utf-8");
+    await fs.writeFile(path.join(ws, "sources/citation_plan.jsonl"), toJsonl([
+      { section_id: "section-1", section_title: "Background", source_ids: [] },
+    ]), "utf-8");
     await expect(draftSectionWorkspace(ws, ["chapters/section-1.md"])).rejects.toThrow(/no evidence chunks/);
   });
 });

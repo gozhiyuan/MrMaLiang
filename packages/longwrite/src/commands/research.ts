@@ -16,7 +16,8 @@ import { importLongExperiment, prepareExperimentEvidence } from "../lib/research
 import { repairCodebaseAnalysis } from "../lib/research/codebase-analysis.js";
 import { repairCodebaseComparison } from "../lib/research/codebase-comparison.js";
 import { loadSearchPlan, type SearchPlan } from "../lib/research/search-plan.js";
-import { gateOwnedByTool, repairRouteForGate } from "../lib/ops/repair-routing.js";
+import { byCapability, capabilityOf, criterionForFinding, structuredFindingsFromValidation } from "../lib/ops/action-plan.js";
+import { FindingSchema } from "../lib/registry/records.js";
 import type { ClassifiedSource } from "../lib/research/types.js";
 
 /** Copy only a reviewed, publication-eligible LongExperiment result into the
@@ -162,6 +163,13 @@ export async function runResearchVenueUpgrade(workspaceDir: string): Promise<voi
   for (const file of [...written, "sources/venue-upgrades.jsonl", "reports/venue-upgrade.md"]) console.log(`  + ${file}`);
 }
 
+export async function runResearchRepairCitationPlan(workspaceDir: string): Promise<void> {
+  const { repairCitationPlan } = await import("../lib/research/corpus-repair.js");
+  const result = await repairCitationPlan(path.resolve(workspaceDir));
+  console.log(`Rebuilt ${result.sections} citation-plan allocation(s)`);
+  for (const file of result.written) console.log(`  + ${file}`);
+}
+
 
 export async function runResearchRecall(workspaceDir: string, opts: {
   topic?: string; provider?: string; limit?: string; targetCandidates?: string; queryBudget?: string; allowSeedFallback?: boolean;
@@ -210,7 +218,9 @@ export async function runResearchClassify(workspaceDir: string, opts: { topic?: 
 
 export async function runResearchSelectSemanticCandidates(workspaceDir: string): Promise<void> {
   const { selectSemanticCandidates } = await import("../lib/research/semantic-screen.js");
-  for (const file of await selectSemanticCandidates(path.resolve(workspaceDir))) console.log(`  + ${file}`);
+  const { selected, written } = await selectSemanticCandidates(path.resolve(workspaceDir));
+  console.log(`Selected ${selected.length} candidate source(s)`);
+  for (const file of written) console.log(`  + ${file}`);
 }
 
 export async function runResearchRepairSemanticScreen(workspaceDir: string): Promise<void> {
@@ -221,7 +231,9 @@ export async function runResearchRepairSemanticScreen(workspaceDir: string): Pro
 
 export async function runResearchSelectSourceEvidenceCandidates(workspaceDir: string): Promise<void> {
   const { selectSourceEvidenceCandidates } = await import("../lib/research/semantic-screen.js");
-  for (const file of await selectSourceEvidenceCandidates(path.resolve(workspaceDir))) console.log(`  + ${file}`);
+  const { selected, written } = await selectSourceEvidenceCandidates(path.resolve(workspaceDir));
+  console.log(`Selected ${selected.length} evidence source(s)`);
+  for (const file of written) console.log(`  + ${file}`);
 }
 
 export async function runResearchRepairSourceEvidence(workspaceDir: string): Promise<void> {
@@ -296,7 +308,7 @@ async function readExpansionPlan(resolved: string, actionPlan?: string): Promise
   return {
     version: 1,
     actions: plan.actions
-      .filter((action) => action.tool === "targeted_research_expansion")
+      .filter((action) => capabilityOf(plan, action) === "targeted_research_expansion")
       .map((action) => ({
         id: "research_expansion",
         source_action_id: action.id,
@@ -305,7 +317,9 @@ async function readExpansionPlan(resolved: string, actionPlan?: string): Promise
         weaknesses: action.finding_ids.map((id) => {
           const finding = findings.get(id);
           if (!finding) throw new Error(`research expansion action ${action.id} references unknown finding ${id}`);
-          return { category: finding.severity, detail: finding.summary };
+          // The producer's own diagnostic. A planner summary was a paraphrase
+          // of it, and expansion queries are derived from this text.
+          return { category: finding.severity, detail: finding.diagnostic };
         }),
       })),
   };
@@ -485,6 +499,29 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
   const config = await loadProjectConfig(resolved);
   const reportPath = path.join(resolved, "reports", "research-expansion.md");
   const plan = await readExpansionPlan(resolved, opts.actionPlan);
+  const replacementRequests = await fs.readFile(
+    path.join(resolved, "sources", "metadata-replacement-requests.json"), "utf-8",
+  ).then((raw) => {
+    const parsed = JSON.parse(raw) as { requests?: Array<{ source_id?: unknown; query?: unknown; title?: unknown }> };
+    return (parsed.requests ?? []).filter((request) =>
+      typeof request.source_id === "string" || typeof request.query === "string" || typeof request.title === "string");
+  }).catch(() => [] as Array<{ source_id?: unknown; query?: unknown; title?: unknown }>);
+  // Generic corpus expansion only appends candidates.  It cannot replace a
+  // cited dead record, repair its evidence ledger, or remove the unsupported
+  // claim, so treating it as metadata recovery would falsely clear an exact
+  // URL/identity gate.  Until the dedicated replacement subflow exists, make
+  // the required operator decision explicit rather than silently no-oping.
+  if (replacementRequests.length > 0) {
+    await fs.mkdir(path.dirname(reportPath), { recursive: true });
+    await fs.writeFile(reportPath,
+      "# Research Expansion\n\n" +
+      "## Blocked: unrecoverable cited metadata requires source replacement\n\n" +
+      replacementRequests.map((request) => `- ${String(request.source_id ?? request.title ?? request.query)}`).join("\n") +
+      "\n\nA generic expansion cannot safely replace these cited records. Run the dedicated " +
+      "`replace_unrecoverable_source` corrective subflow (or provide an operator-approved replacement) " +
+      "before retrying the exact metadata verifier.\n", "utf-8");
+    throw new Error("operator_required: unrecoverable metadata needs replace_unrecoverable_source; generic research expansion is not an exact repair");
+  }
   const actions = plan.actions.filter((action) => action.id === "research_expansion" || action.id === "evidence_repair");
   if (actions.length === 0) {
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
@@ -530,7 +567,18 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
       // artifact is unavailable; expansion remains useful for other gates.
     }
   }
-  const queryVariants = buildExpansionQueries(topic, actions, config.research.taxonomy, previousPlan?.venue_priorities ?? [], config.research.query_budget, exactLandmarkTitles);
+  // Metadata repair records source-specific requests instead of pretending an
+  // unrecoverable record was fixed.  Feed those requests into the next real
+  // expansion so the recovery path acquires a replacement rather than leaving
+  // a durable JSON file no production retrieval stage ever reads.
+  const metadataReplacementTitles = replacementRequests.flatMap((request) =>
+    typeof request.query === "string" && request.query.trim() ? [request.query.trim()]
+      : typeof request.title === "string" && request.title.trim() ? [request.title.trim()] : []);
+  const queryVariants = [...new Set([
+    ...metadataReplacementTitles,
+    ...buildExpansionQueries(topic, actions, config.research.taxonomy,
+      previousPlan?.venue_priorities ?? [], config.research.query_budget, exactLandmarkTitles),
+  ])].slice(0, config.research.query_budget);
   const checkpoint = await loadExpansionCheckpoint(resolved);
   const intentKey = expansionIntentKey(topic, actions);
   const intent = checkpoint.intents[intentKey] ?? {
@@ -606,7 +654,7 @@ export async function runResearchExpand(workspaceDir: string, opts: { actionPlan
   // as the initial corpus instead of silently reverting to metadata-only A/B.
   if (config.research.semantic_screen.enabled) {
     const semantic = await import("../lib/research/semantic-screen.js");
-    written.push(...await semantic.selectSemanticCandidates(resolved));
+    written.push(...(await semantic.selectSemanticCandidates(resolved)).written);
   }
   if (config.research.semantic_screen.enabled) {
     await fs.writeFile(reportPath, [
@@ -800,7 +848,7 @@ export async function runResearchRepairCorpusRecoveryPlan(workspaceDir: string):
     }
     const failedIds = new Set((corpus.findings ?? []).filter((finding) => finding.pass === false).map((finding) => finding.id).filter((id): id is string => typeof id === "string"));
     if (corpus.pass || failedIds.size === 0) throw new Error("a recovery plan is valid only while a corpus gate is failing");
-    if (plan.actions.length !== 1 || plan.actions[0]?.tool !== "targeted_research_expansion") {
+    if (plan.actions.length !== 1 || capabilityOf(plan, plan.actions[0]!) !== "targeted_research_expansion") {
       throw new Error("select exactly one targeted_research_expansion action");
     }
     const action = plan.actions[0]!;
@@ -850,7 +898,7 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
       .then((raw) => JSON.parse(raw) as Record<string, unknown>).catch(() => ({} as Record<string, unknown>));
     const stalledClarification = rawPlan.actions.length === 1
       && rawPlan.actions[0]?.id === "repair-stalled-operator-decision"
-      && rawPlan.actions[0].tool === "request_operator_clarification"
+      && capabilityOf(rawPlan, rawPlan.actions[0]) === "request_operator_clarification"
       && typeof metrics.repair_stalled_rounds === "number"
       && metrics.repair_stalled_rounds >= 2;
     if (stalledClarification) {
@@ -859,9 +907,16 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
       };
       const failedIds = (validation.checks ?? []).filter((check) => check.pass === false)
         .map((check) => check.id).filter((id): id is string => typeof id === "string");
-      const actionIds = new Set(rawPlan.actions[0]!.finding_ids);
-      if (validation.pass || failedIds.length === 0 || failedIds.some((id) => !actionIds.has(id)) || actionIds.size !== failedIds.length) {
-        throw new Error("stalled repair clarification must exactly cover all currently failed release checks");
+      // The escalation names an operator target rather than the failed gates:
+      // no capability this product owns can repair them, which is the whole
+      // point. What must still hold is that there IS something unresolved and
+      // the decision states it.
+      const decision = rawPlan.findings.find((finding) => rawPlan.actions[0]!.finding_ids.includes(finding.id));
+      if (validation.pass || failedIds.length === 0) {
+        throw new Error("a stalled repair clarification is valid only while a release check is failing");
+      }
+      if (!decision || !failedIds.some((id) => decision.diagnostic.includes(id))) {
+        throw new Error("stalled repair clarification must name the currently failed release checks in its diagnostic");
       }
       await fs.mkdir(path.dirname(reportPath), { recursive: true });
       await fs.writeFile(reportPath, [
@@ -892,81 +947,69 @@ export async function runResearchRepairFinalReleasePlan(workspaceDir: string): P
       return;
     }
     if (plan.actions.length === 0) throw new Error("failed release checks require one or more corrective actions");
-    const allowedTools = new Set(["targeted_research_expansion", "reopen_outline", "revise_sections", "revise_visual_plan", "request_operator_clarification"]);
+    // Coverage, not ownership. Each finding carries its own (gate, artifact
+    // kind, required effect) triple, so the capability that will run an action
+    // is RESOLVED rather than asserted — there is no tool for a planner to
+    // choose wrongly, and no gate-level preference to keep in step with the
+    // registry. What remains to check is that nothing failed silently.
     const addressed = new Set<string>();
+    const capabilities = new Set<string>();
     for (const action of plan.actions) {
-      if (!allowedTools.has(action.tool)) throw new Error(`action ${action.id} selects unsupported final-release tool ${action.tool}`);
+      // Throws when an action mixes capabilities or names findings the
+      // registry cannot route.
+      capabilities.add(capabilityOf(plan, action));
       for (const findingId of action.finding_ids) {
-        if (!failedIds.has(findingId)) throw new Error(`action ${action.id} references non-failed release check ${findingId}`);
+        if (!plan.findings.some((finding) => finding.id === findingId)) {
+          throw new Error(`action ${action.id} references unknown finding ${findingId}`);
+        }
         addressed.add(findingId);
       }
     }
-    const missing = [...failedIds].filter((id) => !addressed.has(id));
-    if (missing.length > 0) throw new Error(`final-release plan does not address failed checks: ${missing.join(", ")}`);
-    const ownershipMissing = [...failedIds].filter((id) => !plan.actions.some((action) =>
-      action.tool !== "request_operator_clarification"
-      && action.finding_ids.includes(id)
-      && gateOwnedByTool(id, action.tool)));
-    if (ownershipMissing.length > 0) {
-      throw new Error(`final-release plan assigns no compatible repair capability to: ${ownershipMissing.join(", ")}`);
+    // Every failed check that emitted a routable finding must be covered by
+    // some action. A check that emitted none reaches diagnosis through the
+    // pre-dispatch verdict instead.
+    const failedFindings = (validation.checks ?? [])
+      .filter((check) => check.pass === false)
+      .flatMap((check) => ((check.findings ?? []) as Array<{ id?: unknown }>)
+        .map((finding) => finding?.id)
+        .filter((id): id is string => typeof id === "string"));
+    const missing = [...new Set(failedFindings)].filter((id) => !addressed.has(id));
+    if (missing.length > 0) {
+      throw new Error(`final-release plan does not address failed findings: ${missing.join(", ")}`);
     }
-    // An outline is a planning artifact and an evidence expansion only makes
-    // new material available.  Neither changes the rendered manuscript on
-    // its own.  Require a prose revision to explicitly own failures whose
-    // deterministic remedy is woven, evidence-backed manuscript content.
-    // Without this, a plausible-looking plan can spend a recovery round on
-    // retrieval or an outline refresh and then re-run the exact same paper.
-    const proseOwned = new Set(plan.actions
-      .filter((action) => action.tool === "revise_sections")
-      .flatMap((action) => action.finding_ids));
-    const visuallyOwnedReviewTarget = failedIds.has("rendered_visual_review") && plan.actions.some((action) =>
-      action.tool === "revise_visual_plan" && action.finding_ids.includes("review_target")
-      && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
-    const proseRequired = [...failedIds].filter((id) => repairRouteForGate(id).preferred === "revise_sections"
-      && !(id === "review_target" && visuallyOwnedReviewTarget));
-    const proseMissing = proseRequired.filter((id) => !proseOwned.has(id));
-    if (proseMissing.length > 0) {
-      throw new Error(`final-release plan must assign revise_sections to: ${proseMissing.join(", ")}`);
-    }
-    const proseAction = plan.actions.find((action) => action.tool === "revise_sections");
-    if (proseAction) {
-      const citedText = (validation.checks?.find((check) => check.id === "cited_literature_release_gates")?.findings as unknown[] | undefined)
-        ?.filter((finding): finding is string => typeof finding === "string").join(" ") ?? "";
-      const hasCriterion = (metric: AgenticActionPlan["actions"][number]["acceptance_criteria"][number]["metric"], target: number) =>
-        proseAction.acceptance_criteria.some((criterion) => criterion.metric === metric && criterion.target >= target);
-      if (/cited sources .*below configured minimum|accepted cited-source ratio .*below configured/i.test(citedText)) {
-        const config = await loadProjectConfig(resolved);
-        if (/cited sources .*below configured minimum/i.test(citedText)
-          && !hasCriterion("cited_sources", config.research.release_gates.min_cited_sources)) {
-          throw new Error(`final-release prose repair requires cited_sources >= ${config.research.release_gates.min_cited_sources}`);
-        }
-        if (/accepted cited-source ratio .*below configured/i.test(citedText)
-          && !hasCriterion("accepted_cited_ratio", config.research.release_gates.min_accepted_cited_ratio)) {
-          throw new Error(`final-release prose repair requires accepted_cited_ratio >= ${config.research.release_gates.min_accepted_cited_ratio}`);
-        }
-      }
-      if (failedIds.has("review_target") && !hasCriterion("review_score", 8)) {
-        throw new Error("final-release prose repair requires review_score >= 8");
-      }
+    // Only checks that actually emitted a routable finding can be covered by
+    // an action. One that emitted none has nothing for a capability to act on;
+    // demanding coverage there would make an honest "nobody can repair this"
+    // indistinguishable from a planner ignoring a repairable failure. Those
+    // reach diagnosis through the pre-dispatch verdict instead.
+    const routableGates = new Set((validation.checks ?? [])
+      .filter((check) => check.pass === false)
+      .flatMap((check) => ((check.findings ?? []) as Array<{ id?: unknown }>)
+        .filter((finding) => typeof finding?.id === "string")
+        .map(() => check.id))
+      .filter((id): id is string => typeof id === "string"));
+    const uncoveredChecks = [...failedIds].filter((id) => routableGates.has(id)
+      && !plan.findings.some((finding) => String(finding.gate_id) === id && addressed.has(finding.id)));
+    if (uncoveredChecks.length > 0) {
+      throw new Error(`final-release plan does not address failed checks: ${uncoveredChecks.join(", ")}`);
     }
     // A clarification is a genuine human-decision escape hatch, not a way to
-    // acknowledge a deterministic, repairable release failure while doing no
-    // repair.  If the plan can name a normal bounded action, it must do so;
-    // in particular table/figure rendering failures always require the
-    // durable visual-plan action, never a waiver or a clarification-only
-    // round.
-    const executable = plan.actions.filter((action) => action.tool !== "request_operator_clarification");
-    if (executable.length === 0) {
+    // acknowledge a deterministic, REPAIRABLE release failure while doing no
+    // repair. The distinction is whether a repair exists: a failure that
+    // emitted no routable finding cannot be handed to any capability, and
+    // demanding one there would only replace an honest escalation with a
+    // fabricated repair.
+    const repairable = [...byCapability(await structuredFindingsFromValidation(resolved)).keys()]
+      .some((capability) => capability !== "request_operator_clarification");
+    if (repairable && [...capabilities].every((capability) => capability === "request_operator_clarification")) {
       throw new Error("final-release plan cannot use request_operator_clarification as its only corrective action");
     }
-    const visualMissing = [...failedIds].filter((id) => repairRouteForGate(id).preferred === "revise_visual_plan"
-      && !plan.actions.some((action) => action.tool === "revise_visual_plan" && action.finding_ids.includes(id)));
-    if (visualMissing.length > 0) throw new Error(`final-release plan must assign revise_visual_plan to: ${visualMissing.join(", ")}`);
+
     await fs.mkdir(path.dirname(reportPath), { recursive: true });
     await fs.writeFile(reportPath, [
       "# Final-release plan validation", "", "- Status: pass",
       `- Failed checks addressed: ${[...failedIds].join(", ")}`,
-      `- Selected actions: ${plan.actions.map((action) => action.tool).join(", ")}`, "",
+      `- Selected capabilities: ${[...capabilities].sort().join(", ")}`, "",
     ].join("\n"), "utf-8");
   } catch (error) {
     const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
@@ -1035,120 +1078,88 @@ export async function runResearchGenerateFinalReleasePlan(workspaceDir: string):
   const reviewDetail = reviewWeaknesses.slice(0, 16)
     .map((weakness) => `[${weakness.severity}] ${weakness.category}: ${weakness.detail}`)
     .join("; ");
-  const findings = failed.map((check) => ({
-    id: check.id,
-    severity: "critical" as const,
-    summary: check.id === "review_target" && reviewDetail
-      ? `${Array.isArray(check.findings) ? check.findings.filter((finding): finding is string => typeof finding === "string").join("; ") : "Review target failed"}. Concrete reviewer findings: ${reviewDetail}`.slice(0, 7_500)
-      : Array.isArray(check.findings) && check.findings.every((finding) => typeof finding === "string") && check.findings.length > 0
-      ? check.findings.join("; ").slice(0, 7_500)
-      : typeof check.detail === "string" ? check.detail.slice(0, 7_500)
-      : typeof check.finding === "string" ? check.finding.slice(0, 7_500)
-        : `Deterministic final-release validation reports ${check.id} as failing.`,
-  }));
+  // Structured findings, straight from the failed checks. The generator used
+  // to synthesize prose summaries keyed by gate id and then route them through
+  // a hand-maintained table; a finding carries its own (gate, artifact kind,
+  // required effect) triple and routes itself.
+  const findings = await structuredFindingsFromValidation(resolved);
   const actions: AgenticActionPlan["actions"] = [];
-  const visual: string[] = failedIds.filter((id) => repairRouteForGate(id).preferred === "revise_visual_plan");
-  if (failedIds.includes("review_target") && visualWeaknesses.length > 0) visual.push("review_target");
-  // A low aggregate review score can be caused entirely by a blocking visual
-  // defect. In that case, routing review_target to both prose and visual tools
-  // rewrites already-supported chapters without any prose acceptance delta.
-  // Let the visual action own review_target when all nonvisual feedback is
-  // minor and the rendered visual gate is independently failing.
-  const visualOnlyReviewTarget = failedIds.includes("rendered_visual_review")
-    && blockingVisualWeaknesses.length > 0 && blockingProseWeaknesses.length === 0;
-  const research = failedIds.filter((id) => repairRouteForGate(id).preferred === "targeted_research_expansion");
-  const prose = failedIds.filter((id) => repairRouteForGate(id).preferred === "revise_sections" && !(id === "review_target" && visualOnlyReviewTarget));
-  if (research.length > 0) {
-    const detail = failed.filter((check) => research.includes(check.id))
-      .flatMap((check) => Array.isArray(check.findings) ? check.findings.filter((finding): finding is string => typeof finding === "string") : [])
-      .join("; ");
+  const reviewNote = reviewDetail ? ` Concrete reviewer findings: ${reviewDetail}` : "";
+
+  // One action per capability that owns at least one failed finding. Ordering
+  // is dependency order — acquire evidence, then restructure, then repair
+  // prose and visuals — so a same-round editor consumes newly validated
+  // material instead of revising from stale packets.
+  const order = [
+    "targeted_research_expansion", "reopen_outline", "repair_source_metadata",
+    "repair_bibliography", "repair_citation_plan", "revise_sections", "revise_visual_plan",
+    "request_operator_clarification",
+  ];
+  const grouped = byCapability(findings);
+  for (const capability of [...grouped.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b))) {
+    const group = grouped.get(capability)!;
     actions.push({
-      id: "required-final-release-research-repair",
-      tool: "targeted_research_expansion",
-      finding_ids: research,
-      rationale: `Run bounded evidence acquisition targeted only at the missing landmark works or coverage cells named by the deterministic release report; refresh classification, full text, evidence extraction, and allocation before any dependent prose repair.${detail ? ` Exact gaps: ${detail}` : ""}`.slice(0, 8_000),
-      acceptance_criteria: (await Promise.all(research.map((id) => gateAcceptanceCriterion(resolved, id, config)))).slice(0, 5),
+      id: `required-final-release-${capability.replace(/_/g, "-")}`,
+      finding_ids: group.map((finding) => finding.id).slice(0, 30),
+      rationale: `${group.length} deterministic release failure(s) route to ${capability}. Repair exactly the named findings using current packet-backed evidence; preserve every configured release threshold.${capability === "revise_sections" ? reviewNote : ""}`.slice(0, 8_000),
+      acceptance_criteria: (await Promise.all(
+        group.slice(0, 5).map((finding) => criterionForFinding(resolved, finding)))),
     });
   }
-  if (prose.length > 0) {
-    const citedFinding = failed.find((check) => check.id === "cited_literature_release_gates");
-    const citedText = Array.isArray(citedFinding?.findings)
-      ? citedFinding.findings.filter((finding): finding is string => typeof finding === "string").join(" ")
-      : "";
-    const acceptance: AgenticActionPlan["actions"][number]["acceptance_criteria"] = [];
-    if (/cited sources .*below configured minimum/i.test(citedText)) {
-      acceptance.push({ metric: "cited_sources", target: config.research.release_gates.min_cited_sources, scope: "distinct sources cited in chapters/*.md" });
-    }
-    if (/accepted cited-source ratio .*below configured/i.test(citedText)) {
-      acceptance.push({ metric: "accepted_cited_ratio", target: config.research.release_gates.min_accepted_cited_ratio, scope: "distinct sources cited in chapters/*.md" });
-    }
-    if (/citation density .*below|citations? per page .*below/i.test(citedText)) {
-      acceptance.push({ metric: "citations_per_page", target: config.research.release_gates.min_citations_per_page, scope: "rendered manuscript" });
-    }
-    if (/within[_ -]?1yr|within one year/i.test(citedText)) {
-      acceptance.push({ metric: "cited_within_one_year_ratio", target: config.research.release_gates.min_cited_within_one_year_ratio, scope: "distinct sources cited in chapters/*.md" });
-    }
-    for (const id of prose) {
-      if (["claim_support", "review_target", "claim_contradictions", "prose_redundancy", "landmark_citation_coverage"].includes(id)) acceptance.push(await gateAcceptanceCriterion(resolved, id, config));
-    }
-    if (acceptance.length === 0) acceptance.push({ metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" });
-    const proseDetail = proseWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
+
+  // A failed check that emitted no routable structured finding cannot be
+  // repaired by any capability — nothing knows what to change. That is the
+  // `requires_diagnosis` case, and it escalates to an operator decision rather
+  // than failing the round with "no corrective actions", which tells nobody
+  // anything.
+  if (actions.length === 0 && failedIds.length > 0) {
+    const unclassified = FindingSchema.parse({
+      id: "unclassified-release-failure",
+      gate_id: "cited_literature_release_gates",
+      artifact: { kind: "toolchain", target: "operator" },
+      objective_scope_key: "",
+      required_effect: "repair_toolchain",
+      acceptance_metric: null,
+      severity: "critical",
+      diagnostic: `These release checks failed without emitting a routable finding, so no capability can act on them: ${failedIds.join(", ")}. Diagnose the producer or decide how to proceed.`,
+    });
+    findings.push(unclassified);
     actions.push({
-      id: "required-final-release-prose-repair",
-      tool: "revise_sections",
-      finding_ids: prose,
-      rationale: `Apply the exact deterministic release targets to evidence-backed manuscript prose. Narrow or remove unsupported claims and weave only packet-backed, verified sources; do not lower any release target.${proseDetail ? ` Concrete prose findings: ${proseDetail}` : ""}`.slice(0, 8_000),
-      acceptance_criteria: acceptance.slice(0, 5),
+      id: "diagnose-unclassified-release-failure",
+      finding_ids: [unclassified.id],
+      rationale: unclassified.diagnostic,
+      acceptance_criteria: [await gateAcceptanceCriterion(resolved, failedIds[0]!, config)],
     });
   }
-  if (visual.length > 0) {
-    const visualDetail = visualWeaknesses.slice(0, 12).map((weakness) => `${weakness.category}: ${weakness.detail}`).join("; ");
-    actions.push({
-      id: "required-final-release-visual-repair",
-      tool: "revise_visual_plan",
-      finding_ids: [...new Set(visual)],
-      rationale: `Repair the named figure/table content, placement, captions, and legibility defects, then require a fresh rendered-PDF review. The visual gate cannot be waived.${visualDetail ? ` Concrete visual findings: ${visualDetail}` : ""}`.slice(0, 8_000),
-      acceptance_criteria: [
-        ...(await Promise.all(visual.filter((id) => id !== "review_target").map((id) => gateAcceptanceCriterion(resolved, id, config)))),
-        ...(visual.includes("review_target") ? [{ metric: "review_score" as const, operator: "at_least" as const, target: 8, scope: "fresh independent multi-persona review after visual repair" }] : []),
-      ],
-    });
-  }
-  // When the deterministic packet inventory cannot support the configured
-  // accepted-source floor, add bounded retrieval before the prose editor runs.
-  // Capacity is intentionally checked here rather than guessed from a review.
-  if (failedIds.includes("cited_literature_release_gates")) {
-    const capacity = await evidenceCapacity(resolved, config.research.release_gates.min_accepted_cited_ratio);
-    if (capacity.requiresExpansion) {
-      actions.unshift({
-        id: "expand-final-release-evidence-capacity",
-        tool: "targeted_research_expansion",
-        finding_ids: ["cited_literature_release_gates"],
-        rationale: `The current packet-backed evidence cannot meet the configured release capacity: ${capacity.reasons.join("; ")}. Retrieve only sources that close this concrete gap before revising prose.`,
-        acceptance_criteria: [
-          { metric: "cited_sources", target: config.research.release_gates.min_cited_sources },
-          ...(config.research.release_gates.min_accepted_cited_ratio > 0
-            ? [{ metric: "accepted_cited_ratio" as const, target: config.research.release_gates.min_accepted_cited_ratio }]
-            : []),
-        ],
-      });
-    }
-  }
-  // Two rounds in which no dispatched action satisfies even one owning gate
+
+  // Two rounds in which no dispatched action satisfied even one owning gate
   // indicate an infeasible or mis-scoped repair, not permission to spend a
   // third identical round. Pause on a typed operator decision with the exact
-  // remaining gates. This is a recoverable escalation, not a false success or
-  // an opaque max-round failure.
-  if (stalledRounds >= 2 && failedIds.length > 0) {
+  // remaining gates.
+  if (stalledRounds >= 2 && failedIds.length > 0 && findings.length > 0) {
+    // An operator target: no capability this product owns can act on it, which
+    // is exactly what "a human must decide" means. Reusing the repair findings
+    // would route this to a repair capability and hide the escalation.
+    const decision = FindingSchema.parse({
+      id: "operator-decision-required",
+      gate_id: "cited_literature_release_gates",
+      artifact: { kind: "toolchain", target: "operator" },
+      objective_scope_key: "",
+      required_effect: "repair_toolchain",
+      acceptance_metric: null,
+      severity: "critical",
+      diagnostic: `Automated repair completed ${stalledRounds} consecutive rounds without satisfying any owning release gate. Remaining gates: ${failedIds.join(", ")}.`,
+    });
+    findings.push(decision);
     actions.splice(0, actions.length, {
       id: "repair-stalled-operator-decision",
-      tool: "request_operator_clarification",
-      finding_ids: failedIds,
+      finding_ids: [decision.id],
       rationale: `Automated repair completed ${stalledRounds} consecutive rounds without satisfying any owning release gate. Decide whether to broaden the evidence budget, revise the paper scope/profile, or provide targeted source/venue guidance. Remaining gates: ${failedIds.join(", ")}.`,
       acceptance_criteria: [await gateAcceptanceCriterion(resolved, failedIds[0]!, config)],
     });
   }
-  const plan = AgenticActionPlan.parse({ version: 1, findings, actions });
+
+  const plan = AgenticActionPlan.parse({ version: 2, findings, actions });
   const target = path.join(resolved, "reviews", "action-plan.json");
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
@@ -1202,6 +1213,22 @@ export async function runResearchReconcileIdentities(workspaceDir: string): Prom
   const { reconcileWorkspaceSources } = await import("../lib/research/identity.js");
   const { records, written } = await reconcileWorkspaceSources(resolved);
   console.log(`Reconciled source identities: ${records.length}`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+export async function runResearchRepairBibliography(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { repairBibliography } = await import("../lib/research/corpus-repair.js");
+  const { sources, written } = await repairBibliography(resolved);
+  console.log(`Regenerated the bibliography from ${sources} classified source(s)`);
+  for (const file of written) console.log(`  + ${file}`);
+}
+
+export async function runResearchRepairSourceMetadata(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { repairSourceMetadata } = await import("../lib/research/corpus-repair.js");
+  const { records, written } = await repairSourceMetadata(resolved);
+  console.log(`Repaired metadata for ${records} source record(s)`);
   for (const file of written) console.log(`  + ${file}`);
 }
 
@@ -1336,6 +1363,103 @@ export async function runResearchStallStatus(workspaceDir: string): Promise<void
   console.log(`Loop posture: ${status.posture} (${status.stale_rounds} round(s) without improvement across ${status.rounds})`);
   console.log(`  eligible actions: ${status.eligible_tools.join(", ")}`);
   for (const file of written) console.log(`  + ${file}`);
+}
+
+/** Emits the pre-dispatch reachability verdict.
+ *
+ * An objective nothing available can satisfy is not an objective to spend
+ * rounds on: the verdict names it so the kernel pauses on something an
+ * operator can act on, rather than skipping a phase silently. */
+export async function runResearchAssessReachability(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { writeGateReachability, writeReachabilityVerdict, unreachableObjectives } =
+    await import("../lib/research/gate-reachability.js");
+  const { written } = await writeGateReachability(resolved);
+  const verdictPath = await writeReachabilityVerdict(resolved);
+  const unreachable = await unreachableObjectives(resolved);
+  console.log(unreachable.length === 0
+    ? "Reachability: every declared objective is reachable"
+    : `Reachability: ${unreachable.length} unreachable objective(s)`);
+  for (const entry of unreachable) console.log(`  ${entry.gate}: ${entry.detail}`);
+  for (const file of [...written, verdictPath]) console.log(`  + ${file}`);
+}
+
+/** Assembles the packet the diagnosing unit reads.
+ *
+ * This is the one unit that sees an objective's whole history — every strategy
+ * already tried, every value already measured, and whether the target is
+ * reachable at all. That is exactly why every other unit may reject a repeated
+ * strategy strictly: the escape hatch is diagnosis, not a relaxed rule
+ * somewhere else. */
+export async function runReviewDiagnoseObjective(workspaceDir: string, objective?: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { buildDiagnosisPacket, writeDiagnosisPacket, ATTEMPTS_PATH } = await import("../lib/ops/diagnosis-packet.js");
+  const fsp = await import("node:fs/promises");
+  let target = objective;
+  if (!target) {
+    // The objective under diagnosis is the one whose most recent attempt did
+    // not meet it. Guessing a different one would diagnose work nobody
+    // questioned.
+    const raw = await fsp.readFile(path.join(resolved, ATTEMPTS_PATH), "utf-8").catch(() => "");
+    const rows = raw.split("\n").filter((line) => line.trim().length > 0).map((line) => JSON.parse(line) as { objective?: string });
+    target = rows[rows.length - 1]?.objective;
+  }
+  if (!target) {
+    throw new Error(
+      `no objective to diagnose: ${ATTEMPTS_PATH} records no attempt. ` +
+      `Diagnosis runs after an objective has been attempted and not met.`);
+  }
+  const packet = await buildDiagnosisPacket(resolved, target);
+  const written = await writeDiagnosisPacket(resolved, packet);
+  console.log(`Diagnosis packet for ${target}: ${packet.prior_attempts.length} prior attempt(s), ` +
+    `${packet.observations.length} observation(s), reachability ${packet.reachability.status}`);
+  console.log(`  + ${written}`);
+}
+
+/** Validates the diagnosis a stalled objective produced.
+ *
+ * Diagnosis picks the next STRATEGY. It never lowers a target: an unmet
+ * objective met by redefining it is the failure this contract exists to stop. */
+export async function runReviewValidateDiagnosis(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { validateDiagnosis } = await import("../lib/ops/diagnosis.js");
+  const diagnosis = await validateDiagnosis(resolved);
+  console.log(`Diagnosis for ${diagnosis.objective}: ${diagnosis.decision}`);
+  if (diagnosis.next_effect) console.log(`  next effect: ${diagnosis.next_effect}`);
+  if (diagnosis.next_capability) console.log(`  next capability: ${diagnosis.next_capability}`);
+  if (diagnosis.operator_question) console.log(`  operator question: ${diagnosis.operator_question}`);
+  console.log(`  detail: ${diagnosis.detail}`);
+}
+
+/** Reconciles the target ledger against current landmark resolution.
+ *
+ * Reservation happens BEFORE ranking can displace a target: a landmark nobody
+ * has found yet is a pending target with a name, not an absence that looks
+ * like it was never requested. */
+export async function runResearchReconcileTargets(workspaceDir: string): Promise<void> {
+  const resolved = path.resolve(workspaceDir);
+  const { reconcileLandmarkTargets, reconcileTargetProgress, readTargets, writeRetrievalBrief } =
+    await import("../lib/research/targets.js");
+  const { reserved, resolved: found, ledgerPath } = await reconcileLandmarkTargets(resolved);
+  // Reservation is only half of it. A ledger that never leaves `retrieved`
+  // holds reserve-before-rank for the first selector alone: every later one
+  // reserves a status nothing assigns, finds nothing eligible, and falls back
+  // to ranking whatever it sees — which is the displacement the ledger exists
+  // to prevent.
+  const { advanced } = await reconcileTargetProgress(resolved);
+  const targets = await readTargets(resolved);
+  // And publish what is still MISSING, where the retrieval capability reads it.
+  // Identifying an unresolved landmark and then not telling anything to look
+  // for it leaves the ledger describing a gap that no round ever closes.
+  const brief = await writeRetrievalBrief(resolved);
+  console.log(`Targets reserved: ${reserved} (${found} resolved to a source, ${advanced} advanced)`);
+  console.log(`Outstanding retrieval targets: ${brief.pending} -> ${brief.briefPath}`);
+  for (const target of targets) {
+    const where = target.source_id ?? "unresolved";
+    const why = target.exclusion ? ` excluded: ${target.exclusion.reason}` : "";
+    console.log(`  ${target.target_key} -> ${where} [${target.status}]${why}`);
+  }
+  console.log(`  + ${ledgerPath}`);
 }
 
 /** Rebuilds the comparison-dimension vocabulary from existing evidence. Also

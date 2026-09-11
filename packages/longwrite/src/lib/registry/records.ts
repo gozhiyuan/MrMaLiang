@@ -162,6 +162,14 @@ export const StructuredCheckSchema = z.object({
    * kernel reads this as a pre-dispatch verdict and dispatches diagnosis; a
    * failed check with neither a finding nor this flag would stall the round. */
   requires_diagnosis: z.boolean().default(false),
+  /** The gate could not run at all — a prerequisite artifact was missing or
+   * unreadable — as opposed to running and finding a defect.
+   *
+   * The two are different answers to different questions, and a verifier that
+   * cannot tell them apart reports "this artifact is broken" when the truth is
+   * "we never looked". The finding still travels, because a missing
+   * prerequisite is itself something to repair. */
+  blocked: z.boolean().optional(),
   diagnostic: z.string().max(8_000).optional(),
 }).strict().superRefine((check, ctx) => {
   if (!check.pass && check.findings.length === 0 && !check.requires_diagnosis) {

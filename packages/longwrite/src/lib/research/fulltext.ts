@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import crypto from "node:crypto";
 import { parseJsonl } from "./jsonl.js";
+import { reserveForSelector, settleSelectorReservation } from "./reservation.js";
 import type { ClassifiedSource } from "./types.js";
 import { SemanticScreen, SEMANTIC_SCREEN_PATH } from "./semantic-screen.js";
 
@@ -227,9 +228,12 @@ export async function ingestFulltext(
   fetchImpl: FulltextFetch = fetch,
   pdfExtractor: PdfTextExtractor = extractPdfWithPdftotext,
   opts: FulltextOptions = {},
-): Promise<{ results: FulltextResult[]; written: string[] }> {
+): Promise<{ results: FulltextResult[]; selected: string[]; written: string[] }> {
   const raw = await fs.readFile(path.join(workspaceDir, "sources", "classified_sources.jsonl"), "utf-8");
   const sources = parseJsonl<ClassifiedSource>(raw);
+  // Before ranking, and before a byte is fetched.
+  const { reservedIds, excluded } = await reserveForSelector(
+    workspaceDir, "fulltext_ingest", opts.maxSources ?? MAX_SOURCES);
   // Agentic semantic screening is optional. When present and already
   // validated, it decides *which* bounded sources deserve deep reading;
   // access rank still breaks ties so the retrieval budget is not spent on
@@ -262,10 +266,18 @@ export async function ingestFulltext(
   // incomplete metadata, not that its full text lacks value; retrieving it is
   // how a keyless arXiv-only corpus can gain direct evidence. Only fall back
   // to D when no stronger candidate exists.
-  const eligible = (ranked.filter((source) => source.citation_depth !== "D").length > 0
+  const excludedIds = new Set(excluded.map((entry) => entry.source_id));
+  const admissible = (ranked.filter((source) => source.citation_depth !== "D").length > 0
     ? ranked.filter((source) => source.citation_depth !== "D")
-    : ranked)
-    .slice(0, opts.maxSources ?? MAX_SOURCES);
+    : ranked).filter((source) => !excludedIds.has(source.id));
+  // Reserved targets take their slots first; the access/depth ranking spends
+  // the remainder. Filling by rank first would drop a reserved target at the
+  // cap without recording that it was ever wanted.
+  const reservedSet = new Set(reservedIds);
+  const eligible = [
+    ...admissible.filter((source) => reservedSet.has(source.id)),
+    ...admissible.filter((source) => !reservedSet.has(source.id)),
+  ].slice(0, opts.maxSources ?? MAX_SOURCES);
 
   const results: FulltextResult[] = [];
   const written: string[] = [];
@@ -372,5 +384,7 @@ export async function ingestFulltext(
   await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
   await fs.writeFile(path.join(workspaceDir, "reports", "fulltext.md"), report, "utf-8");
   written.push("fulltext/manifest.json", "reports/fulltext.md");
-  return { results, written };
+  const selected = eligible.map((source) => source.id);
+  await settleSelectorReservation(workspaceDir, "fulltext_ingest", selected, reservedIds, excluded);
+  return { results, selected, written };
 }

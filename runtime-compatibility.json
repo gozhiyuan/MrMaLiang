@@ -1,18 +1,18 @@
 {
   "version": 1,
   "malaclaw": {
-    "supported": ">=2.3.0 <3.0.0",
-    "tested_with": "2.3.0",
-    "note": "Pinned in CI to the immutable commit behind release v2.3.0 (a tag is mutable, and CI runs npm lifecycle scripts against whatever it checks out). The pin moves on MalaClaw releases, not commits. Requires >=2.3.0 for semantic workflow phases, per-stage model reasoning effort, recoverable action dispatch, and race-safe dashboard continuation."
+    "supported": ">=3.0.0 <4.0.0",
+    "tested_with": "3.0.0",
+    "note": "Pinned in CI to the immutable commit behind release v3.0.0 (a tag is mutable, and CI runs npm lifecycle scripts against whatever it checks out). The pin moves on MalaClaw releases, not commits. 3.0 is a breaking runtime revision: IR v2 is required and never defaulted, observations are engine-owned (the kernel validates, sequences and stores every measurement envelope), mutations run in transactional task workspaces that commit as a unit, and outcomes are typed on two axes so a stage that ran is no longer read as a stage whose objective was met. A v1 manifest is refused rather than reinterpreted."
   },
-  "ir_version": 1,
+  "ir_version": 2,
   "module_protocol": 1,
   "runner_protocol": 1,
   "sdk": {
     "package": "malaclaw/sdk",
-    "supported": ">=2.3.0 <3.0.0",
-    "tested_with": "2.3.0",
+    "supported": ">=3.0.0 <4.0.0",
+    "tested_with": "3.0.0",
     "resolution": "path",
-    "note": "The SDK ships as the ./sdk subpath export of the malaclaw package, not as a separate @malaclaw/sdk. It imports the engine's canonical Zod IR, so splitting it out would either duplicate that schema or load two zod instances. MrMaLiang resolves it from the checked-out runtime at .dependencies/MalaClaw."
+    "note": "The SDK ships as the ./sdk subpath export of the malaclaw package, not as a separate @malaclaw/sdk. It imports the engine's canonical Zod IR, so splitting it out would either duplicate that schema or load two zod instances. MrMaLiang resolves it from the checked-out runtime at .dependencies/MalaClaw. From 3.0 it also exports the wire-contract surface \u2014 Criterion, MustImprove, MeasurementEnvelope, the acceptance arithmetic and wireContractFixtureDir() \u2014 so this repository validates its compiled criteria and emitted envelopes against the engine's own schemas rather than a second copy of them."
   }
 }

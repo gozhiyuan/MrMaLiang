@@ -1,4 +1,10 @@
 import { stringify as stringifyYaml } from "yaml";
+import { CAPABILITY_TEMPLATES, toolCeilingFor } from "../lib/registry/capabilities.js";
+import { capabilitiesOfPhase, phaseOf, type PhaseId } from "../lib/registry/phases.js";
+import { verifierIds } from "../lib/registry/verifiers.js";
+import { renderPlannerInstructions } from "../lib/registry/render.js";
+import { metricDefinition, metricsOfTier } from "../lib/registry/metrics.js";
+import { metricId } from "../lib/registry/ids.js";
 import { action, agentStage, foreachStage, loopStage, scriptStage } from "malaclaw/sdk";
 import path from "node:path";
 import type { LongWriteModeDef } from "../lib/mode-schema.js";
@@ -475,9 +481,30 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   if (hasExperiment) {
     const outlineIndex = next.stages.findIndex((stage) => stage.id === "outline");
     if (outlineIndex < 0) throw new Error("empirical LongWrite mode requires an outline stage");
+    // The audited bundle is IMPORTED into the workspace before anything
+    // declares it. `../experiment/results/experiment-manifest.json` is a path
+    // outside the workspace, and IR v2 rejects it as an input — correctly: a
+    // unit that declares a parent-relative read is a unit whose isolated copy
+    // cannot be built. The external location is an argument to the import
+    // command, and what the workflow declares is where the import puts it.
     next.stages.splice(outlineIndex, 0, scriptStage({
+      id: "experiment_import", title: "Import the audited experiment bundle into the workspace",
+      owner: "result-auditor",
+      kind: "mutation",
+      owns: ["experiments/**"],
+      writes: ["experiments/longexperiment-manifest.json", "experiments/artifact-bundle.json"],
+      corrective_capability: "operator",
+      outputs: ["experiments/longexperiment-manifest.json", "experiments/artifact-bundle.json"],
+      validators: ["required_output_exists"], runtime: "script",
+      command: longwriteCommand([
+        "research", "import-experiment", ".", "--manifest", policy.experiment!.manifestPath!,
+      ]),
+      instructions: [
+        "Copy the audited LongExperiment manifest, results and figures into experiments/ so every later stage reads a workspace-relative, checksum-verified copy rather than a path outside the workspace.",
+      ],
+    }), scriptStage({
       id: "experiment_evidence_prepare", title: "Verify audited experiment evidence", owner: "result-auditor",
-      inputs: [policy.experiment!.manifestPath!, "experiments/artifact-bundle.json"],
+      inputs: ["experiments/longexperiment-manifest.json", "experiments/artifact-bundle.json"],
       optional_inputs: hasCodebases ? ["codebases/manifest.json"] : [],
       outputs: ["experiments/verification.json", "evidence/experiment-packets.json"], validators: ["required_output_exists"], runtime: "script",
       command: longwriteCommand(["research", "prepare-experiment", "."]),
@@ -933,10 +960,12 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       "Read the review evidence and write ONLY reviews/action-plan.json. Do not wrap it in Markdown or an array.",
       "reports/stall-status.md decides which tools are eligible this round, from recorded scores rather than from your own judgment of progress. When its posture is `structural`, several rounds have already failed to beat the best score, and every action you emit must use a tool it lists as eligible — repeating prose or visual revision would run a shape that has demonstrably not worked. Pivot the structure, not the tactics: change the outline's frame or the evidence the paper rests on. When the posture is `escalate`, say so plainly in the findings: the binding constraint is likely outside what this loop can change.",
       "reviews/artifact-plan.json is the validated creative strategy. Route every selected intent to the smallest compatible action; do not discard a validated formalization, comparison, metadata plot, timeline, architecture diagram, or taxonomy recall merely because it is not a fixed stage.",
-      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,operator,target,scope?}]}]}. operator is at_least, at_most, or equals. Every action needs at least one measurable criterion. Use cited_sources, cited_within_one_year_ratio, accepted_cited_ratio, cited_arxiv_only_ratio, citations_per_page, citation_depth_per_section (scope=A|B|C or a named section), taxonomy_cell_ab_sources (scope=taxonomy cell), comparative_tables, verified_metadata_plots, figures, tables, rendered_visual_review, empirical_trials, landmark_coverage_ratio, landmark_citation_coverage_ratio, claim_contradictions, prose_redundancy, diagram_connectivity, or review_score. Map weak comparative synthesis to a source-grounded method matrix; map taxonomy gaps to targeted recall plus woven A/B sources; map visual weakness to rendered_visual_review equals 1 plus the smallest necessary figure/table repair. Use at_least for coverage and quality ratios; use at_most or equals for defect counts claim_contradictions, prose_redundancy, and diagram_connectivity. Map landmark_coverage to targeted_research_expansion, naming the exact missing landmark works. Map landmark_citation_coverage to revise_sections so existing A/B landmark evidence is engaged in the argument. Map claim_contradictions to revise_sections with at_most 0 remaining contradictions, or to reopen_outline when the organizing argument itself conflicts. Map prose_redundancy to revise_sections with at_most 0 findings. Map diagram_connectivity to revise_visual_plan with at_most 0 defects. Never use an empirical_trials action unless research.paper_kind is empirical and a preregistered, controlled result artifact is in scope.",
-      "Allowed tools: targeted_research_expansion (only for an evidence/coverage gap), reopen_outline (only for a major/critical structural, scope, or taxonomy defect requiring a changed organizing argument), revise_sections (for prose, structure, citation, or length repair), revise_visual_plan (for a figure/table placement, caption, conceptual-diagram, generated-table, bibliography-presentation, or rendered-PDF defect), and request_operator_clarification (only when a human decision is genuinely required).",
+      "Schema: {version:1,findings:[{id,severity,summary}],actions:[{id,tool,finding_ids,rationale,acceptance_criteria:[{metric,operator,target,scope?}]}]}. operator is at_least, at_most, or equals. Every action needs at least one measurable criterion.",
+      // Generated from the registries rather than restated beside them: a
+      // second copy of a policy drifts the moment either side changes, and
+      // the old mitigation was a test policing the drift.
+      ...renderPlannerInstructions(),
       "Select reopen_outline only when incremental chapter revision cannot address the review finding. Its rationale must name the defective organizing claim and evidence-backed replacement. It may co-occur with targeted_research_expansion: the dispatcher refreshes and validates the literature before it reopens the outline in the same bounded round.",
-      "Output ownership is strict: revise_sections may change only chapters/*.md, paper/abstract.md, and reviews/revision-report.md. Never assign it a generated table/figure, placement, caption, rendered-PDF, bibliography-presentation, TeX, or build defect. Assign those findings to revise_visual_plan so the artifact builder can write the durable placement contract before the normal rebuild.",
       "If one finding spans prose and an artifact, split it into two findings (or attach the same finding id to both actions) and keep each action rationale within that action's declared outputs. Do not ask a prose action to hand off uneditable work as a blocker.",
       "Select each tool at most once per plan. Combine all findings owned by the same tool into that tool's single action; its output contract is shared across those findings.",
       "Every action must name at least one finding id and at least one quantitative acceptance criterion. Select the smallest sufficient set; do not invent commands, paths, tool ids, or model settings.",
@@ -970,37 +999,50 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
     validators: ["required_output_exists"],
     retry: { max_attempts: 2 },
   });
-  const researchDispatch = {
-    type: "action_dispatch",
-    id: "research_action_dispatch",
-    title: "Execute evidence-expansion actions before revision",
-    owner: "analyst",
-    plan_path: "reviews/research-action-plan.json",
-    allowed_actions: ["targeted_research_expansion"],
-    max_actions: 1,
-    continue_on_recoverable_failure: true,
-    outputs: ["reports/action-dispatch-research.json"],
+  // Every dispatcher DERIVED from the phase table: its plan path, the
+  // capabilities it accepts and its action ceiling all come from the same place
+  // the splitter reads. Written out by hand, the splitter wrote a file one
+  // dispatcher never read, another dispatcher allowed a capability the splitter
+  // never routed to it, and a ceiling of one rejected a whole plan the moment a
+  // phase legitimately needed two actions.
+  const dispatchFor = (phase: PhaseId, extra: Record<string, unknown> = {}): Record<string, unknown> => {
+    const route = phaseOf(capabilitiesOfPhase(phase)[0]!);
+    const capabilities = capabilitiesOfPhase(phase);
+    return {
+      type: "action_dispatch",
+      id: route.dispatchId,
+      title: route.title,
+      owner: "analyst",
+      plan_path: route.planPath,
+      allowed_actions: capabilities,
+      // Dispatch instances are isolated by capability, objective, and scope.
+      // A phase may therefore have several legal actions for one capability;
+      // the kernel serializes overlapping envelopes rather than rejecting the
+      // later objective at its admission boundary.
+      max_actions: 20,
+      outputs: [route.reportPath],
+      ...extra,
+    };
   };
-  const outlineDispatch = {
-    type: "action_dispatch",
-    id: "outline_action_dispatch",
-    title: "Execute structural outline-reopen actions after evidence refresh",
-    owner: "analyst",
-    plan_path: "reviews/outline-action-plan.json",
-    allowed_actions: ["reopen_outline"],
-    max_actions: 1,
-    outputs: ["reports/action-dispatch-outline.json"],
-  };
-  const revisionDispatch = {
-    type: "action_dispatch",
-    id: "action_dispatch",
-    title: "Execute prose and visual repair actions from refreshed evidence",
-    owner: "analyst",
-    plan_path: "reviews/revision-action-plan.json",
-    allowed_actions: ["revise_sections", "revise_visual_plan", "request_operator_clarification"],
-    max_actions: 3,
-    outputs: ["reports/action-dispatch.json"],
-  };
+  const researchDispatch = dispatchFor("research", { continue_on_recoverable_failure: true });
+  const outlineDispatch = dispatchFor("outline");
+  // A tier name the workflow never defined is rejected by the engine, and a
+  // logical tier is only expressible where the manifest declares one. Where it
+  // does not, the template's tier is simply not applied — inventing a tier
+  // entry here would put a model choice in the compiler that the manifest
+  // never made.
+  const declaredTiers = new Set(Object.keys((next.model_tiers as Record<string, unknown> | undefined) ?? {}));
+
+  const revisionDispatch = dispatchFor("revision", {
+    // The dispatch protocol. Each of these is a declared transition rather
+    // than a `when` expression over an invented variable: `diagnose_requested`
+    // and `unreachable_objectives` were domain concepts the kernel never
+    // defined, so a guard on them could only ever make a phase look skipped.
+    materializer: longwriteCommand(["research", "materialize-action", "."]),
+    verdict_inputs: ["reports/reachability-verdict.json"],
+    cost_probe: longwriteCommand(["research", "cost-probe", "."]),
+    on_diagnose: "diagnose_objective",
+  });
   // Records whether a targeted_research_expansion was actually dispatched this
   // round, as the numeric metric `research_expansion_dispatched`. The evidence
   // refresh block below is gated on it so the runtime SKIPS those stages when
@@ -1276,10 +1318,232 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       releaseAssessment,
       finalReleaseProgress,
     ];
+    const configRead = "longwrite.yaml";
+    // Measurement is tiered because the tiers cost different amounts and
+    // answer at different moments. Each stage declares ONLY the metrics its
+    // tier owns: a stage claiming every registered metric while measuring one
+    // tier reports the rest as its own responsibility and never produces them.
+    // A measurement runs in an isolated workspace containing exactly what it
+    // declared it reads. That is what makes an undeclared read impossible
+    // rather than merely detectable — and it means an undeclared dependency is
+    // not a subtle bug but an empty directory. The reads come from the metric
+    // registry's own `dependencies`, so a metric that starts reading something
+    // new says so in one place.
+    const readsForMetrics = (metrics: string[]): string[] => [...new Set([
+      configRead,
+      ...metrics.flatMap((metric) => {
+        const definition = metricDefinition(metricId(metric));
+        return [...definition.dependencies, ...(definition.raw_output ?? [])];
+      }),
+    ])].sort();
+    const measurementStages = (["unit", "round"] as const).map((tier) => scriptStage({
+      id: `measure_${tier}_metrics`,
+      title: `Measure ${tier}-tier metrics`,
+      owner: "analyst",
+      kind: "measurement",
+      // A measurement observes; it owns nothing. An envelope here would let
+      // the thing being graded edit the thing grading it.
+      owns: [],
+      reads: readsForMetrics(metricsOfTier(tier)
+        .filter((metric) => metricDefinition(metric).measurement_kind === "script").map(String)),
+      writes_observations: metricsOfTier(tier)
+        .filter((metric) => metricDefinition(metric).measurement_kind === "script").map(String),
+      outputs: ["reports/measurements.json"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["metrics", "evaluate", ".", "--tier", tier]),
+    }));
+    // One acquisition stage per model or external metric. `metrics evaluate`
+    // marks non-script metrics deferred by design; their producer-specific
+    // acquisition supplies the actual model judgment or toolchain value.
+    const acquisitionStages = [...metricsOfTier("release"), ...metricsOfTier("round")]
+      .map(String)
+      .filter((metric) => metricDefinition(metricId(metric)).measurement_kind !== "script")
+      .map((metric) => scriptStage({
+        id: `acquire_${metric}`,
+        title: `Acquire ${metric} from its declared producer`,
+        owner: "analyst",
+        kind: "measurement",
+        // Post-repair acquisition must obtain a new producer result before
+        // reducing it; otherwise it only relabels pre-repair evidence.
+        refresh_producers: true,
+        refresh_producer_outputs: metricDefinition(metricId(metric)).raw_output,
+        owns: [],
+        // Its producer's raw output plus whatever that producer read.
+        reads: readsForMetrics([metric]),
+        writes_observations: [metric],
+        outputs: ["reports/measurements.json"],
+        validators: ["required_output_exists"],
+        runtime: "script",
+        command: longwriteCommand(["metrics", "acquire", ".", "--metric", metric]),
+      }));
+
+    // The adjudication branch, for the one metric that genuinely has competing
+    // judgments. `review_score` reduces several personas scoring the same
+    // manuscript; when they materially disagree the acquisition refuses to
+    // report a number, because a reduction is not a resolution. Something has
+    // to actually resolve it, and until these two stages existed the refusal
+    // made the metric permanently unavailable while the budget still priced an
+    // adjudication call that nothing performed.
+    //
+    // Two stages, because they are two different acts: measuring the spread is
+    // deterministic arithmetic over the scorecard, and RESOLVING it is a
+    // judgment that costs a high-tier call — which is why the second one is
+    // guarded and the first one is not.
+    const assessDisagreement = scriptStage({
+      id: "assess_review_disagreement",
+      title: "Measure how far the persona reviews disagree",
+      owner: "analyst",
+      // It writes into the shared guard file as well as its own report, and it
+      // says so: an undeclared write is invisible to the effect checks whatever
+      // else happens to permit it today.
+      kind: "mutation",
+      owns: ["reports/review-disagreement.json", "reports/metrics.json"],
+      writes: ["reports/review-disagreement.json", "reports/metrics.json"],
+      corrective_capability: "operator",
+      reads: [configRead, "reviews/scorecard.json", "reports/metrics.json"],
+      optional_inputs: ["reviews/scorecard.json"],
+      outputs: ["reports/review-disagreement.json"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["review", "assess-disagreement", "."]),
+    });
+    const adjudicateReviewScore = agentStage({
+      id: "adjudicate_review_score",
+      title: "Resolve a material disagreement between persona reviews",
+      owner: "analyst",
+      // The judgment that settles a contested release score runs at the
+      // highest tier the manifest declares, and at none when it declares none.
+      ...(declaredTiers.has("high") ? { model_tier: "high" } : {}),
+      // Only when the judges actually disagree. A guard is right here and wrong
+      // for reachability: an unreachable objective needs to be REPORTED, while
+      // an adjudication nobody needs is simply a call not worth making.
+      when: "review_score_disagreement >= 1",
+      owns: ["reviews/adjudication/**"],
+      writes: ["reviews/adjudication/review_score.json"],
+      reads: [configRead, "reviews/scorecard.json", "reports/review-disagreement.json",
+              "chapters/**", "paper/main.tex"],
+      inputs: ["reviews/scorecard.json", "reports/review-disagreement.json"],
+      skills: ["reviews/scorecard.json", "reports/review-disagreement.json"],
+      outputs: ["reviews/adjudication/review_score.json"],
+      validators: ["required_output_exists"],
+      validator_commands: [longwriteCommand(["review", "validate-adjudication", ".", "--metric", "review_score"])],
+      instructions: [
+        "reports/review-disagreement.json names the personas whose overall scores are furthest apart and by how much. reviews/scorecard.json carries every persona's per-dimension scores and summary.",
+        "Read the manuscript passages the disagreeing personas actually cite before deciding. An adjudication that restates the spread without examining the work is not a resolution.",
+        "Write ONLY reviews/adjudication/review_score.json as {version:1,by,at,status,resolved_score?,scorecard_digest,rationale}. Copy scorecard_digest verbatim from reports/review-disagreement.json: it binds your ruling to the exact scorecard you read, so a later review round cannot inherit it. `by` names you as the adjudicating role; `rationale` states which reading you found better supported and why, in the reviewers' own terms.",
+        "status is exactly one of resolved or unresolved. `resolved` REQUIRES resolved_score: the score on the reviewers' own 0-10 rubric that the dispute settles at, which becomes the recorded value for this metric. Do not restate the median — if the median was already right, say so and give it as the resolved_score.",
+        "resolved_score must lie between the lowest and highest persona overall in reports/review-disagreement.json. You are choosing between the readings on the table; a number outside them settles a different argument.",
+        "`unresolved` is a real answer and you may not name a score with it. Use it when the disagreement cannot be settled on the evidence available; the metric then stays unavailable and an operator is told you examined it and why it could not be closed.",
+        "You are resolving a disagreement about the manuscript, not changing the rubric and not lowering the target. Choosing a resolved_score outside the range the personas actually reported is not an adjudication of their dispute.",
+      ],
+    });
+
+    // Runs BEFORE the improve loop, and emits a verdict rather than gating a
+    // stage. A `when:` guard would make an unreachable objective look like a
+    // phase that was skipped; the verdict makes it a named, actionable pause.
+    const assessReachability = scriptStage({
+      id: "assess_reachability",
+      title: "Assess whether each declared objective is reachable at all",
+      owner: "analyst",
+      // NOT `kind: measurement`. A measurement unit emits an observation
+      // envelope the kernel ingests from its first output; this stage emits a
+      // VERDICT about whether objectives can be met at all. Declaring it a
+      // measurement made the kernel try to parse the reachability report as a
+      // measurement envelope and fail the stage.
+      reads: [configRead, "sources/**", "outline.json", "reports/longwrite-validation.json"],
+      // Optional, deliberately. Reachability REPORTS that a corpus has not
+      // been evaluated; requiring the corpus as a hard input would fail the
+      // stage in exactly the situation it exists to describe.
+      optional_inputs: ["sources/classified_sources.jsonl", "reports/longwrite-validation.json"],
+      outputs: ["reports/gate-reachability.json", "reports/gate-reachability.md", "reports/reachability-verdict.json"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["research", "assess-reachability", "."]),
+    });
+
+    // Reached when a contract outcome maps to `diagnose`. Its output is a
+    // DECISION, validated against the registries: a different effect, a
+    // different capability, an operator question, or a verdict that the target
+    // is unreachable. It may not touch a manuscript artifact and it may not
+    // lower a target — an unmet objective met by redefining it is the failure
+    // this subflow exists to prevent.
+    // Two units, because they are two different acts. Assembling the packet is
+    // deterministic bookkeeping over the objective's history; DECIDING what to
+    // try next is a judgment. One stage doing both wrote outside its declared
+    // envelope and never produced the decision it promised.
+    const diagnosisPacket = scriptStage({
+      id: "build_diagnosis_packet",
+      title: "Assemble the diagnosis packet for a stalled objective",
+      owner: "analyst",
+      phase: "improve",
+      kind: "mutation",
+      owns: ["repair/**"],
+      writes: ["repair/diagnosis-packet.json"],
+      reads: [configRead, "repair/**", "reviews/**", "reports/**", ".malaclaw/observations/**"],
+      outputs: ["repair/diagnosis-packet.json"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["review", "diagnose-objective", "."]),
+      enabled: false,
+      skippable: true,
+      disabled_reason: "runs with the diagnosis stage the kernel reaches through its diagnose transition",
+    });
+    const diagnoseObjective = agentStage({
+      id: "diagnose_objective",
+      title: "Diagnose an objective that repeated repair could not meet",
+      owner: "analyst",
+      phase: "improve",
+      kind: "mutation",
+      // Diagnosis is the one unit that sees a whole objective's history and
+      // decides what to try next; it runs at the highest tier the manifest
+      // declares, and at none when it declares none.
+      ...(declaredTiers.has("high") ? { model_tier: "high" } : {}),
+      owns: ["reviews/diagnosis.json"],
+      writes: ["reviews/diagnosis.json"],
+      reads: [configRead, "repair/diagnosis-packet.json"],
+      inputs: ["repair/diagnosis-packet.json"],
+      skills: ["repair/diagnosis-packet.json"],
+      outputs: ["reviews/diagnosis.json"],
+      // The promise that this stage produces a DECISION the kernel will act on,
+      // not a report. Declaring it is what makes an unreadable or invalid
+      // diagnosis an operator block instead of a resume that repeats the repair
+      // the decision was supposed to replace.
+      diagnosis_output: "reviews/diagnosis.json",
+      validators: ["required_output_exists"],
+      // The contract is enforced by a real validator rather than a schema_ref
+      // pointing at a file nothing in this repository ships.
+      validator_commands: [longwriteCommand(["review", "validate-diagnosis", "."])],
+      instructions: [
+        "Read repair/diagnosis-packet.json. It carries this objective's whole history: every strategy already attempted with its outcome, every value already measured, whether the target is reachable at all, and the packet the failed action received.",
+        "Write ONLY reviews/diagnosis.json as {version:1,objective,decision,detail,next_effect?,next_capability?,operator_question?}.",
+        "decision is exactly one of retry_with_different_effect (name next_effect), escalate_capability (name a registered next_capability), operator_required (state the operator_question), or target_infeasible.",
+        "Choose a strategy that has NOT already been attempted; the packet lists what has. Repeating one spends a round to relearn what the journal already records.",
+        "You may not lower or restate the target. An objective met by redefining it is not met. If the target cannot be reached with the evidence available, say target_infeasible and explain what would have to change.",
+      ],
+      // Not part of the ordinary graph. The kernel reaches this stage through
+      // the dispatch stage's `on_diagnose` transition, and running it in
+      // sequence would diagnose an objective nobody questioned.
+      enabled: false,
+      // A disabled unit must be explicitly skippable: the engine refuses to
+      // let a required unit vanish from the graph without someone saying it
+      // may.
+      skippable: true,
+      disabled_reason: "reached only through the kernel's diagnose transition, never in graph order",
+    });
     const finalValidateIndex = next.stages.findIndex((stage) => stage.id === "final_validate");
     if (finalValidateIndex < 0) throw new Error("auto_research_agentic requires final_validate for final-release recovery");
     next.stages.splice(finalValidateIndex, 0,
+      assessReachability,
+      diagnosisPacket,
+      ...measurementStages,
+      // The disagreement is measured and, if it is material, resolved BEFORE
+      // the acquisition that refuses an unadjudicated value.
+      assessDisagreement,
+      adjudicateReviewScore,
+      ...acquisitionStages,
       releaseAssessment,
+      diagnoseObjective,
       loopStage({
         id: "final_release_recovery_loop",
         title: "Recover failed final release gates",
@@ -1302,11 +1566,78 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         ...((expand.inputs as string[] | undefined) ?? []).filter((input) => input !== "reports/remediation-plan.json"),
         "reviews/action-plan.json",
       ],
-      optional_inputs: [...new Set([...((expand.optional_inputs as string[] | undefined) ?? []), "reviews/artifact-plan.json"])],
+      optional_inputs: [...new Set([
+        ...((expand.optional_inputs as string[] | undefined) ?? []),
+        "reviews/artifact-plan.json",
+        // What the target ledger says is still missing. The ledger could
+        // already name an unresolved landmark and nothing fed it back into
+        // retrieval, so the same gap survived every round while each round
+        // spent its budget on sources nobody had asked for.
+        "research/retrieval-brief.json",
+      ])],
+      skills: [...new Set([
+        ...((expand.skills as string[] | undefined) ?? []),
+        "research/retrieval-brief.json",
+      ])],
+      instructions: [
+        ...((expand.instructions as string[] | undefined) ?? []),
+        "research/retrieval-brief.json lists the landmark targets the ledger still has no source for, with how many times each has been attempted. Search for those FIRST: a target listed there is one this paper has already decided it needs, and a round that returns other sources leaves the same coverage gap open.",
+      ],
       // The adaptive adapter reads reviews/action-plan.json; the fixed v2
       // command continues to read reports/remediation-plan.json.
       command: longwriteCommand(["research", "expand", ".", "--action-plan", "reviews/action-plan.json"]),
-      max_invocations: 1,
+      // Distinct objectives/scopes are separate instances even when they use
+      // this capability; MalaClaw serializes overlapping envelopes.
+      max_invocations: 10,
+    }),
+    // These were REGISTERED, routable and selectable, and neither had
+    // an executable action: the plan splitter dropped them into no phase group
+    // and the catalog had no entry to dispatch. A recovery loop could diagnose
+    // the same bibliography defect every round with nothing ever acting on it.
+    action({
+      id: "repair_bibliography",
+      title: "Re-derive the bibliography from the classified corpus",
+      owner: "source-curator",
+      inputs: ["reviews/action-plan.json", "sources/classified_sources.jsonl"],
+      instructions: [
+        "The bibliography and citation plan are DERIVED from sources/classified_sources.jsonl. An inconsistency between them and the corpus is repaired by re-deriving them, never by editing the derived file.",
+      ],
+      // The bibliography only: the citation plan allocates sources to outline
+      // sections and is not this capability's to rebuild.
+      outputs: ["sources/bibliography.bib", "reports/bibliography-repair.md"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["research", "repair-bibliography", "."]),
+      max_invocations: 10,
+    }),
+    action({
+      id: "repair_citation_plan",
+      title: "Rebuild section citation allocations from the outline and corpus",
+      owner: "source-curator",
+      inputs: ["reviews/action-plan.json", "outline.json", "sources/classified_sources.jsonl", "sources/citation_plan.jsonl"],
+      instructions: [
+        "Regenerate only sources/citation_plan.jsonl from the current real outline sections and classified corpus. Do not alter bibliography or source metadata.",
+      ],
+      outputs: ["sources/citation_plan.jsonl", "reports/citation-plan-repair.md"],
+      validators: ["required_output_exists", "jsonl_parseable"],
+      runtime: "script",
+      command: longwriteCommand(["research", "repair-citation-plan", "."]),
+      max_invocations: 10,
+    }),
+    action({
+      id: "repair_source_metadata",
+      title: "Re-derive source identity and metadata from the corpus the records name",
+      owner: "source-curator",
+      inputs: ["reviews/action-plan.json", "sources/classified_sources.jsonl"],
+      instructions: [
+        "Identity is re-derived from the corpus rather than edited in place: a record whose metadata disagrees with the source it names is corrected by reading the source again.",
+      ],
+      outputs: ["sources/source-identities.jsonl", "reports/source-identities.md",
+                "reports/source-metadata-repair.md"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["research", "repair-source-metadata", "."]),
+      max_invocations: 10,
     }),
     action({
       id: "reopen_outline",
@@ -1321,7 +1652,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       ],
       outputs: ["outline.md", "outline.json", "feedback/outline-revision.md"], validators: ["required_output_exists", "non_empty_markdown"],
       requires_human_approval: policy?.outlineApprovalMode === "human",
-      max_invocations: 1,
+      max_invocations: 10,
     }),
     action({
       ...revise,
@@ -1358,7 +1689,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         ...(provider === "seed" ? [] : [validateEvidenceLedgerCommand()]),
       ],
       retry: { max_attempts: 2 },
-      max_invocations: 1,
+      max_invocations: 10,
     }),
     action({
       ...visualPlan,
@@ -1380,7 +1711,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
         "For new survey-native artifacts, use table_specs for source-bound comparison/taxonomy/evidence matrices and timelines for source-selected milestones. The builder validates all source IDs and derives timeline years; do not insert raw TeX, chart code, coordinates, or unsupported numerical results.",
         "For every repaired diagram whose review specifies rows, columns, or direction, encode that requirement structurally as layout:{kind:'grid',columns:1|2|3} or layout:{kind:'flow',direction:'left_to_right'|'top_to_bottom'}. Do not leave required geometry only in placement.discussion. LongWrite deterministically renders grid layouts and validates the layout contract before rebuilding the PDF.",
       ],
-      max_invocations: 1,
+      max_invocations: 10,
     }),
     action({
       id: "request_operator_clarification",
@@ -1396,6 +1727,73 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
       max_invocations: 1,
     }),
   ];
+  // The static half of each capability's contract, straight from the registry
+  // template: what it is, what it may touch, and what judges it. The dynamic
+  // half — the acceptance criterion and the protected metrics at their scope —
+  // is materialized per finding at dispatch, because the gate a repair answers
+  // to is not known until a finding names it. Emitting an `acceptance` here
+  // would be one criterion pretending to cover every dispatch.
+  const declaredStageIds = new Set<string>();
+  const collectStageIds = (stages: Array<Record<string, unknown>>): void => {
+    for (const stage of stages) {
+      declaredStageIds.add(String(stage.id));
+      if (Array.isArray(stage.stages)) collectStageIds(stage.stages as Array<Record<string, unknown>>);
+      if (Array.isArray(stage.steps)) {
+        for (const step of stage.steps as Array<Record<string, unknown>>) declaredStageIds.add(String(step.id));
+      }
+    }
+  };
+  collectStageIds((next.stages as Array<Record<string, unknown>> | undefined) ?? []);
+  next.tool_catalog = (next.tool_catalog as Array<Record<string, unknown>>).map((entry) => {
+    const template = CAPABILITY_TEMPLATES.get(String(entry.id));
+    if (!template) return entry;
+    // A measurement name that resolves to no stage is worse than none: the
+    // kernel reports the OBJECTIVE as unmeasurable when the defect is in the
+    // manifest. Caught here, at compile time, where it is one line to fix.
+    const unknown = template.evaluate_with.filter((id) => !declaredStageIds.has(id));
+    if (unknown.length > 0) {
+      throw new Error(
+        `capability template ${template.id} declares evaluate_with ${unknown.join(", ")}, ` +
+        `which this workflow does not declare as a stage`);
+    }
+    // A mutation runs against an isolated copy of exactly what it declared it
+    // reads. The action already declares that: its inputs, its optional
+    // inputs, and the skill documents it is given — plus the envelope it
+    // edits, because a unit that cannot read what it must change rewrites it
+    // from nothing. Leaving `reads` empty gave every dispatched action an
+    // empty workspace.
+    const declaredReads = [...new Set([
+      ...((entry.reads as string[] | undefined) ?? []),
+      ...((entry.inputs as string[] | undefined) ?? []),
+      ...((entry.optional_inputs as string[] | undefined) ?? []),
+      ...((entry.skills as string[] | undefined) ?? []),
+      ...template.owns,
+      "longwrite.yaml",
+    ])].sort();
+    // The ceiling the kernel enforces. Empty for a capability whose compiled
+    // action runs a script, which is the honest answer and the one that makes
+    // "an empty ceiling grants nothing" safe: without it the materializer, not
+    // the manifest, chose what a repair was allowed to touch.
+    const ceiling = toolCeilingFor(String(template.id));
+    return {
+      ...entry,
+      kind: template.kind,
+      owns: template.owns,
+      reads: declaredReads,
+      // Emitted for every runtime that can ENFORCE a grant, not only for the
+      // ones that left it unset. Keying on `runtime === undefined` meant an
+      // operator who explicitly selected codex — an agent runtime with harness
+      // tools — got an empty ceiling in the manifest while the materializer
+      // still requested editing tools, and the fail-closed check then rejected
+      // the action outright. `script` is the one runtime with no harness tools
+      // to grant, and the runtime-capability check refuses a ceiling on it.
+      ...(ceiling.length > 0 && entry.runtime !== "script" ? { allowed_tools: ceiling } : {}),
+      ...(template.evaluate_with.length > 0 ? { evaluate_with: template.evaluate_with } : {}),
+      ...(entry.model_tier !== undefined
+        ? { model_tier: entry.model_tier }
+        : declaredTiers.has(template.model_tier) ? { model_tier: template.model_tier } : {}),
+    };
+  });
   if (hasCodebases) {
     const codebaseInputs = ["codebases/manifest.json", "evidence/codebase-context.md", "evidence/codebase-analysis.json", "evidence/codebase-comparison.json"];
     const codebaseInstruction = "Configured repositories are pinned codebase evidence, not scholarly literature. Use evidence/codebase-analysis.json as the validated architecture dossier and inspect its exact file/line locators before making a repository claim. Cite `[codebase:<id>]` or `[codebase:<id>:path#Lx-Ly]`; never claim execution results unless a verified empirical result artifact is supplied.";
@@ -1482,6 +1880,7 @@ function withAgenticResearchStages(workflow: Record<string, unknown>, policy?: C
   if (provider === "seed") {
     const disableVisualReview = (stages: Array<Record<string, unknown>>): Array<Record<string, unknown>> => stages.map((stage) => {
       if (Array.isArray(stage.stages)) return { ...stage, stages: disableVisualReview(stage.stages as Array<Record<string, unknown>>) };
+      if (Array.isArray(stage.steps)) return { ...stage, steps: disableVisualReview(stage.steps as Array<Record<string, unknown>>) };
       if (["render_visual_review", "visual_review"].includes(String(stage.id))) {
         return { ...stage, enabled: false, skippable: true, disabled_reason: "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer" };
       }
@@ -1732,6 +2131,125 @@ function applyStageOverrides(
   return next;
 }
 
+/** Complete the declared-effects migration at the only authoritative boundary:
+ * the compiler that emits the executable MalaClaw IR.  Mode files describe
+ * stage intent and outputs; this pass makes that intent an isolation envelope
+ * for every ordinary unit, including loop and foreach children.  Stages that
+ * already declare a narrower audited envelope retain it verbatim.
+ *
+ * `fulltext` is deliberately wider than its manifest output: ingestion writes
+ * an indexed manifest *and* one retrieved document per source, so declaring
+ * only the manifest would let the directory escape transactional isolation. */
+function declareProductionEffects(workflow: Record<string, unknown>): Record<string, unknown> {
+  const envelope = (stage: Record<string, unknown>): Record<string, unknown> => {
+    if (String(stage.type) === "loop" && Array.isArray(stage.stages)) {
+      return { ...stage, stages: stage.stages.map((child) => envelope(child as Record<string, unknown>)) };
+    }
+    if (Array.isArray(stage.steps)) {
+      return { ...stage, steps: stage.steps.map((step) => envelope(step as Record<string, unknown>)) };
+    }
+    // Dispatch is kernel-owned orchestration, not a workspace mutation.
+    if (String(stage.type) === "action_dispatch" || stage.kind !== undefined) return stage;
+    const outputs = Array.isArray(stage.outputs)
+      ? stage.outputs.filter((value): value is string => typeof value === "string") : [];
+    if (outputs.length === 0) return stage;
+    const id = String(stage.id);
+    // The build report is a declared OUTPUT, not merely an owned side effect.
+    // The kernel issues a producer receipt per declared output, so a report
+    // that is owned and not declared has no receipt — and the acquisition that
+    // reduces it into `latex_build_status` had nothing to verify its
+    // provenance against. It could therefore reduce a report left behind by an
+    // earlier build.
+    const buildReports = ["build", "initial_build", "rebuild"].includes(id)
+      ? ["reports/latex-build.md", "reports/figures-build.md"] : [];
+    if (buildReports.length > 0) {
+      stage = { ...stage, outputs: [...new Set([...outputs, ...buildReports])] };
+      outputs.push(...buildReports.filter((report) => !outputs.includes(report)));
+    }
+    const owns = [...new Set([
+      ...outputs,
+      ...(id.includes("fulltext") ? ["fulltext/**", "sources/documents/**"] : []),
+      ...(id.includes("allocate_evidence") ? ["evidence/**"] : []),
+      // A manuscript build first consolidates citation provenance, then emits
+      // several generated figure/LaTeX surfaces beyond its validator-facing
+      // output list. All belong to the same atomic build transaction.
+      ...(["build", "initial_build", "rebuild"].includes(id)
+        ? ["evidence/citation-ledger.jsonl", "figures/**", "paper/**", "build/**", "data/**", "scripts/plot_source_years.py",
+          "reports/figures-build.md", "reports/latex-build.md", "reports/visual-plan-repair.md"] : []),
+      // The deterministic corpus-gate command also publishes the current
+      // metric snapshot used by downstream dispatch; it is not merely a
+      // report-local side effect.
+      ...(id.includes("corpus_gates") ? ["reports/metrics.json"] : []),
+      // Rendering computes whether a page set is reviewable and records that
+      // guard in the shared metric snapshot consumed by visual-review stages.
+      ...(id === "render_visual_review" ? ["reports/metrics.json"] : []),
+      // Scorecard validation records the deterministic score snapshot and
+      // history alongside the model's review output.
+      ...(["baseline_review", "review"].includes(id)
+        ? ["reports/metrics.json", "reports/score-history.json"] : []),
+      ...(id === "final_release_plan"
+        ? ["reviews/action-plan.json.pre-final-release-enrichment.json"] : []),
+      ...(id === "citation_repair_packet" ? ["evidence/citation-ledger.jsonl"] : []),
+    ])].sort();
+    const reads = [...new Set([
+      // Every LongWrite command resolves the durable project contract from
+      // this file; omitting it made isolated task workspaces look complete
+      // until the first validator tried to load configuration.
+      "longwrite.yaml",
+      // Ledger consolidation resolves each marker through the classified
+      // source catalog; its historical stage definition listed prose and
+      // coverage but omitted this load-bearing read.
+      ...(["citation_ledger", "consolidate_citations"].includes(id)
+        ? ["sources/classified_sources.jsonl", "evidence/section-*.json"] : []),
+      ...(["build", "initial_build", "rebuild"].includes(id)
+        ? ["chapters/**", "sources/**", "evidence/**", "figures/**", "paper/**"] : []),
+      ...(id === "citation_repair_packet" ? ["sources/classified_sources.jsonl"] : []),
+      // Final-release assessment runs the whole domain validator rather than
+      // a report-local check. Its task workspace must therefore contain every
+      // artifact family that validator inspects; otherwise it diagnoses files
+      // that exist in the canonical workspace as missing.
+      ...(id.includes("final_release")
+        ? ["chapters/**", "sources/**", "evidence/**", "reports/**", "research/**", "outline.json", "outline.md", "paper/**", "figures/**", "build/**"] : []),
+      ...((stage.reads as string[] | undefined) ?? []),
+      ...((stage.inputs as string[] | undefined) ?? []),
+      ...((stage.optional_inputs as string[] | undefined) ?? []),
+    ])].sort();
+    return { ...stage, kind: "mutation", owns, writes: owns,
+      // Rendering records whether there are any caption-bearing pages. A
+      // multimodal review with none cannot produce a truthful page-by-page
+      // verdict, so it is explicitly skipped rather than failing on invented
+      // image input.
+      ...(id === "visual_review" ? { when: "visual_reviewable_pages >= 1" } : {}),
+      ...(reads.length > 0 ? { reads } : {}) };
+  };
+  const stages = Array.isArray(workflow.stages)
+    ? workflow.stages.map((stage) => envelope(stage as Record<string, unknown>)) : [];
+  return { ...workflow, stages };
+}
+
+/** Every owner the compiled workflow names, so the project can attach them.
+ *
+ * An owner absent from `attached_agents` is a semantic-validation error the
+ * shape check cannot see: the manifest parses, and the engine refuses it at
+ * startup. Compilation ADDS stages the mode file never listed, so the roster
+ * has to be checked against what was actually emitted rather than against what
+ * the mode declared. */
+export function declaredOwners(workflow: Record<string, unknown>): string[] {
+  const owners = new Set<string>();
+  const walk = (stages: Array<Record<string, unknown>>): void => {
+    for (const stage of stages) {
+      if (typeof stage.owner === "string") owners.add(stage.owner);
+      if (Array.isArray(stage.stages)) walk(stage.stages as Array<Record<string, unknown>>);
+      if (Array.isArray(stage.steps)) walk(stage.steps as Array<Record<string, unknown>>);
+    }
+  };
+  walk(((workflow.stages as Array<Record<string, unknown>> | undefined) ?? []));
+  for (const action of ((workflow.tool_catalog as Array<Record<string, unknown>> | undefined) ?? [])) {
+    if (typeof action.owner === "string") owners.add(action.owner);
+  }
+  return [...owners].sort();
+}
+
 /** Compile a writing mode into a MalaClaw manifest object.
  *  The workflow block passes through verbatim, plus mode/artifact metadata.
  *  MalaClaw validates workflow correctness. */
@@ -1754,10 +2272,10 @@ export function compileModeToManifest(
         { offlineRehearsal: (opts.researchProvider ?? "seed") === "seed" },
       )
     : adaptiveWorkflow;
-  const workflow = applyExecutionDefaults(
+  const workflow = declareProductionEffects(applyExecutionDefaults(
     applyStageOverrides(applyRuntimeProfile(productionWorkflow, opts.runtimeProfile), opts.stageOverrides),
     opts.executionDefaults,
-  );
+  ));
   return {
     version: 1,
     project: {
@@ -1765,10 +2283,47 @@ export function compileModeToManifest(
       name: opts.projectName ?? opts.projectId,
       description: opts.topic ? `${mode.name} project: ${opts.topic}` : mode.description,
       attached_agents: mode.default_agents,
+      ...((): Record<string, never> => {
+        // Fails at COMPILE time, where the stage that names the owner is in
+        // hand, rather than at run time as "owner X is not an agent" with no
+        // hint of which pass introduced it. Compilation adds stages the mode
+        // file never listed, so the roster must be checked against what was
+        // actually emitted.
+        const attached = new Set(mode.default_agents);
+        const missing = declaredOwners(workflow as unknown as Record<string, unknown>)
+          .filter((owner) => !attached.has(owner));
+        if (missing.length > 0) {
+          throw new Error(
+            `compiled workflow names owner(s) ${missing.join(", ")} that ${mode.id} does not ` +
+            `attach; add them to default_agents so the manifest passes semantic validation`);
+        }
+        return {};
+      })(),
     },
     workflow: {
       mode: mode.id,
       artifact_type: mode.artifact_type,
+      // All generated production stages declare their read/write envelopes.
+      // Treat an omission as a compiler error: transactional isolation cannot
+      // be a production guarantee while an undeclared stage can write around
+      // its task workspace.
+      require_declared_effects: true,
+      // The kernel refuses a verification criterion whose id it was never told
+      // about, and it is right to: a criterion nobody can answer can never be
+      // satisfied. The registry of verifiers this product implements is the
+      // only honest source for that list, so it is emitted rather than
+      // maintained by hand alongside it.
+      verifiers: verifierIds(),
+      // Declaring the ids without declaring what ANSWERS them leaves every
+      // verification criterion pending forever, and a repair that worked is
+      // reported as measurement_failed.
+      verifier_command: longwriteCommand(["research", "answer-verifications", "."]),
+      // And how each dispatched attempt was JUDGED. The attempt ledger is
+      // written at materialization, when nobody yet knows whether the repair
+      // worked; without this channel every row reads `dispatched` forever and
+      // diagnosis is asked to pick a different strategy from a history in which
+      // nothing has failed.
+      outcome_command: longwriteCommand(["research", "record-outcome", "."]),
       ...(opts.runLimits ? { run_limits: opts.runLimits } : {}),
       ...workflow,
     },

@@ -45,6 +45,9 @@ async function workspace(options: Options = {}): Promise<string> {
   await fs.writeFile(path.join(ws, "sources", "citation_plan.jsonl"),
     JSON.stringify({ section_id: "section-01", section_title: "One",
       source_ids: options.danglingPlanEntry ? ["ghost-source"] : ["s1"] }), "utf-8");
+  await fs.writeFile(path.join(ws, "outline.json"), JSON.stringify({ sections: [
+    { id: "section-01", title: "One", keywords: ["evidence"] },
+  ] }), "utf-8");
   await fs.writeFile(path.join(ws, "sources", "bibliography.bib"),
     options.danglingBibEntry ? "@article{other, title={Other}}\n" : "@article{lovelace2025s1, title={T}}\n", "utf-8");
   const words = options.words ?? 20;
@@ -65,16 +68,15 @@ describe("research validator structured output", () => {
     }
   });
 
-  it("routes an unresolved source record to metadata repair, not prose", async () => {
+  it("routes an unresolved citation-plan source to citation-plan repair, not metadata repair", async () => {
     // The citation plan names a record that was never classified: the prose is
     // not wrong, the record behind it does not exist.
-    const findings = await findingsFor(await workspace({ danglingPlanEntry: true }), "citation_verification");
-    const metadata = findings.find((f) => f.artifact.kind === "source_record");
-    expect(metadata?.required_effect).toBe("repair_source_metadata");
+    const findings = await findingsFor(await workspace({ danglingPlanEntry: true }), "citation_plan_consistent");
+    expect(findings[0]?.required_effect).toBe("repair_citation_plan");
   });
 
   it("routes an unresolved bibliography entry to bibliography repair", async () => {
-    const findings = await findingsFor(await workspace({ danglingBibEntry: true }), "citation_verification");
+    const findings = await findingsFor(await workspace({ danglingBibEntry: true }), "bibliography_consistent");
     expect(findings.some((f) => f.artifact.kind === "bibliography"
       && f.required_effect === "repair_bibliography_consistency")).toBe(true);
   });
@@ -107,7 +109,10 @@ describe("research validator structured output", () => {
 
   it("leaves no failing check without something to act on", async () => {
     const report = await validateResearchWorkspace(await workspace({ noArtifacts: true }), AS_OF);
-    for (const check of report.checks.filter((item) => !item.pass)) {
+    // citation_verification is a diagnostic aggregate. When a component
+    // already emitted the exact finding, the aggregate deliberately does not
+    // trigger duplicate diagnosis before ordinary dispatch.
+    for (const check of report.checks.filter((item) => !item.pass && item.id !== "citation_verification")) {
       expect(check.findings.length > 0 || check.requires_diagnosis, String(check.id)).toBeTruthy();
     }
   });

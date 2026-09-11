@@ -116,7 +116,11 @@ const ACCEPTANCE: Draft[] = [
   { metric: "rendered_visual_review", scope_kind: "global", direction: "maximize", target_type: "boolean",
     tolerance: 0, time_dependent: false, measurement_tier: "release", measurement_kind: "model",
     evaluator: "rendered_visual_review", producer: "render_and_describe_pdf",
-    validator: "visual_review_schema", reducer: "adjudicated_consensus",
+    // ONE recorded verdict, taken as it stands. It was declared
+    // `adjudicated_consensus`, which priced an adjudication call that nothing
+    // performs and — once adjudication was actually enforced — made the metric
+    // permanently unavailable on any disagreement it could never have had.
+    validator: "visual_review_schema", reducer: "single_judgment",
     // What the reviewer actually looks at: the rendered PDF and the manifest
     // of pages taken from it. Omitting those meant a rebuilt manuscript kept
     // the previous visual judgment, which is the reuse this digest prevents.
@@ -138,13 +142,24 @@ const ACCEPTANCE: Draft[] = [
   { metric: "review_score", scope_kind: "global", direction: "maximize", target_type: "score",
     tolerance: 0.25, time_dependent: false, measurement_tier: "release", measurement_kind: "model",
     evaluator: "review_score", producer: "persona_review", validator: "scorecard_schema",
+    // The one metric that genuinely has competing judgments: several personas
+    // score the same manuscript and can materially disagree. The workflow runs
+    // `adjudicate_review_score` when they do, and the acquisition refuses the
+    // value until that adjudication is on disk.
     reducer: "adjudicated_consensus",
-    dependencies: ["chapters/", "paper/main.tex"],
+    // The adjudication is an INPUT to this measurement, not an afterthought.
+    // Left out, the acquisition ran in an isolated workspace that did not
+    // contain the file it refuses to proceed without, so a resolved
+    // disagreement still reported the metric unavailable — and the digest did
+    // not move when the adjudicator changed its mind.
+    dependencies: ["chapters/", "paper/main.tex", "reviews/adjudication/review_score.json"],
     raw_output: ["reviews/scorecard.json"], estimated_cost: { model_calls: 4, render_required: false } },
   { metric: "claim_support", scope_kind: "global", direction: "maximize", target_type: "ratio",
     tolerance: 0.02, time_dependent: false, measurement_tier: "release", measurement_kind: "model",
     evaluator: "claim_support", producer: "claim_judgment", validator: "claim_judgment_schema",
-    reducer: "adjudicated_consensus",
+    // One verdict per claim, reduced to the supported proportion. Nothing
+    // disagrees with anything here, so there is nothing to adjudicate.
+    reducer: "supported_proportion",
     dependencies: ["chapters/", "evidence/active-validated-source-evidence.json", "evidence/citation-ledger.jsonl"],
     raw_output: ["reviews/claim-judgments.jsonl"], estimated_cost: { model_calls: 6, render_required: false } },
   { metric: "landmark_coverage_ratio", scope_kind: "global", direction: "maximize", target_type: "ratio",

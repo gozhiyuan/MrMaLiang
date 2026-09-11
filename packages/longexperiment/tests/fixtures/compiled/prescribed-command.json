@@ -5,12 +5,14 @@
     "description": "LongExperiment: Memory helps planning.",
     "attached_agents": [
       "experiment-lead",
+      "experiment-reporter",
       "methodologist",
-      "result-auditor",
-      "experiment-reporter"
+      "result-auditor"
     ]
   },
   "workflow": {
+    "ir_version": 2,
+    "require_declared_effects": true,
     "external_inputs": [
       "experiment.yaml",
       "experiment_brief.md"
@@ -46,7 +48,19 @@
             "pin-inputs",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "inputs/locks.json"
+        ],
+        "writes": [
+          "inputs/locks.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json"
+        ]
       },
       {
         "id": "design",
@@ -73,7 +87,23 @@
             "design",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ],
+        "writes": [
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "experiment_brief.md",
+          "reports/experiment-design.md",
+          "runs/trial-plan.json"
+        ]
       },
       {
         "id": "prepare_worktrees",
@@ -98,7 +128,20 @@
             "worktrees",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "worktrees/manifest.json"
+        ],
+        "writes": [
+          "worktrees/manifest.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "worktrees/manifest.json"
+        ]
       },
       {
         "id": "suite_plan",
@@ -126,7 +169,28 @@
             "suite-plan",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json"
+        ],
+        "writes": [
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "reports/experiment-design.md",
+          "runs/study-level-1.json",
+          "runs/study-level-2.json",
+          "runs/suite-plan.json",
+          "worktrees/manifest.json"
+        ]
       },
       {
         "type": "foreach",
@@ -165,6 +229,22 @@
             "instructions": [
               "Run the configured runner for this one study only. The runner receives LONGEXPERIMENT_STUDY_ID, LONGEXPERIMENT_SEEDS, LONGEXPERIMENT_CONDITIONS, immutable input locks, and a required raw-result output path.",
               "Never fabricate result JSON. A nonzero runner exit or missing raw-results artifact fails this study."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "writes": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "runs/suite-plan.json",
+              "worktrees/manifest.json"
             ]
           },
           {
@@ -172,7 +252,8 @@
             "owner": "result-auditor",
             "inputs": [
               "results/studies/{{item.id}}/raw-results.json",
-              "inputs/locks.json"
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ],
             "outputs": [
               "results/studies/{{item.id}}/audit.json"
@@ -193,6 +274,20 @@
             ],
             "instructions": [
               "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "results/studies/**"
+            ],
+            "writes": [
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "results/studies/{{item.id}}/raw-results.json",
+              "runs/suite-plan.json"
             ]
           }
         ]
@@ -234,6 +329,22 @@
             "instructions": [
               "Run the configured runner for this one study only. The runner receives LONGEXPERIMENT_STUDY_ID, LONGEXPERIMENT_SEEDS, LONGEXPERIMENT_CONDITIONS, immutable input locks, and a required raw-result output path.",
               "Never fabricate result JSON. A nonzero runner exit or missing raw-results artifact fails this study."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "writes": [
+              "logs/studies/**",
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "runs/suite-plan.json",
+              "worktrees/manifest.json"
             ]
           },
           {
@@ -241,7 +352,8 @@
             "owner": "result-auditor",
             "inputs": [
               "results/studies/{{item.id}}/raw-results.json",
-              "inputs/locks.json"
+              "inputs/locks.json",
+              "runs/suite-plan.json"
             ],
             "outputs": [
               "results/studies/{{item.id}}/audit.json"
@@ -262,6 +374,20 @@
             ],
             "instructions": [
               "Verify every required condition/seed trial, source pin, and referenced artifact before allowing a dependent study to start."
+            ],
+            "kind": "mutation",
+            "owns": [
+              "results/studies/**"
+            ],
+            "writes": [
+              "results/studies/**"
+            ],
+            "corrective_capability": "operator",
+            "reads": [
+              "experiment.yaml",
+              "inputs/locks.json",
+              "results/studies/{{item.id}}/raw-results.json",
+              "runs/suite-plan.json"
             ]
           }
         ]
@@ -274,7 +400,7 @@
         "inputs": [
           "runs/suite-plan.json",
           "inputs/locks.json",
-          "results/studies/*/audit.json"
+          "results/studies/**"
         ],
         "outputs": [
           "results/raw-results.json"
@@ -293,7 +419,22 @@
             "aggregate",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "results/raw-results.json"
+        ],
+        "writes": [
+          "results/raw-results.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "results/raw-results.json",
+          "results/studies/**",
+          "runs/suite-plan.json"
+        ]
       },
       {
         "id": "audit_results",
@@ -319,7 +460,24 @@
             "audit",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ],
+        "writes": [
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "inputs/locks.json",
+          "reports/result-audit.md",
+          "results/experiment-manifest.json",
+          "results/raw-results.json"
+        ]
       },
       {
         "id": "report",
@@ -344,7 +502,21 @@
             "report",
             "."
           ]
-        }
+        },
+        "kind": "mutation",
+        "owns": [
+          "reports/experiment-report.md"
+        ],
+        "writes": [
+          "reports/experiment-report.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "experiment.yaml",
+          "reports/experiment-report.md",
+          "reports/result-audit.md",
+          "results/experiment-manifest.json"
+        ]
       }
     ]
   }

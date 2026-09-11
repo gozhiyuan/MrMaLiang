@@ -83,7 +83,26 @@ export function withResearchScriptStages(
       return { ...stage, runtime: "script", command: longwriteCommand(["research", "snowball", "."]) };
     }
     if (String(stage.id) === "venue_upgrade") {
-      return { ...stage, runtime: "script", command: longwriteCommand(["research", "venue-upgrade", "."]) };
+      const envelope = [
+        "sources/deduped_sources.jsonl", "sources/venue-upgrades.jsonl", "reports/venue-upgrade.md",
+        // The enrichment pass this command reuses writes its own two artifacts
+        // and then copies them to the venue-named ones. Nothing downstream
+        // requires them, so they are part of the ENVELOPE rather than of the
+        // outputs a validator enforces — but they are written, and isolation
+        // caught them the moment this stage stopped running straight in the
+        // canonical workspace.
+        "sources/metadata-upgrades.jsonl", "reports/metadata-enrichment.md",
+      ];
+      return {
+        ...stage, runtime: "script", command: longwriteCommand(["research", "venue-upgrade", "."]),
+        kind: "mutation", owns: envelope, writes: envelope,
+        corrective_capability: "operator",
+        reads: [...new Set([
+          ...((stage.reads as string[] | undefined) ?? []),
+          ...((stage.inputs as string[] | undefined) ?? []),
+          "sources/deduped_sources.jsonl", "longwrite.yaml",
+        ])].sort(),
+      };
     }
     if (String(stage.id) === "structure_audit") {
       return { ...stage, runtime: "script", command: longwriteCommand(["review", "structure", "."]) };
@@ -241,5 +260,30 @@ export function withResearchScriptStages(
     return stage;
   };
   workflow.stages = workflow.stages.map((stage) => mapStage(stage));
+
+  // The target ledger has to be POPULATED before any selector reserves against
+  // it. `research reconcile-targets` existed and no stage ran it, so in a real
+  // run the ledger was empty: every selector reserved nothing, found nothing
+  // eligible, and ranked whatever it happened to see — which is precisely the
+  // displacement reserve-before-rank exists to prevent. It runs immediately
+  // after identity reconciliation, the last point at which the corpus is
+  // settled and before the first selector (`fulltext`) reads it.
+  const anchor = workflow.stages.findIndex((stage) => String(stage.id) === "identity_reconcile");
+  if (anchor >= 0 && !workflow.stages.some((stage) => String(stage.id) === "reconcile_targets")) {
+    workflow.stages.splice(anchor + 1, 0, {
+      id: "reconcile_targets",
+      title: "Reserve landmark targets and publish what is still unretrieved",
+      owner: "source-curator",
+      phase: String((workflow.stages[anchor] as StageRecord).phase ?? "research"),
+      // Optional, deliberately: a mode with no landmark contract has no
+      // candidates file, and the ledger is then empty rather than the stage
+      // being a failure.
+      optional_inputs: ["research/landmark-candidates.json", "sources/classified_sources.jsonl"],
+      outputs: ["research/target-ledger.json", "research/retrieval-brief.json"],
+      validators: ["required_output_exists"],
+      runtime: "script",
+      command: longwriteCommand(["research", "reconcile-targets", "."]),
+    } as StageRecord);
+  }
   return workflow;
 }

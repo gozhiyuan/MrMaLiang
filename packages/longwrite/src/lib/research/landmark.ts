@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import type { ClassifiedSource } from "./types.js";
 
@@ -55,7 +57,15 @@ function titleMatches(candidate: string, source: string): boolean {
   return containsSequence(wanted, actual);
 }
 
-export type LandmarkMatch = { candidate: string; matchedSourceId: string | null; matchedBy: "identifier" | "title" | null };
+/** `matchedBy` says whether an identifier or the title matched; `method` says
+ * WHICH rule did, because "we found it by arXiv id" and "we found it by DOI"
+ * are different provenance claims about the same source. */
+export type LandmarkMatch = {
+  candidate: string;
+  matchedSourceId: string | null;
+  matchedBy: "identifier" | "title" | null;
+  method: "arxiv_id" | "doi" | "title" | null;
+};
 
 /** Identifier matches are normalized but exact and unambiguous. Title matching
  * requires an exact contiguous token sequence in either direction, so a short
@@ -71,16 +81,16 @@ export function matchLandmarksToCorpus(
     const doi = candidate.expected_identifiers?.doi;
     if (arxivId) {
       const bySource = sources.find((source) => !used.has(source.id) && source.identifiers?.arxiv_id && normalizeArxiv(source.identifiers.arxiv_id) === normalizeArxiv(arxivId));
-      if (bySource) { used.add(bySource.id); return { candidate: candidate.name, matchedSourceId: bySource.id, matchedBy: "identifier" as const }; }
+      if (bySource) { used.add(bySource.id); return { candidate: candidate.name, matchedSourceId: bySource.id, matchedBy: "identifier" as const, method: "arxiv_id" as const }; }
     }
     if (doi) {
       const bySource = sources.find((source) => !used.has(source.id) && source.identifiers?.doi && normalizeDoi(source.identifiers.doi) === normalizeDoi(doi));
-      if (bySource) { used.add(bySource.id); return { candidate: candidate.name, matchedSourceId: bySource.id, matchedBy: "identifier" as const }; }
+      if (bySource) { used.add(bySource.id); return { candidate: candidate.name, matchedSourceId: bySource.id, matchedBy: "identifier" as const, method: "doi" as const }; }
     }
     const normalizedName = normalize(candidate.name);
     const byTitle = sources.find((source) => !used.has(source.id) && titleMatches(normalizedName, source.title));
-    if (byTitle) { used.add(byTitle.id); return { candidate: candidate.name, matchedSourceId: byTitle.id, matchedBy: "title" as const }; }
-    return { candidate: candidate.name, matchedSourceId: null, matchedBy: null };
+    if (byTitle) { used.add(byTitle.id); return { candidate: candidate.name, matchedSourceId: byTitle.id, matchedBy: "title" as const, method: "title" as const }; }
+    return { candidate: candidate.name, matchedSourceId: null, matchedBy: null, method: null };
   });
 }
 
@@ -94,4 +104,70 @@ export function computeLandmarkCoverage(matches: LandmarkMatch[]): LandmarkCover
     coverageRatio: matches.length === 0 ? 1 : matched.length / matches.length,
     unmatched: matches.filter((match) => match.matchedSourceId === null).map((match) => match.candidate),
   };
+}
+
+/** A landmark's identity, independent of whether it has been resolved yet.
+ *
+ * Keying on the resolved source id would make an unresolved target and its
+ * later-discovered source two different targets, which is how a landmark that
+ * arrives late looks like a landmark that was never requested. */
+export function landmarkTargetKey(candidate: { name: string }): string {
+  return `landmark:${normalize(candidate.name).replace(/\s+/g, "-")}`;
+}
+
+export const LandmarkResolution = z.object({
+  target_key: z.string().min(1),
+  candidate_name: z.string().min(1),
+  resolved_source_id: z.string().min(1).nullable(),
+  method: z.enum(["arxiv_id", "doi", "title", "unresolved"]),
+  at: z.string().datetime(),
+}).strict();
+export type LandmarkResolution = z.infer<typeof LandmarkResolution>;
+
+/** The corpus a resolution is matched against.
+ *
+ * A missing corpus is an empty one — nothing has been classified yet, and every
+ * target is legitimately unresolved. A corpus that exists but cannot be read is
+ * not: reporting that as "no sources" would record every landmark as missing
+ * when the truth is that we could not look. */
+async function readClassifiedSources(workspaceDir: string): Promise<ClassifiedSource[]> {
+  const file = path.join(workspaceDir, "sources", "classified_sources.jsonl");
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(`cannot read ${file}: ${(error as NodeJS.ErrnoException).code ?? String(error)}`);
+  }
+  return raw.split("\n").filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as ClassifiedSource);
+}
+
+/** Resolution reuses matchLandmarksToCorpus rather than reimplementing its
+ * identifier-then-title matching.
+ *
+ * Every candidate produces a record, including the ones nothing matched: an
+ * unfound landmark is a pending target, and omitting it is the difference
+ * between "the search failed" and "nobody ever asked". */
+export async function resolveLandmarkTargets(workspaceDir: string): Promise<LandmarkResolution[]> {
+  const raw = await fs.readFile(path.join(workspaceDir, "research", "landmark-candidates.json"), "utf-8")
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+  if (raw === null) return [];
+  const parsed = LandmarkCandidates.parse(JSON.parse(raw));
+  const sources = await readClassifiedSources(workspaceDir);
+  const matches = matchLandmarksToCorpus(parsed.candidates, sources);
+  const at = new Date().toISOString();
+  return parsed.candidates.map((candidate) => {
+    const match = matches.find((entry) => entry.candidate === candidate.name);
+    return LandmarkResolution.parse({
+      target_key: landmarkTargetKey(candidate),
+      candidate_name: candidate.name,
+      resolved_source_id: match?.matchedSourceId ?? null,
+      method: match?.method ?? "unresolved",
+      at,
+    });
+  });
 }

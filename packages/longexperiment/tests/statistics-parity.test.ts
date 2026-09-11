@@ -4,10 +4,15 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { deterministicBootstrap } from "../src/lib/stages.js";
 
+/** A synchronous child blocks this worker's event loop, so vitest's own
+ * timeout cannot interrupt it. Without a timeout of its own, a child that
+ * never exits hangs the entire run instead of failing one test. */
+const SUBPROCESS_TIMEOUT_MS = 300_000;
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function pythonBootstrap(deltas: number[], repeats: number): { lower: number; upper: number } {
-  const output = execFileSync("python3", ["-m", "maliang_experiment_protocol.statistics"], { cwd: root, env: { ...process.env, PYTHONPATH: path.join(root, "python") }, input: JSON.stringify({ deltas, repeats }), encoding: "utf8" });
+  const output = execFileSync("python3", ["-m", "maliang_experiment_protocol.statistics"], { cwd: root, env: { ...process.env, PYTHONPATH: path.join(root, "python") }, input: JSON.stringify({ deltas, repeats }), encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
   return JSON.parse(output) as { lower: number; upper: number };
 }
 

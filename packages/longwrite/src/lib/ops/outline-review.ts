@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { parseJsonl } from "../research/jsonl.js";
 import type { ClassifiedSource } from "../research/types.js";
-import { AgenticActionPlan } from "./action-plan.js";
+import { AgenticActionPlan, capabilityOf } from "./action-plan.js";
 
 export const OUTLINE_REVIEW_PATH = "reviews/outline-review.json";
 
@@ -135,7 +135,8 @@ export async function validateOutlineReopen(workspaceDir: string, actionPlanPath
   const rel = "reports/outline-reopen.md";
   const raw = await fs.readFile(path.join(workspaceDir, actionPlanPath), "utf-8");
   const plan = AgenticActionPlan.parse(JSON.parse(raw));
-  const selected = plan.actions.some((action) => action.tool === "reopen_outline");
+  // Resolved from each action's findings; a planner never names the tool.
+  const selected = plan.actions.some((action) => capabilityOf(plan, action) === "reopen_outline");
   if (!selected) {
     await fs.mkdir(path.join(workspaceDir, "reports"), { recursive: true });
     await fs.writeFile(path.join(workspaceDir, rel), "# Outline Reopen\n\nStatus: not requested. The approved outline was retained this quality round.\n", "utf-8");

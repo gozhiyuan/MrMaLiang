@@ -9,6 +9,11 @@ import { prepareResearchWorkspace } from "../src/lib/research/pipeline.js";
 import { buildFigureWorkspace } from "../src/lib/writing/figures.js";
 import { onePixelPng } from "./helpers/png.js";
 
+/** A synchronous child blocks this worker's event loop, so vitest's own
+ * timeout cannot interrupt it. Without a timeout of its own, a child that
+ * never exits hangs the entire run instead of failing one test. */
+const SUBPROCESS_TIMEOUT_MS = 300_000;
+
 const tempDirs: string[] = [];
 async function makeWorkspace(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "longwrite-latexc-"));
@@ -42,7 +47,7 @@ afterEach(async () => {
 
 function latexmkAvailable(): boolean {
   try {
-    execFileSync("latexmk", ["-version"], { stdio: "ignore" });
+    execFileSync("latexmk", ["-version"], { stdio: "ignore", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
     return true;
   } catch {
     return false;

@@ -1,3 +1,4 @@
+import { PreDispatchVerdict } from "malaclaw/sdk";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadProjectConfig } from "../project-config.js";
@@ -141,4 +142,74 @@ export async function writeGateReachability(workspaceDir: string): Promise<{ rep
   await fs.writeFile(path.join(workspaceDir, "reports", "gate-reachability.json"), `${JSON.stringify(report, null, 2)}\n`, "utf-8");
   await fs.writeFile(path.join(workspaceDir, "reports", "gate-reachability.md"), markdown(report), "utf-8");
   return { report, written: ["reports/gate-reachability.json", "reports/gate-reachability.md"] };
+}
+
+/** An objective nothing available can satisfy.
+ *
+ * Distinct from an objective that is merely unmet: no amount of repair moves a
+ * target whose inputs do not exist, and spending rounds on one is how a run
+ * exhausts its budget learning what a capacity count already knew. */
+export type UnreachableObjective = { gate: string; required: number; available: number; detail: string };
+
+/** Objectives the corpus cannot satisfy, from the recorded reachability report.
+ *
+ * Returns nothing when reachability has not been evaluated: absence of
+ * analysis is not proof of infeasibility, and reporting "unreachable" from a
+ * missing report would pause a run that nobody had assessed. */
+export async function unreachableObjectives(workspaceDir: string): Promise<UnreachableObjective[]> {
+  const file = path.join(workspaceDir, "reports", "gate-reachability.json");
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(`cannot read ${file}: ${(error as NodeJS.ErrnoException).code ?? String(error)}`);
+  }
+  const report = JSON.parse(raw) as Partial<GateReachabilityReport>;
+  if (report.evaluated !== true) return [];
+  return (report.gates ?? [])
+    .filter((gate) => gate.reachable === false)
+    .map((gate) => ({
+      gate: gate.id,
+      required: gate.required ?? 0,
+      available: gate.available ?? 0,
+      detail: gate.detail ?? `${gate.id} is unreachable`,
+    }));
+}
+
+export const REACHABILITY_VERDICT_PATH = path.join("reports", "reachability-verdict.json");
+
+/** The pre-dispatch verdict the kernel reads BEFORE selecting actions.
+ *
+ * A `when:` guard would make an unreachable improve phase look skipped — a
+ * silent non-event — when what actually happened is that a named objective
+ * cannot be met and someone has to decide what to do about it. */
+export async function writeReachabilityVerdict(workspaceDir: string): Promise<string> {
+  const unreachable = await unreachableObjectives(workspaceDir);
+  // Parsed through the KERNEL's own schema, not shaped to resemble it.
+  //
+  // This file carried `evaluated_at`, a `verdict` string, and entries keyed
+  // `gate`/`required`/`available` — none of which `PreDispatchVerdict` accepts.
+  // The kernel's reader is strict, so every read of it failed, and the engine's
+  // `catch(() => null)` turned that into "no verdict to apply". The control was
+  // declared in the manifest, produced on disk, and never once enforced. The
+  // richer diagnostic shape still exists in reports/gate-reachability.json,
+  // which is the artifact written for people rather than for the kernel.
+  const verdict = PreDispatchVerdict.parse({
+    version: 1,
+    unreachable: unreachable.map((entry) => ({
+      objective: entry.gate,
+      // The kernel prints this when it pauses, so the pause names what is
+      // missing rather than only that something is.
+      detail: entry.detail,
+    })),
+    // Reachability answers one question. A gate whose failure could not be
+    // classified reaches diagnosis through the contract cycle, not through
+    // this verdict.
+    requires_diagnosis: [],
+  });
+  const target = path.join(workspaceDir, REACHABILITY_VERDICT_PATH);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, `${JSON.stringify(verdict, null, 2)}\n`, "utf-8");
+  return REACHABILITY_VERDICT_PATH;
 }

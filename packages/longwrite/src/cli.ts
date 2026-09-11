@@ -311,6 +311,16 @@ metrics
     await runMetricsEvaluate(workspace, options);
   });
 
+metrics
+  .command("acquire <workspace>")
+  .description("Acquire one model metric from its producer's output: validate, reduce, and emit a measured entry with judgment")
+  .option("--metric <id>", "the model metric to acquire")
+  .option("--as-of <iso>", "evaluation date (defaults to now)")
+  .action(async (workspace, options) => {
+    const { runMetricsAcquire } = await import("./commands/metrics.js");
+    await runMetricsAcquire(workspace, options);
+  });
+
 const report = program.command("report").description("Write LongWrite operational reports");
 
 report
@@ -345,6 +355,23 @@ review
   .action(async (workspace) => {
     const { runReviewAgenda } = await import("./commands/review.js");
     await runReviewAgenda(workspace);
+  });
+
+review
+  .command("diagnose-objective <workspace>")
+  .description("Assemble the diagnosis packet: every strategy already tried, every value measured, and the reachability verdict")
+  .option("--objective <id>", "Objective to diagnose (defaults to the most recently attempted)")
+  .action(async (workspace, options: { objective?: string }) => {
+    const { runReviewDiagnoseObjective } = await import("./commands/research.js");
+    await runReviewDiagnoseObjective(workspace, options.objective);
+  });
+
+review
+  .command("validate-diagnosis <workspace>")
+  .description("Validate reviews/diagnosis.json: a closed decision vocabulary, registry-checked capabilities, and no target relaxation")
+  .action(async (workspace) => {
+    const { runReviewValidateDiagnosis } = await import("./commands/research.js");
+    await runReviewValidateDiagnosis(workspace);
   });
 
 review
@@ -836,6 +863,115 @@ research
   .action(async (workspace) => {
     const { runResearchStallStatus } = await import("./commands/research.js");
     await runResearchStallStatus(workspace);
+  });
+
+research
+  .command("assess-reachability <workspace>")
+  .description("Emit the pre-dispatch reachability verdict so an unreachable objective pauses on a name rather than being skipped")
+  .action(async (workspace) => {
+    const { runResearchAssessReachability } = await import("./commands/research.js");
+    await runResearchAssessReachability(workspace);
+  });
+
+research
+  .command("materialize-action <workspace>")
+  .description("Turn a validated finding set into a MalaClaw action instance or an operator blocker")
+  .option("--request <file>", "Materialization request written by the dispatcher")
+  .option("--output <file>", "Where to write the MaterializationResult")
+  .action(async (workspace, options: { request?: string; output?: string }) => {
+    const { runMaterializeAction } = await import("./commands/dispatch.js");
+    await runMaterializeAction(workspace, options);
+  });
+
+research
+  .command("answer-verifications <workspace>")
+  .description("Answer the verification requests an attempt issued, echoing each request's id and input digest")
+  .option("--request <file>", "Verification requests written by the kernel")
+  .option("--output <file>", "Where to write the VerificationEnvelope")
+  .action(async (workspace, options: { request?: string; output?: string }) => {
+    const { runAnswerVerifications } = await import("./commands/dispatch.js");
+    await runAnswerVerifications(workspace, options);
+  });
+
+review
+  .command("assess-disagreement <workspace>")
+  .description("Measure how far the persona reviews disagree, gating the adjudication stage")
+  .action(async (workspace) => {
+    const { assessReviewDisagreement } = await import("./lib/ops/adjudication.js");
+    const result = await assessReviewDisagreement(workspace);
+    console.log(`review_score spread ${result.spread.toFixed(2)} — ` +
+      `${result.material ? "material; adjudication required" : "within tolerance"}`);
+    console.log(`  + ${result.reportPath}`);
+  });
+
+review
+  .command("validate-adjudication <workspace>")
+  .description("Validate a recorded adjudication for one metric")
+  .requiredOption("--metric <metric>", "Metric the adjudication resolves")
+  .action(async (workspace, options: { metric: string }) => {
+    const { validateAdjudication } = await import("./lib/ops/adjudication.js");
+    const record = await validateAdjudication(workspace, options.metric);
+    console.log(`adjudication for ${options.metric} recorded by ${record.by}`);
+  });
+
+research
+  .command("repair-bibliography <workspace>")
+  .description("Re-derive sources/bibliography.bib from the classified corpus")
+  .action(async (workspace) => {
+    const { runResearchRepairBibliography } = await import("./commands/research.js");
+    await runResearchRepairBibliography(workspace);
+  });
+
+research
+  .command("repair-citation-plan <workspace>")
+  .description("Rebuild per-section citation allocations from outline.json and the classified corpus")
+  .action(async (workspace) => {
+    const { runResearchRepairCitationPlan } = await import("./commands/research.js");
+    await runResearchRepairCitationPlan(workspace);
+  });
+
+research
+  .command("repair-source-metadata <workspace>")
+  .description("Re-derive source identity and metadata from the corpus the records name")
+  .action(async (workspace) => {
+    const { runResearchRepairSourceMetadata } = await import("./commands/research.js");
+    await runResearchRepairSourceMetadata(workspace);
+  });
+
+research
+  .command("record-outcome <workspace>")
+  .description("Record how the kernel judged one dispatched attempt, resolving its row in the attempt ledger")
+  .option("--record <file>", "AttemptOutcome record written by the kernel")
+  .action(async (workspace, options: { record?: string }) => {
+    const { runRecordOutcome } = await import("./commands/dispatch.js");
+    await runRecordOutcome(workspace, options);
+  });
+
+research
+  .command("reachability-verdict <workspace>")
+  .description("Write the pre-dispatch verdict: objectives that cannot be reached, and failures nothing could classify")
+  .option("--output <file>", "Where to write the PreDispatchVerdict")
+  .action(async (workspace, options: { output?: string }) => {
+    const { runReachabilityVerdict } = await import("./commands/dispatch.js");
+    await runReachabilityVerdict(workspace, options);
+  });
+
+research
+  .command("cost-probe <workspace>")
+  .description("Write what the round about to be dispatched would cost, in the units the run limits use")
+  .option("--request <file>", "Metrics this round would measure")
+  .option("--output <file>", "Where to write the CostEstimate")
+  .action(async (workspace, options: { request?: string; output?: string }) => {
+    const { runCostProbe } = await import("./commands/dispatch.js");
+    await runCostProbe(workspace, options);
+  });
+
+research
+  .command("reconcile-targets <workspace>")
+  .description("Reserve landmark targets in the ledger before ranking can displace them")
+  .action(async (workspace) => {
+    const { runResearchReconcileTargets } = await import("./commands/research.js");
+    await runResearchReconcileTargets(workspace);
   });
 
 research

@@ -6,9 +6,14 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 
+/** A synchronous child blocks this worker's event loop, so vitest's own
+ * timeout cannot interrupt it. Without a timeout of its own, a child that
+ * never exits hangs the entire run instead of failing one test. */
+const SUBPROCESS_TIMEOUT_MS = 300_000;
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const cli = path.join(root, "apps", "maliang", "dist", "cli.js");
-const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: "utf8" });
+const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
 
 const temporaryRoot = path.join(os.tmpdir(), `maliang-cli-routing-e2e-${Date.now()}`);
 afterAll(async () => { await fs.rm(temporaryRoot, { recursive: true, force: true }); });
@@ -65,7 +70,7 @@ describe("maliang command surface", () => {
       "utf8",
     );
 
-    const r = spawnSync(process.execPath, [cli, "writing", "mode", "list"], { cwd: workspace, encoding: "utf8" });
+    const r = spawnSync(process.execPath, [cli, "writing", "mode", "list"], { cwd: workspace, encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
     const combined = `${r.stderr}${r.stdout}`;
     expect(combined).not.toMatch(/Unknown command/);
     expect(r.status).toBe(0);
@@ -94,7 +99,7 @@ describe("maliang command surface", () => {
       "utf8",
     );
 
-    const r = spawnSync(process.execPath, [cli, "sync", workspace, "--component", "experiment"], { cwd: root, encoding: "utf8" });
+    const r = spawnSync(process.execPath, [cli, "sync", workspace, "--component", "experiment"], { cwd: root, encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
     // The child longexperiment call may exit nonzero on a bare workspace;
     // only the forwarding notice (printed before the child runs) is asserted.
     expect(r.stderr).toContain("to experiment (longexperiment)");
@@ -149,6 +154,7 @@ describe("maliang command surface", () => {
     const stubbed = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
       cwd: root, encoding: "utf8",
       env: { ...process.env, PATH: `${stubDir}${path.delimiter}${process.env.PATH ?? ""}` },
+      timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL",
     });
 
     const reset = stubbed(["run", workspace, "--runtime", "script", "--reset"]);
@@ -220,12 +226,12 @@ describe("maliang command surface", () => {
   it("treats a repository supplied to paper.survey only as code evidence", async () => {
     const repository = path.join(temporaryRoot, "survey-repository");
     await fs.mkdir(repository, { recursive: true });
-    expect(spawnSync("git", ["init"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository }).status).toBe(0);
+    expect(spawnSync("git", ["init"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
     await fs.writeFile(path.join(repository, "README.md"), "# Survey target\n", "utf8");
-    expect(spawnSync("git", ["add", "README.md"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["commit", "-m", "fixture"], { cwd: repository }).status).toBe(0);
+    expect(spawnSync("git", ["add", "README.md"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["commit", "-m", "fixture"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
     const workspace = path.join(temporaryRoot, "repository-survey-inferred");
     const result = run(["init", workspace, "--template", "paper.survey", "--topic", "Repository architecture", "--repository", repository, "--reference-link", "https://example.org/original-paper"]);
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
@@ -280,13 +286,13 @@ describe("maliang command surface", () => {
   it("binds repository empirical writing and trials to the same immutable revision", async () => {
     const repository = path.join(temporaryRoot, "local-model-repository");
     await fs.mkdir(repository, { recursive: true });
-    expect(spawnSync("git", ["init"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository }).status).toBe(0);
+    expect(spawnSync("git", ["init"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
     await fs.writeFile(path.join(repository, "README.md"), "# Pinned model repository\n", "utf8");
-    expect(spawnSync("git", ["add", "README.md"], { cwd: repository }).status).toBe(0);
-    expect(spawnSync("git", ["commit", "-m", "fixture"], { cwd: repository }).status).toBe(0);
-    const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).stdout.trim();
+    expect(spawnSync("git", ["add", "README.md"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    expect(spawnSync("git", ["commit", "-m", "fixture"], { cwd: repository, timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).status).toBe(0);
+    const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).stdout.trim();
 
     const workspace = path.join(temporaryRoot, "repository-empirical");
     const result = run(["init", workspace, "--blueprint", "nanochat-agentic-empirical-paper", "--repository", repository]);

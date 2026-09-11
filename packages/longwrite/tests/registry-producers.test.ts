@@ -27,9 +27,9 @@ describe("producer declarations", () => {
     expect(effectsFor("research_artifacts_present")).toEqual(["evidence_packet/acquire_additional_evidence"]);
   });
 
-  it("lets a build failure reach the bibliography and the toolchain", () => {
+  it("does not claim bibliography repair can directly satisfy a build metric", () => {
     const effects = effectsFor("manuscript_build");
-    expect(effects).toContain("bibliography/repair_bibliography_consistency");
+    expect(effects).not.toContain("bibliography/repair_bibliography_consistency");
     expect(effects).toContain("toolchain/repair_toolchain");
   });
 
@@ -37,10 +37,9 @@ describe("producer declarations", () => {
     expect(effectsFor("publication_custom_template")).toEqual(["publication_template/repair_template"]);
   });
 
-  it("lets citation verification reach source metadata and the bibliography", () => {
+  it("keeps aggregate citation verification diagnostic-only", () => {
     const effects = effectsFor("citation_verification");
-    expect(effects).toContain("source_record/repair_source_metadata");
-    expect(effects).toContain("bibliography/repair_bibliography_consistency");
+    expect(effects).toEqual([]);
   });
 
   it("lets a related-work matrix defect reach the table spec", () => {
@@ -88,7 +87,7 @@ describe("producer declarations", () => {
 
   it("names only capabilities the templates will later have to own", () => {
     expect([...REGISTRY.capabilities()].map(String).sort()).toEqual([
-      "reopen_outline", "repair_bibliography", "repair_source_metadata",
+      "reopen_outline", "repair_bibliography", "repair_citation_plan", "repair_source_metadata",
       "request_operator_clarification", "revise_sections", "revise_visual_plan",
       "targeted_research_expansion",
     ]);

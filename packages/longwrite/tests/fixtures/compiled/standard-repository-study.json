@@ -12,12 +12,54 @@
       "chapter-writer",
       "skeptical-reviewer",
       "editor",
-      "artifact-builder"
+      "artifact-builder",
+      "result-auditor"
     ]
   },
   "workflow": {
     "mode": "auto_research_agentic",
     "artifact_type": "research_paper",
+    "require_declared_effects": true,
+    "verifiers": [
+      "bibliography_consistent",
+      "chapter_contract_coverage",
+      "citation_evidence_ledger",
+      "citation_markers_present",
+      "citation_plan_consistent",
+      "citation_url_liveness",
+      "code_validation",
+      "codebase_evidence",
+      "figure_references",
+      "full_research_contracts",
+      "full_source_identity",
+      "latex_sources",
+      "publication_article_layout",
+      "publication_custom_template",
+      "publication_layout",
+      "publication_min_pages",
+      "publication_page_limit",
+      "publication_release_gates",
+      "reader_facing_publication",
+      "target_length"
+    ],
+    "verifier_command": {
+      "cmd": "<node>",
+      "args": [
+        "<longwrite-cli>",
+        "research",
+        "answer-verifications",
+        "."
+      ]
+    },
+    "outcome_command": {
+      "cmd": "<node>",
+      "args": [
+        "<longwrite-cli>",
+        "research",
+        "record-outcome",
+        "."
+      ]
+    },
     "stages": [
       {
         "id": "intake",
@@ -30,7 +72,17 @@
           "required_output_exists",
           "non_empty_markdown"
         ],
-        "phase": "specify"
+        "phase": "specify",
+        "kind": "mutation",
+        "owns": [
+          "project_brief.md"
+        ],
+        "writes": [
+          "project_brief.md"
+        ],
+        "reads": [
+          "longwrite.yaml"
+        ]
       },
       {
         "id": "landmark_scout",
@@ -61,7 +113,18 @@
             ]
           }
         ],
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "research/landmark-candidates.json"
+        ],
+        "writes": [
+          "research/landmark-candidates.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "project_brief.md"
+        ]
       },
       {
         "id": "search_planner",
@@ -93,7 +156,19 @@
             ]
           }
         ],
-        "phase": "specify"
+        "phase": "specify",
+        "kind": "mutation",
+        "owns": [
+          "sources/search-plan.json"
+        ],
+        "writes": [
+          "sources/search-plan.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "project_brief.md",
+          "research/landmark-candidates.json"
+        ]
       },
       {
         "id": "codebase_prepare",
@@ -123,7 +198,27 @@
             "."
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "codebases/manifest.json",
+          "codebases/mentioned-repositories.json",
+          "evidence/codebase-chunks.jsonl",
+          "evidence/codebase-context.md",
+          "sources/codebases.bib"
+        ],
+        "writes": [
+          "codebases/manifest.json",
+          "codebases/mentioned-repositories.json",
+          "evidence/codebase-chunks.jsonl",
+          "evidence/codebase-context.md",
+          "sources/codebases.bib"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "project_brief.md",
+          "sources/search-plan.json"
+        ]
       },
       {
         "id": "codebase_architecture_analysis",
@@ -169,7 +264,25 @@
         "retry": {
           "max_attempts": 2
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-analysis.raw.json",
+          "reports/codebase-analysis-repair.md"
+        ],
+        "writes": [
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-analysis.raw.json",
+          "reports/codebase-analysis-repair.md"
+        ],
+        "reads": [
+          "codebases/manifest.json",
+          "evidence/codebase-chunks.jsonl",
+          "evidence/codebase-context.md",
+          "longwrite.yaml",
+          "project_brief.md"
+        ]
       },
       {
         "id": "codebase_comparison_analysis",
@@ -215,7 +328,25 @@
         "retry": {
           "max_attempts": 2
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "evidence/codebase-comparison.json",
+          "evidence/codebase-comparison.raw.json",
+          "reports/codebase-comparison-repair.md"
+        ],
+        "writes": [
+          "evidence/codebase-comparison.json",
+          "evidence/codebase-comparison.raw.json",
+          "reports/codebase-comparison-repair.md"
+        ],
+        "reads": [
+          "codebases/manifest.json",
+          "codebases/mentioned-repositories.json",
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-context.md",
+          "longwrite.yaml"
+        ]
       },
       {
         "id": "recall",
@@ -257,7 +388,24 @@
             "30"
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/reference-seeds.md",
+          "sources/deduped_sources.jsonl",
+          "sources/raw_results.jsonl",
+          "sources/reference-seeds.json"
+        ],
+        "writes": [
+          "reports/reference-seeds.md",
+          "sources/deduped_sources.jsonl",
+          "sources/raw_results.jsonl",
+          "sources/reference-seeds.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "project_brief.md"
+        ]
       },
       {
         "id": "snowball_recall",
@@ -291,7 +439,22 @@
         "skippable": true,
         "enabled": false,
         "disabled_reason": "standard workflow profile",
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/snowball.md",
+          "sources/deduped_sources.jsonl",
+          "sources/snowball_results.jsonl"
+        ],
+        "writes": [
+          "reports/snowball.md",
+          "sources/deduped_sources.jsonl",
+          "sources/snowball_results.jsonl"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/deduped_sources.jsonl"
+        ]
       },
       {
         "id": "enrich",
@@ -325,7 +488,22 @@
             "--disabled"
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/metadata-enrichment.md",
+          "sources/deduped_sources.jsonl",
+          "sources/metadata-upgrades.jsonl"
+        ],
+        "writes": [
+          "reports/metadata-enrichment.md",
+          "sources/deduped_sources.jsonl",
+          "sources/metadata-upgrades.jsonl"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/deduped_sources.jsonl"
+        ]
       },
       {
         "id": "venue_upgrade",
@@ -356,6 +534,26 @@
             "."
           ]
         },
+        "kind": "mutation",
+        "owns": [
+          "sources/deduped_sources.jsonl",
+          "sources/venue-upgrades.jsonl",
+          "reports/venue-upgrade.md",
+          "sources/metadata-upgrades.jsonl",
+          "reports/metadata-enrichment.md"
+        ],
+        "writes": [
+          "sources/deduped_sources.jsonl",
+          "sources/venue-upgrades.jsonl",
+          "reports/venue-upgrade.md",
+          "sources/metadata-upgrades.jsonl",
+          "reports/metadata-enrichment.md"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "longwrite.yaml",
+          "sources/deduped_sources.jsonl"
+        ],
         "skippable": true,
         "enabled": false,
         "disabled_reason": "standard workflow profile",
@@ -385,7 +583,18 @@
             "."
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "sources/scored_sources.jsonl"
+        ],
+        "writes": [
+          "sources/scored_sources.jsonl"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/deduped_sources.jsonl"
+        ]
       },
       {
         "id": "classify",
@@ -416,7 +625,24 @@
             "Agent orchestration frameworks"
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/research-tooling.md",
+          "sources/bibliography.bib",
+          "sources/citation_plan.jsonl",
+          "sources/classified_sources.jsonl"
+        ],
+        "writes": [
+          "reports/research-tooling.md",
+          "sources/bibliography.bib",
+          "sources/citation_plan.jsonl",
+          "sources/classified_sources.jsonl"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/scored_sources.jsonl"
+        ]
       },
       {
         "id": "identity_reconcile",
@@ -443,7 +669,61 @@
             "."
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/source-identities.md",
+          "sources/source-identities.jsonl"
+        ],
+        "writes": [
+          "reports/source-identities.md",
+          "sources/source-identities.jsonl"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl"
+        ]
+      },
+      {
+        "id": "reconcile_targets",
+        "title": "Reserve landmark targets and publish what is still unretrieved",
+        "owner": "source-curator",
+        "phase": "research",
+        "optional_inputs": [
+          "research/landmark-candidates.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "outputs": [
+          "research/target-ledger.json",
+          "research/retrieval-brief.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "reconcile-targets",
+            "."
+          ]
+        },
+        "kind": "mutation",
+        "owns": [
+          "research/retrieval-brief.json",
+          "research/target-ledger.json"
+        ],
+        "writes": [
+          "research/retrieval-brief.json",
+          "research/target-ledger.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "research/landmark-candidates.json",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "corpus_gates",
@@ -470,7 +750,23 @@
             "."
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "reports/corpus-gates.json",
+          "reports/corpus-gates.md",
+          "reports/metrics.json"
+        ],
+        "writes": [
+          "reports/corpus-gates.json",
+          "reports/corpus-gates.md",
+          "reports/metrics.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl",
+          "sources/source-identities.jsonl"
+        ]
       },
       {
         "id": "fulltext",
@@ -499,7 +795,24 @@
             "--no-pdf-download"
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "fulltext/**",
+          "fulltext/manifest.json",
+          "reports/fulltext.md",
+          "sources/documents/**"
+        ],
+        "writes": [
+          "fulltext/**",
+          "fulltext/manifest.json",
+          "reports/fulltext.md",
+          "sources/documents/**"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "evidence_index",
@@ -527,7 +840,23 @@
             "."
           ]
         },
-        "phase": "research"
+        "phase": "research",
+        "kind": "mutation",
+        "owns": [
+          "evidence/chunks.jsonl",
+          "evidence/index.sqlite",
+          "evidence/manifest.json"
+        ],
+        "writes": [
+          "evidence/chunks.jsonl",
+          "evidence/index.sqlite",
+          "evidence/manifest.json"
+        ],
+        "reads": [
+          "fulltext/manifest.json",
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "outline",
@@ -566,7 +895,26 @@
           "evidence/codebase-analysis.json",
           "evidence/codebase-comparison.json"
         ],
-        "phase": "synthesize"
+        "phase": "synthesize",
+        "kind": "mutation",
+        "owns": [
+          "outline.json",
+          "outline.md"
+        ],
+        "writes": [
+          "outline.json",
+          "outline.md"
+        ],
+        "reads": [
+          "codebases/manifest.json",
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-comparison.json",
+          "evidence/codebase-context.md",
+          "feedback/outline-revision.md",
+          "longwrite.yaml",
+          "project_brief.md",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "survey_contract",
@@ -594,7 +942,23 @@
             "."
           ]
         },
-        "phase": "synthesize"
+        "phase": "synthesize",
+        "kind": "mutation",
+        "owns": [
+          "reports/survey-contract.json",
+          "reports/survey-contract.md",
+          "tables/related-work-matrix.md"
+        ],
+        "writes": [
+          "reports/survey-contract.json",
+          "reports/survey-contract.md",
+          "tables/related-work-matrix.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "outline.json",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "structure_audit",
@@ -620,7 +984,20 @@
             "."
           ]
         },
-        "phase": "synthesize"
+        "phase": "synthesize",
+        "kind": "mutation",
+        "owns": [
+          "reports/structure-audit.json",
+          "reports/structure-audit.md"
+        ],
+        "writes": [
+          "reports/structure-audit.json",
+          "reports/structure-audit.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "outline.json"
+        ]
       },
       {
         "id": "allocate_evidence",
@@ -648,7 +1025,24 @@
             "."
           ]
         },
-        "phase": "synthesize"
+        "phase": "synthesize",
+        "kind": "mutation",
+        "owns": [
+          "evidence/**",
+          "evidence/coverage.json",
+          "evidence/section-*.json"
+        ],
+        "writes": [
+          "evidence/**",
+          "evidence/coverage.json",
+          "evidence/section-*.json"
+        ],
+        "reads": [
+          "evidence/index.sqlite",
+          "longwrite.yaml",
+          "outline.json",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "visual_plan",
@@ -684,7 +1078,24 @@
           "evidence/codebase-analysis.json",
           "evidence/codebase-comparison.json"
         ],
-        "phase": "synthesize"
+        "phase": "synthesize",
+        "kind": "mutation",
+        "owns": [
+          "figures/placement-plan.json"
+        ],
+        "writes": [
+          "figures/placement-plan.json"
+        ],
+        "reads": [
+          "codebases/manifest.json",
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-comparison.json",
+          "evidence/codebase-context.md",
+          "evidence/coverage.json",
+          "longwrite.yaml",
+          "outline.json",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "draft_sections",
@@ -748,7 +1159,27 @@
                 "."
               ]
             },
-            "phase": "write"
+            "phase": "write",
+            "kind": "mutation",
+            "owns": [
+              "chapters/{{section.id}}.md"
+            ],
+            "writes": [
+              "chapters/{{section.id}}.md"
+            ],
+            "reads": [
+              "codebases/manifest.json",
+              "evidence/codebase-analysis.json",
+              "evidence/codebase-comparison.json",
+              "evidence/codebase-context.md",
+              "evidence/section-{{section.id}}.json",
+              "fulltext/*.md",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "project_brief.md",
+              "sources/classified_sources.jsonl"
+            ]
           }
         ],
         "phase": "write"
@@ -777,7 +1208,21 @@
             "."
           ]
         },
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "evidence/citation-ledger.jsonl"
+        ],
+        "writes": [
+          "evidence/citation-ledger.jsonl"
+        ],
+        "reads": [
+          "chapters/*.md",
+          "evidence/coverage.json",
+          "evidence/section-*.json",
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "evidence_audit",
@@ -803,7 +1248,20 @@
             "."
           ]
         },
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "reports/evidence-audit.json",
+          "reports/evidence-audit.md"
+        ],
+        "writes": [
+          "reports/evidence-audit.json",
+          "reports/evidence-audit.md"
+        ],
+        "reads": [
+          "evidence/citation-ledger.jsonl",
+          "longwrite.yaml"
+        ]
       },
       {
         "id": "abstract",
@@ -831,7 +1289,21 @@
           "required_output_exists",
           "non_empty_markdown"
         ],
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "paper/abstract.md"
+        ],
+        "writes": [
+          "paper/abstract.md"
+        ],
+        "reads": [
+          "chapters/*.md",
+          "evidence/coverage.json",
+          "longwrite.yaml",
+          "outline.md",
+          "project_brief.md"
+        ]
       },
       {
         "id": "initial_build",
@@ -853,7 +1325,9 @@
           "paper/sections/*.tex",
           "paper/figures/*.tex",
           "paper/tables/*.tex",
-          "build/manuscript.pdf"
+          "build/manuscript.pdf",
+          "reports/latex-build.md",
+          "reports/figures-build.md"
         ],
         "validators": [
           "required_output_exists"
@@ -888,7 +1362,59 @@
             ]
           }
         ],
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "build/**",
+          "build/manuscript.pdf",
+          "data/**",
+          "evidence/citation-ledger.jsonl",
+          "figures/**",
+          "figures/*.svg",
+          "figures/figure-plan.md",
+          "figures/manifest.json",
+          "paper/**",
+          "paper/figures/*.tex",
+          "paper/main.tex",
+          "paper/references.bib",
+          "paper/sections/*.tex",
+          "paper/tables/*.tex",
+          "reports/figures-build.md",
+          "reports/latex-build.md",
+          "reports/visual-plan-repair.md",
+          "scripts/plot_source_years.py"
+        ],
+        "writes": [
+          "build/**",
+          "build/manuscript.pdf",
+          "data/**",
+          "evidence/citation-ledger.jsonl",
+          "figures/**",
+          "figures/*.svg",
+          "figures/figure-plan.md",
+          "figures/manifest.json",
+          "paper/**",
+          "paper/figures/*.tex",
+          "paper/main.tex",
+          "paper/references.bib",
+          "paper/sections/*.tex",
+          "paper/tables/*.tex",
+          "reports/figures-build.md",
+          "reports/latex-build.md",
+          "reports/visual-plan-repair.md",
+          "scripts/plot_source_years.py"
+        ],
+        "reads": [
+          "chapters/**",
+          "chapters/*.md",
+          "evidence/**",
+          "figures/**",
+          "longwrite.yaml",
+          "paper/**",
+          "paper/abstract.md",
+          "sources/**",
+          "sources/bibliography.bib"
+        ]
       },
       {
         "id": "render_visual_review",
@@ -917,7 +1443,22 @@
         "enabled": false,
         "skippable": true,
         "disabled_reason": "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer",
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "reports/metrics.json",
+          "reports/visual-render-manifest.json",
+          "reports/visual-review/*.png"
+        ],
+        "writes": [
+          "reports/metrics.json",
+          "reports/visual-render-manifest.json",
+          "reports/visual-review/*.png"
+        ],
+        "reads": [
+          "build/manuscript.pdf",
+          "longwrite.yaml"
+        ]
       },
       {
         "id": "visual_review",
@@ -967,7 +1508,21 @@
         "enabled": false,
         "skippable": true,
         "disabled_reason": "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer",
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ],
+        "writes": [
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ],
+        "reads": [
+          "build/manuscript.pdf",
+          "longwrite.yaml",
+          "reports/visual-render-manifest.json"
+        ]
       },
       {
         "id": "baseline_review",
@@ -1047,7 +1602,40 @@
             ]
           }
         ],
-        "phase": "write"
+        "phase": "write",
+        "kind": "mutation",
+        "owns": [
+          "reports/metrics.json",
+          "reports/score-history.json",
+          "reviews/review-round-001.md",
+          "reviews/scorecard.json"
+        ],
+        "writes": [
+          "reports/metrics.json",
+          "reports/score-history.json",
+          "reviews/review-round-001.md",
+          "reviews/scorecard.json"
+        ],
+        "reads": [
+          "build/manuscript.pdf",
+          "chapters/*.md",
+          "codebases/manifest.json",
+          "evidence/citation-ledger.jsonl",
+          "evidence/codebase-analysis.json",
+          "evidence/codebase-comparison.json",
+          "evidence/codebase-context.md",
+          "evidence/coverage.json",
+          "feedback/user-feedback.md",
+          "figures/manifest.json",
+          "longwrite.yaml",
+          "outline.json",
+          "outline.md",
+          "project_brief.md",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "reviews/visual-qa.json",
+          "reviews/visual-qa.md"
+        ]
       },
       {
         "id": "verify_citations",
@@ -1077,7 +1665,21 @@
             "40"
           ]
         },
-        "phase": "improve"
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "reports/source-verification.md",
+          "sources/citation-verification.jsonl"
+        ],
+        "writes": [
+          "reports/source-verification.md",
+          "sources/citation-verification.jsonl"
+        ],
+        "reads": [
+          "chapters/*.md",
+          "longwrite.yaml",
+          "sources/classified_sources.jsonl"
+        ]
       },
       {
         "id": "assess",
@@ -1105,6 +1707,493 @@
             "research",
             "assess",
             "."
+          ]
+        },
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "reports/research-assessment.json",
+          "reports/research-assessment.md",
+          "sources/source_upgrade_plan.jsonl"
+        ],
+        "writes": [
+          "reports/research-assessment.json",
+          "reports/research-assessment.md",
+          "sources/source_upgrade_plan.jsonl"
+        ],
+        "reads": [
+          "chapters/*.md",
+          "longwrite.yaml",
+          "sources/bibliography.bib",
+          "sources/citation_plan.jsonl",
+          "sources/classified_sources.jsonl"
+        ]
+      },
+      {
+        "id": "assess_reachability",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Assess whether each declared objective is reachable at all",
+        "reads": [
+          "longwrite.yaml",
+          "outline.json",
+          "reports/longwrite-validation.json",
+          "sources/**",
+          "sources/classified_sources.jsonl"
+        ],
+        "optional_inputs": [
+          "sources/classified_sources.jsonl",
+          "reports/longwrite-validation.json"
+        ],
+        "outputs": [
+          "reports/gate-reachability.json",
+          "reports/gate-reachability.md",
+          "reports/reachability-verdict.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "assess-reachability",
+            "."
+          ]
+        },
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "reports/gate-reachability.json",
+          "reports/gate-reachability.md",
+          "reports/reachability-verdict.json"
+        ],
+        "writes": [
+          "reports/gate-reachability.json",
+          "reports/gate-reachability.md",
+          "reports/reachability-verdict.json"
+        ]
+      },
+      {
+        "id": "build_diagnosis_packet",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Assemble the diagnosis packet for a stalled objective",
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "repair/**"
+        ],
+        "writes": [
+          "repair/diagnosis-packet.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "repair/**",
+          "reviews/**",
+          "reports/**",
+          ".malaclaw/observations/**"
+        ],
+        "outputs": [
+          "repair/diagnosis-packet.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "enabled": false,
+        "skippable": true,
+        "disabled_reason": "runs with the diagnosis stage the kernel reaches through its diagnose transition",
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "diagnose-objective",
+            "."
+          ]
+        }
+      },
+      {
+        "id": "measure_unit_metrics",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Measure unit-tier metrics",
+        "kind": "measurement",
+        "owns": [],
+        "reads": [
+          "longwrite.yaml",
+          "reports/corpus-gates.json",
+          "reports/metrics/diversity.json",
+          "reports/metrics/recency.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "writes_observations": [
+          "candidate_count",
+          "recent_source_ratio",
+          "source_type_diversity_count"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "evaluate",
+            ".",
+            "--tier",
+            "unit"
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "measure_round_metrics",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Measure round-tier metrics",
+        "kind": "measurement",
+        "owns": [],
+        "reads": [
+          "build/manuscript.pdf",
+          "chapters/",
+          "evidence/active-validated-source-evidence.json",
+          "evidence/experiment-packets.json",
+          "figures/concept-map.mmd",
+          "figures/manifest.json",
+          "figures/workflow.mmd",
+          "longwrite.yaml",
+          "outline.json",
+          "outline.md",
+          "paper/tables/",
+          "reports/metrics/accepted-cited.json",
+          "reports/metrics/citation-density.json",
+          "reports/metrics/citation-depth.json",
+          "reports/metrics/cited-recency.json",
+          "reports/metrics/cited-sources.json",
+          "reports/metrics/cited-taxonomy-coverage.json",
+          "reports/metrics/cited-venues.json",
+          "reports/metrics/contradictions.json",
+          "reports/metrics/core-sources.json",
+          "reports/metrics/diagram-connectivity.json",
+          "reports/metrics/figures.json",
+          "reports/metrics/landmark-citations.json",
+          "reports/metrics/landmarks.json",
+          "reports/metrics/plots.json",
+          "reports/metrics/redundancy.json",
+          "reports/metrics/table-count.json",
+          "reports/metrics/tables.json",
+          "reports/metrics/taxonomy-coverage.json",
+          "reports/metrics/trials.json",
+          "reports/outline-readiness.md",
+          "reports/source-verification.md",
+          "research/landmark-candidates.json",
+          "reviews/claim-judgments.jsonl",
+          "reviews/outline-review.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "writes_observations": [
+          "cited_sources",
+          "cited_within_one_year_ratio",
+          "accepted_cited_ratio",
+          "cited_arxiv_only_ratio",
+          "citations_per_page",
+          "citation_depth_per_section",
+          "taxonomy_cell_ab_sources",
+          "core_sources",
+          "comparative_tables",
+          "verified_metadata_plots",
+          "figures",
+          "tables",
+          "empirical_trials",
+          "outline_readiness",
+          "landmark_coverage_ratio",
+          "landmark_citation_coverage_ratio",
+          "claim_contradictions",
+          "prose_redundancy",
+          "diagram_connectivity",
+          "cited_taxonomy_cell_ab_sources",
+          "citation_verification_status"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "evaluate",
+            ".",
+            "--tier",
+            "round"
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "assess_review_disagreement",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Measure how far the persona reviews disagree",
+        "kind": "mutation",
+        "owns": [
+          "reports/review-disagreement.json",
+          "reports/metrics.json"
+        ],
+        "writes": [
+          "reports/review-disagreement.json",
+          "reports/metrics.json"
+        ],
+        "corrective_capability": "operator",
+        "reads": [
+          "longwrite.yaml",
+          "reviews/scorecard.json",
+          "reports/metrics.json"
+        ],
+        "optional_inputs": [
+          "reviews/scorecard.json"
+        ],
+        "outputs": [
+          "reports/review-disagreement.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "review",
+            "assess-disagreement",
+            "."
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "adjudicate_review_score",
+        "owner": "analyst",
+        "title": "Resolve a material disagreement between persona reviews",
+        "when": "review_score_disagreement >= 1",
+        "owns": [
+          "reviews/adjudication/review_score.json"
+        ],
+        "writes": [
+          "reviews/adjudication/review_score.json"
+        ],
+        "reads": [
+          "chapters/**",
+          "longwrite.yaml",
+          "paper/main.tex",
+          "reports/review-disagreement.json",
+          "reviews/scorecard.json"
+        ],
+        "inputs": [
+          "reviews/scorecard.json",
+          "reports/review-disagreement.json"
+        ],
+        "skills": [
+          "reviews/scorecard.json",
+          "reports/review-disagreement.json"
+        ],
+        "outputs": [
+          "reviews/adjudication/review_score.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "review",
+              "validate-adjudication",
+              ".",
+              "--metric",
+              "review_score"
+            ]
+          }
+        ],
+        "instructions": [
+          "reports/review-disagreement.json names the personas whose overall scores are furthest apart and by how much. reviews/scorecard.json carries every persona's per-dimension scores and summary.",
+          "Read the manuscript passages the disagreeing personas actually cite before deciding. An adjudication that restates the spread without examining the work is not a resolution.",
+          "Write ONLY reviews/adjudication/review_score.json as {version:1,by,at,status,resolved_score?,scorecard_digest,rationale}. Copy scorecard_digest verbatim from reports/review-disagreement.json: it binds your ruling to the exact scorecard you read, so a later review round cannot inherit it. `by` names you as the adjudicating role; `rationale` states which reading you found better supported and why, in the reviewers' own terms.",
+          "status is exactly one of resolved or unresolved. `resolved` REQUIRES resolved_score: the score on the reviewers' own 0-10 rubric that the dispute settles at, which becomes the recorded value for this metric. Do not restate the median — if the median was already right, say so and give it as the resolved_score.",
+          "resolved_score must lie between the lowest and highest persona overall in reports/review-disagreement.json. You are choosing between the readings on the table; a number outside them settles a different argument.",
+          "`unresolved` is a real answer and you may not name a score with it. Use it when the disagreement cannot be settled on the evidence available; the metric then stays unavailable and an operator is told you examined it and why it could not be closed.",
+          "You are resolving a disagreement about the manuscript, not changing the rubric and not lowering the target. Choosing a resolved_score outside the range the personas actually reported is not an adjudication of their dispute."
+        ],
+        "phase": "improve",
+        "kind": "mutation"
+      },
+      {
+        "id": "acquire_rendered_visual_review",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Acquire rendered_visual_review from its declared producer",
+        "kind": "measurement",
+        "refresh_producers": true,
+        "refresh_producer_outputs": [
+          "reviews/visual-qa.json"
+        ],
+        "owns": [],
+        "reads": [
+          "build/manuscript.pdf",
+          "figures/",
+          "longwrite.yaml",
+          "paper/",
+          "reports/visual-render-manifest.json",
+          "reviews/visual-qa.json"
+        ],
+        "writes_observations": [
+          "rendered_visual_review"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "acquire",
+            ".",
+            "--metric",
+            "rendered_visual_review"
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "acquire_review_score",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Acquire review_score from its declared producer",
+        "kind": "measurement",
+        "refresh_producers": true,
+        "refresh_producer_outputs": [
+          "reviews/scorecard.json"
+        ],
+        "owns": [],
+        "reads": [
+          "chapters/",
+          "longwrite.yaml",
+          "paper/main.tex",
+          "reviews/adjudication/review_score.json",
+          "reviews/scorecard.json"
+        ],
+        "writes_observations": [
+          "review_score"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "acquire",
+            ".",
+            "--metric",
+            "review_score"
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "acquire_claim_support",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Acquire claim_support from its declared producer",
+        "kind": "measurement",
+        "refresh_producers": true,
+        "refresh_producer_outputs": [
+          "reviews/claim-judgments.jsonl"
+        ],
+        "owns": [],
+        "reads": [
+          "chapters/",
+          "evidence/active-validated-source-evidence.json",
+          "evidence/citation-ledger.jsonl",
+          "longwrite.yaml",
+          "reviews/claim-judgments.jsonl"
+        ],
+        "writes_observations": [
+          "claim_support"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "acquire",
+            ".",
+            "--metric",
+            "claim_support"
+          ]
+        },
+        "phase": "improve"
+      },
+      {
+        "id": "acquire_latex_build_status",
+        "owner": "analyst",
+        "runtime": "script",
+        "title": "Acquire latex_build_status from its declared producer",
+        "kind": "measurement",
+        "refresh_producers": true,
+        "refresh_producer_outputs": [
+          "reports/latex-build.md"
+        ],
+        "owns": [],
+        "reads": [
+          "longwrite.yaml",
+          "paper/main.tex",
+          "paper/references.bib",
+          "paper/sections/",
+          "paper/template/",
+          "reports/latex-build.md"
+        ],
+        "writes_observations": [
+          "latex_build_status"
+        ],
+        "outputs": [
+          "reports/measurements.json"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "metrics",
+            "acquire",
+            ".",
+            "--metric",
+            "latex_build_status"
           ]
         },
         "phase": "improve"
@@ -1139,7 +2228,88 @@
             "--advisory"
           ]
         },
-        "phase": "improve"
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/metrics.json",
+          "reports/release-gates.json"
+        ],
+        "writes": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/metrics.json",
+          "reports/release-gates.json"
+        ],
+        "reads": [
+          "build/**",
+          "chapters/**",
+          "chapters/*.md",
+          "evidence/**",
+          "figures/**",
+          "longwrite.yaml",
+          "outline.json",
+          "outline.md",
+          "paper/**",
+          "reports/**",
+          "research/**",
+          "reviews/scorecard.json",
+          "sources/**",
+          "sources/bibliography.bib",
+          "sources/classified_sources.jsonl"
+        ]
+      },
+      {
+        "id": "diagnose_objective",
+        "owner": "analyst",
+        "title": "Diagnose an objective that repeated repair could not meet",
+        "phase": "improve",
+        "kind": "mutation",
+        "owns": [
+          "reviews/diagnosis.json"
+        ],
+        "writes": [
+          "reviews/diagnosis.json"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "repair/diagnosis-packet.json"
+        ],
+        "inputs": [
+          "repair/diagnosis-packet.json"
+        ],
+        "skills": [
+          "repair/diagnosis-packet.json"
+        ],
+        "outputs": [
+          "reviews/diagnosis.json"
+        ],
+        "diagnosis_output": "reviews/diagnosis.json",
+        "validators": [
+          "required_output_exists"
+        ],
+        "validator_commands": [
+          {
+            "cmd": "<node>",
+            "args": [
+              "<longwrite-cli>",
+              "review",
+              "validate-diagnosis",
+              "."
+            ]
+          }
+        ],
+        "instructions": [
+          "Read repair/diagnosis-packet.json. It carries this objective's whole history: every strategy already attempted with its outcome, every value already measured, whether the target is reachable at all, and the packet the failed action received.",
+          "Write ONLY reviews/diagnosis.json as {version:1,objective,decision,detail,next_effect?,next_capability?,operator_question?}.",
+          "decision is exactly one of retry_with_different_effect (name next_effect), escalate_capability (name a registered next_capability), operator_required (state the operator_question), or target_infeasible.",
+          "Choose a strategy that has NOT already been attempted; the packet lists what has. Repeating one spends a round to relearn what the journal already records.",
+          "You may not lower or restate the target. An objective met by redefining it is not met. If the target cannot be reached with the evidence available, say target_infeasible and explain what would have to change."
+        ],
+        "enabled": false,
+        "skippable": true,
+        "disabled_reason": "reached only through the kernel's diagnose transition, never in graph order"
       },
       {
         "type": "loop",
@@ -1175,7 +2345,30 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/final-release-baseline.json"
+            ],
+            "writes": [
+              "reports/final-release-baseline.json"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "reports/evidence-audit.json",
+              "reports/metrics.json",
+              "reports/release-gates.json",
+              "research/**",
+              "sources/**"
+            ]
           },
           {
             "id": "final_release_plan",
@@ -1208,7 +2401,36 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/final-release-plan-repair.md",
+              "reviews/action-plan.json",
+              "reviews/action-plan.json.pre-final-release-enrichment.json"
+            ],
+            "writes": [
+              "reports/final-release-plan-repair.md",
+              "reviews/action-plan.json",
+              "reviews/action-plan.json.pre-final-release-enrichment.json"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "reports/action-acceptance.json",
+              "reports/final-release-progress.json",
+              "reports/longwrite-validation.json",
+              "reports/release-gates.json",
+              "research/**",
+              "reviews/scorecard.json",
+              "sources/**"
+            ]
           },
           {
             "id": "action_plan_split",
@@ -1237,22 +2459,42 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/action-plan-split.md",
+              "reviews/outline-action-plan.json",
+              "reviews/research-action-plan.json",
+              "reviews/revision-action-plan.json"
+            ],
+            "writes": [
+              "reports/action-plan-split.md",
+              "reviews/outline-action-plan.json",
+              "reviews/research-action-plan.json",
+              "reviews/revision-action-plan.json"
+            ],
+            "reads": [
+              "longwrite.yaml",
+              "reviews/action-plan.json"
+            ]
           },
           {
             "type": "action_dispatch",
             "id": "research_action_dispatch",
-            "title": "Execute evidence-expansion actions before revision",
+            "title": "Execute evidence-expansion and corpus repairs before revision",
             "owner": "analyst",
             "plan_path": "reviews/research-action-plan.json",
             "allowed_actions": [
+              "repair_bibliography",
+              "repair_citation_plan",
+              "repair_source_metadata",
               "targeted_research_expansion"
             ],
-            "max_actions": 1,
-            "continue_on_recoverable_failure": true,
+            "max_actions": 20,
             "outputs": [
               "reports/action-dispatch-research.json"
             ],
+            "continue_on_recoverable_failure": true,
             "when": "final_release_gate_pass < 1",
             "phase": "improve"
           },
@@ -1265,7 +2507,7 @@
             "allowed_actions": [
               "reopen_outline"
             ],
-            "max_actions": 1,
+            "max_actions": 20,
             "outputs": [
               "reports/action-dispatch-outline.json"
             ],
@@ -1299,7 +2541,25 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "evidence/citation-ledger.jsonl",
+              "reviews/citation-repair-packet.json",
+              "reviews/citation-repair-packet.md"
+            ],
+            "writes": [
+              "evidence/citation-ledger.jsonl",
+              "reviews/citation-repair-packet.json",
+              "reviews/citation-repair-packet.md"
+            ],
+            "reads": [
+              "chapters/*.md",
+              "evidence/citation-ledger.jsonl",
+              "evidence/section-*.json",
+              "longwrite.yaml",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "id": "cited_source_upgrade_packet",
@@ -1328,7 +2588,22 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reviews/cited-source-upgrade-packet.json",
+              "reviews/cited-source-upgrade-packet.md"
+            ],
+            "writes": [
+              "reviews/cited-source-upgrade-packet.json",
+              "reviews/cited-source-upgrade-packet.md"
+            ],
+            "reads": [
+              "chapters/*.md",
+              "evidence/section-*.json",
+              "longwrite.yaml",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "type": "action_dispatch",
@@ -1337,14 +2612,36 @@
             "owner": "analyst",
             "plan_path": "reviews/revision-action-plan.json",
             "allowed_actions": [
+              "request_operator_clarification",
               "revise_sections",
-              "revise_visual_plan",
-              "request_operator_clarification"
+              "revise_visual_plan"
             ],
-            "max_actions": 3,
+            "max_actions": 20,
             "outputs": [
               "reports/action-dispatch.json"
             ],
+            "materializer": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "materialize-action",
+                "."
+              ]
+            },
+            "verdict_inputs": [
+              "reports/reachability-verdict.json"
+            ],
+            "cost_probe": {
+              "cmd": "<node>",
+              "args": [
+                "<longwrite-cli>",
+                "research",
+                "cost-probe",
+                "."
+              ]
+            },
+            "on_diagnose": "diagnose_objective",
             "when": "final_release_gate_pass < 1",
             "phase": "improve"
           },
@@ -1374,7 +2671,21 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "writes": [
+              "evidence/citation-ledger.jsonl"
+            ],
+            "reads": [
+              "chapters/*.md",
+              "evidence/coverage.json",
+              "evidence/section-*.json",
+              "longwrite.yaml",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "id": "evidence_audit",
@@ -1401,7 +2712,20 @@
               ]
             },
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/evidence-audit.json",
+              "reports/evidence-audit.md"
+            ],
+            "writes": [
+              "reports/evidence-audit.json",
+              "reports/evidence-audit.md"
+            ],
+            "reads": [
+              "evidence/citation-ledger.jsonl",
+              "longwrite.yaml"
+            ]
           },
           {
             "id": "claim_judge",
@@ -1424,6 +2748,7 @@
             ],
             "outputs": [
               "reviews/claim-judgments.jsonl",
+              "reviews/claim-judgments.jsonl.pre-normalization.json",
               "reports/claim-judgment-repair.md"
             ],
             "validators": [
@@ -1442,7 +2767,24 @@
               }
             ],
             "when": "manuscript_revision_planned >= 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/claim-judgment-repair.md",
+              "reviews/claim-judgments.jsonl",
+              "reviews/claim-judgments.jsonl.pre-normalization.json"
+            ],
+            "writes": [
+              "reports/claim-judgment-repair.md",
+              "reviews/claim-judgments.jsonl",
+              "reviews/claim-judgments.jsonl.pre-normalization.json"
+            ],
+            "reads": [
+              "chapters/*.md",
+              "evidence/citation-ledger.jsonl",
+              "longwrite.yaml",
+              "reports/evidence-audit.md"
+            ]
           },
           {
             "id": "claim_score",
@@ -1469,7 +2811,20 @@
               ]
             },
             "when": "manuscript_revision_planned >= 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/claim-gate.md",
+              "reports/metrics.json"
+            ],
+            "writes": [
+              "reports/claim-gate.md",
+              "reports/metrics.json"
+            ],
+            "reads": [
+              "longwrite.yaml",
+              "reviews/claim-judgments.jsonl"
+            ]
           },
           {
             "id": "rebuild",
@@ -1495,7 +2850,9 @@
               "paper/sections/*.tex",
               "paper/figures/*.tex",
               "paper/tables/*.tex",
-              "build/manuscript.pdf"
+              "build/manuscript.pdf",
+              "reports/latex-build.md",
+              "reports/figures-build.md"
             ],
             "validators": [
               "required_output_exists"
@@ -1531,7 +2888,64 @@
               }
             ],
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "build/**",
+              "build/manuscript.pdf",
+              "data/**",
+              "data/*.csv",
+              "evidence/citation-ledger.jsonl",
+              "figures/**",
+              "figures/*.svg",
+              "figures/figure-plan.md",
+              "figures/manifest.json",
+              "paper/**",
+              "paper/figures/*.tex",
+              "paper/main.tex",
+              "paper/sections/*.tex",
+              "paper/tables/*.tex",
+              "reports/figures-build.md",
+              "reports/latex-build.md",
+              "reports/visual-plan-repair.md",
+              "scripts/plot_source_years.py",
+              "tables/*.md"
+            ],
+            "writes": [
+              "build/**",
+              "build/manuscript.pdf",
+              "data/**",
+              "data/*.csv",
+              "evidence/citation-ledger.jsonl",
+              "figures/**",
+              "figures/*.svg",
+              "figures/figure-plan.md",
+              "figures/manifest.json",
+              "paper/**",
+              "paper/figures/*.tex",
+              "paper/main.tex",
+              "paper/sections/*.tex",
+              "paper/tables/*.tex",
+              "reports/figures-build.md",
+              "reports/latex-build.md",
+              "reports/visual-plan-repair.md",
+              "scripts/plot_source_years.py",
+              "tables/*.md"
+            ],
+            "reads": [
+              "chapters/**",
+              "chapters/*.md",
+              "evidence/**",
+              "evidence/citation-ledger.jsonl",
+              "figures/**",
+              "longwrite.yaml",
+              "paper/**",
+              "paper/abstract.md",
+              "reports/evidence-audit.md",
+              "reports/remediation-plan.json",
+              "sources/**",
+              "sources/bibliography.bib"
+            ]
           },
           {
             "id": "render_visual_review",
@@ -1561,7 +2975,22 @@
             "enabled": false,
             "skippable": true,
             "disabled_reason": "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/metrics.json",
+              "reports/visual-render-manifest.json",
+              "reports/visual-review/*.png"
+            ],
+            "writes": [
+              "reports/metrics.json",
+              "reports/visual-render-manifest.json",
+              "reports/visual-review/*.png"
+            ],
+            "reads": [
+              "build/manuscript.pdf",
+              "longwrite.yaml"
+            ]
           },
           {
             "id": "visual_review",
@@ -1610,7 +3039,21 @@
             "enabled": false,
             "skippable": true,
             "disabled_reason": "seed/dry-run rehearsal cannot attach rendered page images to a multimodal reviewer",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md"
+            ],
+            "writes": [
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md"
+            ],
+            "reads": [
+              "build/manuscript.pdf",
+              "longwrite.yaml",
+              "reports/visual-render-manifest.json"
+            ]
           },
           {
             "id": "review",
@@ -1695,7 +3138,42 @@
               }
             ],
             "when": "final_release_gate_pass < 1",
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/metrics.json",
+              "reports/score-history.json",
+              "reviews/review-round-001.md",
+              "reviews/scorecard.json"
+            ],
+            "writes": [
+              "reports/metrics.json",
+              "reports/score-history.json",
+              "reviews/review-round-001.md",
+              "reviews/scorecard.json"
+            ],
+            "reads": [
+              "build/manuscript.pdf",
+              "chapters/*.md",
+              "codebases/manifest.json",
+              "evidence/citation-ledger.jsonl",
+              "evidence/codebase-analysis.json",
+              "evidence/codebase-comparison.json",
+              "evidence/codebase-context.md",
+              "evidence/coverage.json",
+              "feedback/user-feedback.md",
+              "figures/manifest.json",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "project_brief.md",
+              "reports/evidence-audit.md",
+              "reports/word-metrics.md",
+              "reviews/action-plan.json",
+              "reviews/artifact-plan.json",
+              "reviews/visual-qa.json",
+              "reviews/visual-qa.md"
+            ]
           },
           {
             "id": "final_release_verify_citations",
@@ -1723,7 +3201,31 @@
                 "."
               ]
             },
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/source-verification.md",
+              "sources/citation-verification.jsonl"
+            ],
+            "writes": [
+              "reports/source-verification.md",
+              "sources/citation-verification.jsonl"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "chapters/*.md",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "research/**",
+              "sources/**",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "id": "final_release_assess_research",
@@ -1753,7 +3255,35 @@
                 "."
               ]
             },
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/research-assessment.json",
+              "reports/research-assessment.md",
+              "sources/source_upgrade_plan.jsonl"
+            ],
+            "writes": [
+              "reports/research-assessment.json",
+              "reports/research-assessment.md",
+              "sources/source_upgrade_plan.jsonl"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "chapters/*.md",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "research/**",
+              "sources/**",
+              "sources/bibliography.bib",
+              "sources/citation_plan.jsonl",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "id": "final_release_assessment",
@@ -1785,7 +3315,37 @@
                 "--advisory"
               ]
             },
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/longwrite-validation.json",
+              "reports/longwrite-validation.md",
+              "reports/metrics.json",
+              "reports/release-gates.json"
+            ],
+            "writes": [
+              "reports/longwrite-validation.json",
+              "reports/longwrite-validation.md",
+              "reports/metrics.json",
+              "reports/release-gates.json"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "chapters/*.md",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "research/**",
+              "reviews/scorecard.json",
+              "sources/**",
+              "sources/bibliography.bib",
+              "sources/classified_sources.jsonl"
+            ]
           },
           {
             "id": "final_release_progress",
@@ -1815,7 +3375,35 @@
                 "."
               ]
             },
-            "phase": "improve"
+            "phase": "improve",
+            "kind": "mutation",
+            "owns": [
+              "reports/action-acceptance.json",
+              "reports/final-release-progress.json",
+              "reports/final-release-progress.md"
+            ],
+            "writes": [
+              "reports/action-acceptance.json",
+              "reports/final-release-progress.json",
+              "reports/final-release-progress.md"
+            ],
+            "reads": [
+              "build/**",
+              "chapters/**",
+              "evidence/**",
+              "figures/**",
+              "longwrite.yaml",
+              "outline.json",
+              "outline.md",
+              "paper/**",
+              "reports/**",
+              "reports/evidence-audit.json",
+              "reports/final-release-baseline.json",
+              "reports/metrics.json",
+              "reports/release-gates.json",
+              "research/**",
+              "sources/**"
+            ]
           }
         ],
         "phase": "improve"
@@ -1850,7 +3438,27 @@
             "."
           ]
         },
-        "phase": "release"
+        "phase": "release",
+        "kind": "mutation",
+        "owns": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/release-gates.json"
+        ],
+        "writes": [
+          "reports/longwrite-validation.json",
+          "reports/longwrite-validation.md",
+          "reports/release-gates.json"
+        ],
+        "reads": [
+          "build/manuscript.pdf",
+          "chapters/*.md",
+          "evidence/citation-ledger.jsonl",
+          "longwrite.yaml",
+          "reports/evidence-audit.md",
+          "reports/research-assessment.json",
+          "sources/citation-verification.jsonl"
+        ]
       },
       {
         "id": "package_submission",
@@ -1879,7 +3487,22 @@
             "."
           ]
         },
-        "phase": "release"
+        "phase": "release",
+        "kind": "mutation",
+        "owns": [
+          "build/submission/*/longwrite-submission-manifest.json"
+        ],
+        "writes": [
+          "build/submission/*/longwrite-submission-manifest.json"
+        ],
+        "reads": [
+          "build/manuscript.pdf",
+          "longwrite.yaml",
+          "paper/main.tex",
+          "paper/references.bib",
+          "reports/longwrite-validation.json",
+          "reports/release-gates.json"
+        ]
       }
     ],
     "tool_catalog": [
@@ -1896,13 +3519,20 @@
         ],
         "optional_inputs": [
           "evidence/coverage.json",
-          "reviews/artifact-plan.json"
+          "reviews/artifact-plan.json",
+          "research/retrieval-brief.json"
         ],
         "validators": [
           "required_output_exists"
         ],
         "runtime": "script",
-        "max_invocations": 1,
+        "skills": [
+          "research/retrieval-brief.json"
+        ],
+        "instructions": [
+          "research/retrieval-brief.json lists the landmark targets the ledger still has no source for, with how many times each has been attempted. Search for those FIRST: a target listed there is one this paper has already decided it needs, and a round that returns other sources leaves the same coverage gap open."
+        ],
+        "max_invocations": 10,
         "command": {
           "cmd": "<node>",
           "args": [
@@ -1914,6 +3544,183 @@
             "reviews/action-plan.json"
           ]
         },
+        "kind": "mutation",
+        "owns": [
+          "sources/citation-verification.jsonl",
+          "sources/**",
+          "evidence/**",
+          "fulltext/**",
+          "research/**",
+          "reports/research-expansion.md"
+        ],
+        "reads": [
+          "evidence/**",
+          "evidence/coverage.json",
+          "fulltext/**",
+          "longwrite.yaml",
+          "outline.json",
+          "reports/research-expansion.md",
+          "research/**",
+          "research/retrieval-brief.json",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json",
+          "sources/**",
+          "sources/citation-verification.jsonl"
+        ],
+        "evaluate_with": [
+          "measure_unit_metrics",
+          "measure_round_metrics"
+        ],
+        "phase": "improve"
+      },
+      {
+        "id": "repair_bibliography",
+        "owner": "source-curator",
+        "title": "Re-derive the bibliography from the classified corpus",
+        "inputs": [
+          "reviews/action-plan.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "instructions": [
+          "The bibliography and citation plan are DERIVED from sources/classified_sources.jsonl. An inconsistency between them and the corpus is repaired by re-deriving them, never by editing the derived file."
+        ],
+        "outputs": [
+          "sources/bibliography.bib",
+          "reports/bibliography-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "max_invocations": 10,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "repair-bibliography",
+            "."
+          ]
+        },
+        "kind": "mutation",
+        "owns": [
+          "sources/bibliography.bib",
+          "reports/bibliography-repair.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "reports/bibliography-repair.md",
+          "reviews/action-plan.json",
+          "sources/bibliography.bib",
+          "sources/classified_sources.jsonl"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics"
+        ],
+        "phase": "improve"
+      },
+      {
+        "id": "repair_citation_plan",
+        "owner": "source-curator",
+        "title": "Rebuild section citation allocations from the outline and corpus",
+        "inputs": [
+          "reviews/action-plan.json",
+          "outline.json",
+          "sources/classified_sources.jsonl",
+          "sources/citation_plan.jsonl"
+        ],
+        "instructions": [
+          "Regenerate only sources/citation_plan.jsonl from the current real outline sections and classified corpus. Do not alter bibliography or source metadata."
+        ],
+        "outputs": [
+          "sources/citation_plan.jsonl",
+          "reports/citation-plan-repair.md"
+        ],
+        "validators": [
+          "required_output_exists",
+          "jsonl_parseable"
+        ],
+        "runtime": "script",
+        "max_invocations": 10,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "repair-citation-plan",
+            "."
+          ]
+        },
+        "kind": "mutation",
+        "owns": [
+          "sources/citation_plan.jsonl",
+          "reports/citation-plan-repair.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "outline.json",
+          "reports/citation-plan-repair.md",
+          "reviews/action-plan.json",
+          "sources/citation_plan.jsonl",
+          "sources/classified_sources.jsonl"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics"
+        ],
+        "phase": "improve"
+      },
+      {
+        "id": "repair_source_metadata",
+        "owner": "source-curator",
+        "title": "Re-derive source identity and metadata from the corpus the records name",
+        "inputs": [
+          "reviews/action-plan.json",
+          "sources/classified_sources.jsonl"
+        ],
+        "instructions": [
+          "Identity is re-derived from the corpus rather than edited in place: a record whose metadata disagrees with the source it names is corrected by reading the source again."
+        ],
+        "outputs": [
+          "sources/source-identities.jsonl",
+          "reports/source-identities.md",
+          "reports/source-metadata-repair.md"
+        ],
+        "validators": [
+          "required_output_exists"
+        ],
+        "runtime": "script",
+        "max_invocations": 10,
+        "command": {
+          "cmd": "<node>",
+          "args": [
+            "<longwrite-cli>",
+            "research",
+            "repair-source-metadata",
+            "."
+          ]
+        },
+        "kind": "mutation",
+        "owns": [
+          "sources/classified_sources.jsonl",
+          "sources/citation-verification.jsonl",
+          "sources/**",
+          "reports/source-identities.md",
+          "reports/source-metadata-repair.md",
+          "reports/source-verification.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "reports/source-identities.md",
+          "reports/source-metadata-repair.md",
+          "reports/source-verification.md",
+          "reviews/action-plan.json",
+          "sources/**",
+          "sources/citation-verification.jsonl",
+          "sources/classified_sources.jsonl"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics"
+        ],
         "phase": "improve"
       },
       {
@@ -1967,7 +3774,39 @@
           "non_empty_markdown"
         ],
         "requires_human_approval": false,
-        "max_invocations": 1,
+        "max_invocations": 10,
+        "kind": "mutation",
+        "owns": [
+          "outline.json",
+          "outline.md",
+          "feedback/outline-revision.md",
+          "reviews/outline-revision.md"
+        ],
+        "reads": [
+          "evidence/active-validated-source-evidence.json",
+          "evidence/source-packets.json",
+          "feedback/outline-revision.md",
+          "longwrite.yaml",
+          "outline.json",
+          "outline.md",
+          "reports/corpus-gates.md",
+          "reports/evidence-depth-finalization.md",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json",
+          "reviews/outline-revision.md",
+          "reviews/scorecard.json",
+          "sources/classified_sources.jsonl",
+          "sources/semantic-screening.json"
+        ],
+        "allowed_tools": [
+          "Edit",
+          "Read",
+          "Write"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics",
+          "acquire_review_score"
+        ],
         "phase": "improve"
       },
       {
@@ -2037,10 +3876,50 @@
           "reviews/revision-report.md"
         ],
         "validator_commands": [],
-        "max_invocations": 1,
+        "max_invocations": 10,
         "retry": {
           "max_attempts": 2
         },
+        "kind": "mutation",
+        "owns": [
+          "chapters/**",
+          "paper/abstract.md",
+          "reviews/revision-report.md"
+        ],
+        "reads": [
+          "chapters/**",
+          "chapters/*.md",
+          "evidence/citation-ledger.jsonl",
+          "evidence/section-*.json",
+          "feedback/user-feedback.md",
+          "fulltext/*.md",
+          "longwrite.yaml",
+          "outline.json",
+          "paper/abstract.md",
+          "project_brief.md",
+          "reports/action-dispatch.json",
+          "reports/evidence-audit.md",
+          "reports/word-metrics.md",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json",
+          "reviews/citation-repair-packet.json",
+          "reviews/citation-repair-packet.md",
+          "reviews/cited-source-upgrade-packet.json",
+          "reviews/cited-source-upgrade-packet.md",
+          "reviews/review-round-001.md",
+          "reviews/revision-report.md"
+        ],
+        "allowed_tools": [
+          "Edit",
+          "Read",
+          "Write"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics",
+          "acquire_claim_support",
+          "acquire_review_score",
+          "acquire_rendered_visual_review"
+        ],
         "phase": "improve"
       },
       {
@@ -2078,7 +3957,39 @@
           "evidence/codebase-analysis.json",
           "evidence/codebase-comparison.json"
         ],
-        "max_invocations": 1,
+        "max_invocations": 10,
+        "kind": "mutation",
+        "owns": [
+          "figures/**",
+          "tables/**",
+          "paper/template/**",
+          "figures/placement-plan.json"
+        ],
+        "reads": [
+          "evidence/coverage.json",
+          "figures/**",
+          "figures/placement-plan.json",
+          "longwrite.yaml",
+          "outline.json",
+          "paper/template/**",
+          "reports/action-dispatch.json",
+          "reviews/action-plan.json",
+          "reviews/artifact-plan.json",
+          "reviews/scorecard.json",
+          "sources/classified_sources.jsonl",
+          "tables/**"
+        ],
+        "allowed_tools": [
+          "Edit",
+          "Read",
+          "Write"
+        ],
+        "evaluate_with": [
+          "measure_round_metrics",
+          "acquire_latex_build_status",
+          "acquire_rendered_visual_review",
+          "acquire_review_score"
+        ],
         "skills": [
           "codebases/manifest.json",
           "evidence/codebase-context.md",
@@ -2118,6 +4029,15 @@
             "reviews/action-plan.json"
           ]
         },
+        "kind": "mutation",
+        "owns": [
+          "reviews/clarification-request.md"
+        ],
+        "reads": [
+          "longwrite.yaml",
+          "reviews/action-plan.json",
+          "reviews/clarification-request.md"
+        ],
         "phase": "improve"
       }
     ],

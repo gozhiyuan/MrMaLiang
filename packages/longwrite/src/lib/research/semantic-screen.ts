@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { reserveForSelector, settleSelectorReservation } from "./reservation.js";
 import { toJsonl, parseJsonl } from "./jsonl.js";
 import { writeBibtex } from "./bibtex.js";
-import { buildCitationPlan } from "./citation-plan.js";
+import { buildCitationPlan, plannedSections } from "./citation-plan.js";
 import type { ClassifiedSource, CitationDepth } from "./types.js";
 import { loadProjectConfig } from "../project-config.js";
 
@@ -324,13 +325,27 @@ function unwrapFence(raw: string): { content: string; normalized: boolean } {
 
 /** Script-selected subset: LQS rank is retained, while every taxonomy cell
  * reserves candidates so an early keyword miss cannot starve deep reading. */
-export async function selectSemanticCandidates(workspaceDir: string): Promise<string[]> {
+export async function selectSemanticCandidates(
+  workspaceDir: string,
+): Promise<{ selected: string[]; written: string[] }> {
   const config = await loadProjectConfig(workspaceDir);
   const settings = config.research.semantic_screen;
   const sources = await readClassified(workspaceDir);
+  // BEFORE any ranking, and before anything is written: an over-subscribed
+  // reserve is a decision someone has to make, not a set of targets to drop
+  // quietly at the cap.
+  const { reservedIds, excluded } = await reserveForSelector(
+    workspaceDir, "semantic_screen", settings.max_candidates);
   const ranked = [...sources].filter((source) => source.citation_depth !== "D")
     .sort((a, b) => b.quality_score - a.quality_score || b.year - a.year);
   const selected = new Map<string, { source: ClassifiedSource; reasons: string[] }>();
+  // Reserved targets first, so the ranking spends what is left rather than
+  // deciding what is kept.
+  const byId = new Map(sources.map((source) => [source.id, source]));
+  for (const id of reservedIds) {
+    const source = byId.get(id);
+    if (source) selected.set(id, { source, reasons: ["reserved target"] });
+  }
   // Reserve taxonomy coverage *before* spending the remaining capacity on the
   // global LQS ranking. Filling rank first would make the reserve a no-op at
   // the cap and recreate the exact blind spot this stage is meant to expose.
@@ -341,8 +356,12 @@ export async function selectSemanticCandidates(workspaceDir: string): Promise<st
       else if (selected.size < settings.max_candidates) selected.set(source.id, { source, reasons: [`taxonomy reserve: ${cell}`] });
     }
   }
+  const excludedIds = new Set(excluded.map((entry) => entry.source_id));
   for (const source of ranked) {
     if (selected.size >= settings.max_candidates) break;
+    // A target excluded for a recorded reason does not come back in through
+    // the ranking it was excluded from.
+    if (excludedIds.has(source.id)) continue;
     const current = selected.get(source.id);
     if (current) current.reasons.push("metadata LQS rank");
     else selected.set(source.id, { source, reasons: ["metadata LQS rank"] });
@@ -359,7 +378,8 @@ export async function selectSemanticCandidates(workspaceDir: string): Promise<st
     fs.writeFile(path.join(workspaceDir, SEMANTIC_CANDIDATES_PATH), `${JSON.stringify(artifact, null, 2)}\n`, "utf-8"),
     fs.copyFile(path.join(workspaceDir, "sources", "classified_sources.jsonl"), path.join(workspaceDir, METADATA_CLASSIFIED_PATH)),
   ]);
-  return [SEMANTIC_CANDIDATES_PATH, METADATA_CLASSIFIED_PATH];
+  await settleSelectorReservation(workspaceDir, "semantic_screen", [...selected.keys()], reservedIds, excluded);
+  return { selected: [...selected.keys()], written: [SEMANTIC_CANDIDATES_PATH, METADATA_CLASSIFIED_PATH] };
 }
 
 export async function repairSemanticScreen(workspaceDir: string): Promise<{ normalized: boolean; reportPath: string }> {
@@ -402,8 +422,12 @@ export async function repairSemanticScreen(workspaceDir: string): Promise<{ norm
 
 /** Select only ingested, semantically approved sources for costly claim-level
  * reading. The stage deliberately leaves unapproved sources at C/D later. */
-export async function selectSourceEvidenceCandidates(workspaceDir: string): Promise<string[]> {
+export async function selectSourceEvidenceCandidates(
+  workspaceDir: string,
+): Promise<{ selected: string[]; written: string[] }> {
   const config = await loadProjectConfig(workspaceDir);
+  const { reservedIds, excluded } = await reserveForSelector(
+    workspaceDir, "source_evidence", config.research.semantic_screen.max_evidence_sources);
   const [screen, manifestRaw, sources] = await Promise.all([
     fs.readFile(path.join(workspaceDir, SEMANTIC_SCREEN_PATH), "utf-8").then((value) => SemanticScreen.parse(JSON.parse(value))),
     fs.readFile(path.join(workspaceDir, "fulltext", "manifest.json"), "utf-8"),
@@ -412,9 +436,18 @@ export async function selectSourceEvidenceCandidates(workspaceDir: string): Prom
   const manifest = JSON.parse(manifestRaw) as { results?: Array<{ sourceId?: string; status?: string; path?: string }> };
   const ingested = new Map((manifest.results ?? []).flatMap((result) => result.status === "ingested" && result.sourceId && result.path ? [[result.sourceId, result.path] as const] : []));
   const sourceById = new Map(sources.map((source) => [source.id, source]));
-  const ordered = screen.screenings
+  const excludedIds = new Set(excluded.map((entry) => entry.source_id));
+  const eligible = screen.screenings
     .filter((item) => item.fulltext_priority && item.semantic_relevance !== "low" && item.recommended_depth !== "D" && ingested.has(item.source_id))
-    .sort((a, b) => (a.recommended_depth === "A" ? 0 : 1) - (b.recommended_depth === "A" ? 0 : 1));
+    .filter((item) => !excludedIds.has(item.source_id));
+  // Reserved first, then rank spends what is left. Ordering rank first makes
+  // the reserve a no-op at the cap.
+  const reservedFirst = new Set(reservedIds.filter((id) => eligible.some((item) => item.source_id === id)));
+  const ordered = [
+    ...eligible.filter((item) => reservedFirst.has(item.source_id)),
+    ...eligible.filter((item) => !reservedFirst.has(item.source_id))
+      .sort((a, b) => (a.recommended_depth === "A" ? 0 : 1) - (b.recommended_depth === "A" ? 0 : 1)),
+  ];
   const candidates = ordered.slice(0, config.research.semantic_screen.max_evidence_sources).flatMap((screening) => {
     const source = sourceById.get(screening.source_id);
     const fulltext_path = ingested.get(screening.source_id);
@@ -422,7 +455,12 @@ export async function selectSourceEvidenceCandidates(workspaceDir: string): Prom
   });
   await fs.mkdir(path.join(workspaceDir, "sources"), { recursive: true });
   await fs.writeFile(path.join(workspaceDir, SOURCE_EVIDENCE_CANDIDATES_PATH), `${JSON.stringify({ version: 1, candidates }, null, 2)}\n`, "utf-8");
-  return [SOURCE_EVIDENCE_CANDIDATES_PATH];
+  const selected = candidates.map((candidate) => candidate.id);
+  // A reserved target that never reached full text cannot be selected here,
+  // and that is a fulltext_unavailable outcome rather than a silent drop.
+  await settleSelectorReservation(workspaceDir, "source_evidence", selected,
+    reservedIds.filter((id) => ingested.has(id)), excluded);
+  return { selected, written: [SOURCE_EVIDENCE_CANDIDATES_PATH] };
 }
 
 /** An A/B-depth packet whose claims record no later_use/cross_task_transfer/
@@ -563,7 +601,10 @@ export async function finalizeEvidenceBackedDepth(workspaceDir: string): Promise
           : `${source.citation_depth_rationale} Downgraded from metadata-provisional ${source.citation_depth}: no validated semantic/full-text evidence packet met the agentic A/B contract.`,
     };
   });
-  const citationPlan = buildCitationPlan(finalized);
+  // The REAL plan: one entry per outline section, allocated by each section's
+  // own contract. This stage runs after the outline exists, which is why the
+  // plan belongs here and not in the research pipeline.
+  const citationPlan = buildCitationPlan(finalized, await plannedSections(workspaceDir));
   const currentCoreIds = new Set(finalized.filter((source) => source.citation_depth === "A" || source.citation_depth === "B").map((source) => source.id));
   const activeEvidence = ValidatedSourceEvidenceHistory.parse({
     version: 1,

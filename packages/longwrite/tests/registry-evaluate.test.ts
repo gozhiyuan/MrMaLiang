@@ -85,12 +85,13 @@ describe("metrics evaluate", () => {
     expect(envelope.measurements[0].reason).toMatch(/no evaluator/);
   });
 
-  it("selects only the metrics on the requested tier", async () => {
+  it("selects only script metrics on the requested tier", async () => {
     const ws = await workspace();
     const envelope = await buildEnvelope(ws, { tier: "release", asOfDate: AS_OF });
     expect(envelope.measurements.map((m) => String(m.metric)).sort())
-      .toEqual(["claim_support", "rendered_visual_review", "review_score"]);
-    expect(envelope.measurements.every((m) => m.status === "deferred")).toBe(true);
+      .toEqual([]);
+    // Model values are produced by their dedicated acquisition stages, not
+    // by an evaluator that would only emit a deferred placeholder.
   });
 
   it("compiles the configured target onto the entry", async () => {

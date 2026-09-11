@@ -241,8 +241,6 @@ export const PRODUCER = defineProducer({
     { id: "latex_build", class: "manuscript", findings: [
       { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
         acceptance_metric: "latex_build_status" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
-        acceptance_metric: "latex_build_status" },
       { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification",
         acceptance_metric: "latex_build_status" },
     ] },

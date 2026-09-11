@@ -85,6 +85,25 @@ release failures may be advisory, but live-provider releases must fail closed.
   the only check a dynamically built gate id cannot defeat.
   MrMaLiang never writes `.malaclaw/`: it emits measurement envelopes and the
   engine owns storage, sequencing and acceptance arithmetic.
+  The tool catalog holds **capability templates**, not contracts: a template
+  declares what a capability is, the most it may ever touch, and the metrics it
+  must not break. It declares no `acceptance`, because the gate and scope a
+  repair answers to are known only when a finding is dispatched — the
+  dispatcher materializes a per-finding **action instance** whose envelope is
+  narrowed to the artifacts that finding names and whose criterion comes from
+  that finding's own metric and scope.
+  A finding whose `acceptance_metric` is `null` takes a **verification
+  criterion** instead: the gate that emitted it must run again and come back
+  clean. `verification_id` is the gate id, and every such gate has a registered
+  verifier — a criterion nothing can re-run could never be satisfied.
+  Targets are reserved **before** ranking. A reserved target is either selected
+  or excluded with a typed reason; it may never simply vanish because generic
+  ranking filled the queue, and reservations that exceed capacity pause the run
+  before any work starts rather than being truncated.
+- **MrMaLiang requires MalaClaw 3.x** (`runtime-compatibility.json`). IR v2 is
+  required and never defaulted; observations are engine-owned; mutations run in
+  transactional task workspaces; and outcomes are typed on two axes, so a stage
+  that ran is not read as a stage whose objective was met.
 - `packages/longexperiment/src/lib/schema.ts`: durable experiment protocol.
 - `packages/longexperiment/src/lib/compiler.ts`: experiment workflow compiler.
 - `packages/research-protocol/src/`: shared experiment/manuscript handoff
@@ -126,7 +145,7 @@ Requirements:
 
 - Node.js 22 or newer.
 - npm workspaces.
-- MalaClaw `>=2.3.0 <3.0.0` on `PATH` for integration rehearsals.
+- MalaClaw `>=3.0.0 <4.0.0` on `PATH` for integration rehearsals (the range `runtime-compatibility.json` declares).
 
 Common commands from the repository root:
 

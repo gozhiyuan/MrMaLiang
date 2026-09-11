@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildResearchArtifacts, buildResearchArtifactsWithProvider, prepareResearchWorkspace, recallSources } from "../src/lib/research/pipeline.js";
 import { classifySources } from "../src/lib/research/classify.js";
+import { buildCitationPlan } from "../src/lib/research/citation-plan.js";
 import { dedupeSources, duplicateKeys } from "../src/lib/research/dedupe.js";
 import { parseJsonl } from "../src/lib/research/jsonl.js";
 import type { CitationPlanEntry, ClassifiedSource, RawSource, ScoredSource } from "../src/lib/research/types.js";
@@ -21,21 +22,52 @@ afterEach(async () => {
 });
 
 describe("research artifact pipeline", () => {
-  it("builds raw, scored, classified, BibTeX, and citation-plan artifacts", () => {
+  it("defers the citation plan until real outline sections exist", () => {
     const artifacts = buildResearchArtifacts("Long-horizon agent memory", 6);
     expect(artifacts.raw).toHaveLength(6);
     expect(artifacts.deduped).toHaveLength(6);
     expect(artifacts.scored).toHaveLength(6);
     expect(artifacts.classified).toHaveLength(6);
-    expect(artifacts.citationPlan.length).toBeGreaterThan(0);
+    // A corpus has no editorial section contract yet.  Inventing generic
+    // sections here is what previously made later sections inherit the first
+    // section's allocation.
+    expect(artifacts.citationPlan).toEqual([]);
     expect(artifacts.bibliographyBibtex).toContain("@misc");
     expect(artifacts.reportMarkdown).toContain("Long-horizon agent memory");
 
     const sourceIds = new Set(artifacts.classified.map((source) => source.id));
-    for (const entry of artifacts.citationPlan) {
-      expect(entry.section_id).toMatch(/^section-/);
-      expect(entry.source_ids.every((id) => sourceIds.has(id))).toBe(true);
+    expect(sourceIds.size).toBe(6);
+  });
+
+  it("allocates every real outline section independently", () => {
+    const artifacts = buildResearchArtifacts("Long-horizon agent memory", 12);
+    const sections = [
+      "problem", "foundations", "architecture", "evaluation", "safety", "outlook",
+    ].map((id) => ({ id, title: `${id} section`, keywords: [id, "agent memory"] }));
+    const plan = buildCitationPlan(artifacts.classified, sections);
+
+    expect(plan).toHaveLength(sections.length);
+    expect(new Set(plan.map((entry) => entry.section_id))).toEqual(new Set(sections.map((section) => section.id)));
+    for (const entry of plan) {
+      expect(entry.source_ids.length).toBeGreaterThanOrEqual(2);
+      expect(entry.source_ids.every((id) => artifacts.classified.some((source) => source.id === id))).toBe(true);
     }
+  });
+
+  it("covers distinct sources before repeating high-affinity sources in repeated-topic sections", () => {
+    const sources = Array.from({ length: 12 }, (_, index) => ({
+      id: `memory-${index + 1}`, title: `Agent Memory Study ${index + 1}`,
+      authors: ["A"], year: 2026, venue: "ICLR", url: `https://example.test/${index + 1}`,
+      abstract: "agent memory", source: "crossref" as const, topics: ["agent", "memory"],
+      quality_score: 0.9, score_rationale: "fixture", citation_depth: "A" as const,
+      citation_depth_rationale: "fixture",
+    }));
+    const plan = buildCitationPlan(sources, [
+      { id: "one", title: "Agent Memory", keywords: ["agent memory"] },
+      { id: "two", title: "Agent Memory", keywords: ["agent memory"] },
+    ]);
+    expect(new Set([...plan[0]!.source_ids, ...plan[1]!.source_ids]).size)
+      .toBeGreaterThan(plan[0]!.source_ids.length);
   });
 
   it("assigns scores and citation depth deterministically", () => {
@@ -167,7 +199,7 @@ describe("prepareResearchWorkspace", () => {
     expect(deduped).toHaveLength(5);
     expect(scored[0].quality_score).toBeGreaterThan(0);
     expect(classified[0].citation_depth).toBeTruthy();
-    expect(citationPlan[0].source_ids.length).toBeGreaterThan(0);
+    expect(citationPlan).toEqual([]);
     expect(bib).toContain("@misc");
   });
 });

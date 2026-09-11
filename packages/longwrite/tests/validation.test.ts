@@ -90,11 +90,11 @@ describe("research workspace validation", () => {
     expect(report.checks.map((check) => check.id)).toEqual([
       "research_artifacts_present",
       "citation_markers_present",
+      "citation_plan_consistent",
       "source_coverage",
       "bibliography_consistent",
       "literature_quality_score",
       "prose_redundancy",
-      "citation_verification",
       "research_policy",
       "cited_literature_release_gates",
       "citation_url_liveness",
@@ -110,6 +110,7 @@ describe("research workspace validation", () => {
       "full_research_contracts",
       "publication_artifact_contract",
       "manuscript_build",
+      "citation_verification",
     ]);
     expect(validationReportToMarkdown(report)).toContain("Status: pass");
   });

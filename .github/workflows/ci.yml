@@ -20,11 +20,12 @@ jobs:
           # cannot be relocated.
           #
           # This still only moves when MalaClaw cuts a release, which is the
-          # point: runtime-compatibility.json declares ">=2.0.0 <3.0.0", and
+          # point: runtime-compatibility.json declares ">=3.0.0 <4.0.0", and
           # each bump here is one reviewable line recording which release was
           # actually tested. Bump with:
           #   git -C <malaclaw> rev-parse v<next>^{commit}
-          ref: 73885cf55773562c9d6bea30c9f92139aa13243c # MalaClaw v2.3.0 + directional acceptance criteria
+          #
+          ref: 5d4d6aa9c58a4f864f611afd184c676c076edff0 # MalaClaw v3.0.0
           path: .dependencies/MalaClaw
       - uses: actions/setup-node@v4
         with:

@@ -310,6 +310,7 @@ export async function writeAuditStage(workspace: string, config: ExperimentConfi
     publication_eligible: publicationEligible(config, { status: "completed", trialCount: trials.length, comparisons: raw.comparisons as never[], verifiedArtifacts: verifiedArtifacts.length, requiredSeeds: evaluation.seeds.length }),
   });
   await writeJson(path.join(workspace, "results", "experiment-manifest.json"), manifest);
+  await fs.mkdir(path.join(workspace, "reports"), { recursive: true });
   await fs.writeFile(path.join(workspace, "reports", "result-audit.md"), ["# Result Audit", "", `Status: **${manifest.status}**`, `Publication eligible: **${manifest.publication_eligible ? "yes" : "no"}**`, "", "## Verified comparisons", "", ...manifest.comparisons.map((comparison) => `- ${comparison.id}: ${comparison.metric} Δ=${comparison.estimate.toFixed(6)}, 95% CI [${comparison.confidence_interval.lower.toFixed(6)}, ${comparison.confidence_interval.upper.toFixed(6)}], paired seeds ${comparison.paired_seeds.join(", ")}`), "", "## Immutable provenance", "", `- Input locks SHA-256: ${manifest.provenance.input_locks_sha256}`, `- Result SHA-256: ${manifest.provenance.result_sha256}`, ...verifiedArtifacts.map((artifact) => `- ${artifact.path}: ${artifact.sha256}`), ""].join("\n"), "utf-8");
 }
 

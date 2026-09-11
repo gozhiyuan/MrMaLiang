@@ -1,5 +1,7 @@
 import path from "node:path";
 import { writeWordMetrics } from "../lib/ops/word-metrics.js";
+import { metricId } from "../lib/registry/ids.js";
+import { metricDefinition } from "../lib/registry/metrics.js";
 
 export async function runMetricsWords(workspaceDir: string): Promise<void> {
   const resolved = path.resolve(workspaceDir);
@@ -40,4 +42,22 @@ export async function runMetricsEvaluate(
   }, {});
   const summary = Object.entries(counts).map(([status, count]) => `${count} ${status}`).join(", ");
   process.stdout.write(`${written}: ${envelope.measurements.length} entries (${summary})\n`);
+}
+
+/** Acquires one model or external metric from its declared producer.
+ *
+ * Separate from `evaluate` because they are different acts: evaluation runs
+ * deterministic evaluators, acquisition reduces a model's judgment. Routing a
+ * model metric through `evaluate` defers it forever. */
+export async function runMetricsAcquire(
+  workspaceDir: string, options: { metric?: string; asOf?: string } = {},
+): Promise<void> {
+  if (!options.metric) throw new Error("metrics acquire requires --metric <id>");
+  const { acquireModelMetric, acquireExternalMetric } = await import("../lib/registry/acquire.js");
+  const resolved = path.resolve(workspaceDir);
+  const definition = metricDefinition(metricId(options.metric));
+  const { status, written } = definition.measurement_kind === "model"
+    ? await acquireModelMetric(resolved, options.metric, options.asOf ?? new Date().toISOString())
+    : await acquireExternalMetric(resolved, options.metric, options.asOf ?? new Date().toISOString());
+  process.stdout.write(`${written}: ${options.metric} ${status}\n`);
 }

@@ -34,6 +34,9 @@ describe("agentic semantic-screen contract", () => {
       mode: "auto_research_agentic", topic: "Memory architecture", researchProvider: "multi",
       taxonomy: ["memory architecture"],
     });
+    await fs.writeFile(path.join(dir, "outline.json"), JSON.stringify({ sections: [
+      { id: "memory-architecture", title: "Memory architecture", keywords: ["memory", "architecture"] },
+    ] }), "utf-8");
     const sources = [source("paper-a", "A"), source("paper-b", "B")];
     await fs.writeFile(path.join(dir, "sources", "classified_sources.jsonl"), `${sources.map(JSON.stringify).join("\n")}\n`, "utf-8");
     await selectSemanticCandidates(dir);
@@ -104,6 +107,9 @@ describe("agentic semantic-screen contract", () => {
       mode: "auto_research_agentic", topic: "Memory architecture", researchProvider: "multi",
       taxonomy: ["memory architecture"],
     });
+    await fs.writeFile(path.join(dir, "outline.json"), JSON.stringify({ sections: [
+      { id: "memory-architecture", title: "Memory architecture", keywords: ["memory", "architecture"] },
+    ] }), "utf-8");
     const sources = [source("earlier-a", "A"), source("later-c", "C")];
     await fs.writeFile(path.join(dir, "sources", "metadata-classified_sources.jsonl"), `${sources.map(JSON.stringify).join("\n")}\n`, "utf-8");
     await fs.mkdir(path.join(dir, "evidence"), { recursive: true });

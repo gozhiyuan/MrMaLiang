@@ -53,9 +53,17 @@ describe("outline review contract", () => {
   it("requires deterministic outline audits when an allowlisted reopen was selected", async () => {
     const dir = await workspace();
     await fs.writeFile(path.join(dir, "reviews", "action-plan.json"), JSON.stringify({
-      version: 1,
-      findings: [{ id: "taxonomy", severity: "critical", summary: "The organizing taxonomy collapses two incompatible method families." }],
-      actions: [{ id: "reopen", tool: "reopen_outline", finding_ids: ["taxonomy"], rationale: "Replace the taxonomy with a source-backed multi-axis organization.", acceptance_criteria: [{ metric: "outline_readiness", target: 1 }] }],
+      version: 2,
+      // A structured finding routes itself: (gate, artifact kind, required
+      // effect) resolves to reopen_outline without the plan naming a tool.
+      findings: [{
+        id: "taxonomy", gate_id: "full_research_contracts",
+        artifact: { kind: "outline", path: "outline.json" },
+        objective_scope_key: "", required_effect: "replace_organizing_claim",
+        acceptance_metric: null, severity: "critical",
+        diagnostic: "The organizing taxonomy collapses two incompatible method families.",
+      }],
+      actions: [{ id: "reopen", finding_ids: ["taxonomy"], rationale: "Replace the taxonomy with a source-backed multi-axis organization.", acceptance_criteria: [{ metric: "outline_readiness", target: 1 }] }],
     }));
     await expect(validateOutlineReopen(dir)).resolves.toMatchObject({ selected: true, ready: true });
     await expect(fs.readFile(path.join(dir, "reports", "outline-reopen.md"), "utf8")).resolves.toContain("Status: validated");

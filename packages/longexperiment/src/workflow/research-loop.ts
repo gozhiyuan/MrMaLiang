@@ -103,7 +103,7 @@ export function researchLoopStage(
       },
       {
         id: "promote", title: "Promote a champion and record dead ends", owner: "result-auditor",
-        inputs: ["runs/active-round/candidates.json", "results/studies/*/audit.json", "experiment.yaml"],
+        inputs: ["runs/active-round/candidates.json", "results/studies/**", "experiment.yaml"],
         outputs: ["runs/lineage.json", "runs/research-state.json", "reports/metrics.json"],
         runtime: "script", command: longexperimentCommand(["stage", "promote-round", "."]), validators: ["required_output_exists"],
         instructions: ["This is the only writer of champion state. Promotion requires an audited improvement outside measured noise; everything else becomes a recorded dead end."],

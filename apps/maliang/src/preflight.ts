@@ -180,7 +180,10 @@ export async function runUnifiedPreflight(workspace: string, runtime: string | u
 
 /** Single source of truth for the supported MalaClaw range. */
 async function supportedMalaClawRange(): Promise<{ minimum: number[]; majorBelow: number; label: string }> {
-  const fallback = { minimum: [2, 3, 0], majorBelow: 3, label: ">=2.3.0 <3.0.0" };
+  // Kept in step with runtime-compatibility.json. A stale fallback is worse
+  // than no fallback: it accepts the runtime the contract was changed to
+  // reject, and does it silently, at the one check whose job is to catch that.
+  const fallback = { minimum: [3, 0, 0], majorBelow: 4, label: ">=3.0.0 <4.0.0" };
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const raw = await fs.readFile(path.resolve(here, "..", "..", "..", "runtime-compatibility.json"), "utf-8");

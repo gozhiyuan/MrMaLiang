@@ -2,62 +2,78 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { loadProjectConfig } from "../project-config.js";
-import { gateOwnedByTool, repairRouteForGate } from "./repair-routing.js";
+import { gateOwnedByCapability } from "./gate-routing.js";
+import { FindingSchema, type Finding } from "../registry/records.js";
+import { REGISTRY } from "../registry/producers.js";
+import { capabilitiesOfPhase, phaseRoutes } from "../registry/phases.js";
+import { METRIC_REGISTRY, PLANNER_SELECTABLE } from "../registry/metrics.js";
+import { metricId } from "../registry/ids.js";
 
-export const ACCEPTANCE_METRICS = ["cited_sources", "cited_within_one_year_ratio", "accepted_cited_ratio", "cited_arxiv_only_ratio", "citations_per_page", "citation_depth_per_section", "taxonomy_cell_ab_sources", "core_sources", "comparative_tables", "verified_metadata_plots", "figures", "tables", "rendered_visual_review", "empirical_trials", "outline_readiness", "review_score", "claim_support", "landmark_coverage_ratio", "landmark_citation_coverage_ratio", "claim_contradictions", "prose_redundancy", "diagram_connectivity"] as const;
+/** The metrics a planner may name, GENERATED from the registry's own
+ * planner-selectable set rather than restated here. The hand-kept copy needed
+ * a dedicated drift test to police it; generation removes the second copy that
+ * could drift. */
+export const ACCEPTANCE_METRICS = [...PLANNER_SELECTABLE].map(String).sort() as unknown as readonly [string, ...string[]];
 
 const AcceptanceCriterionObject = z.object({
-  /** Each metric is mechanically observable in the workspace or by the
-   * next independent reviewer; free-form success claims are not accepted.
-   * Keep this list in sync with the `action_plan` planner instruction in
-   * `src/workflow/composition.ts` (the "Use cited_sources, ..." sentence) —
-   * see tests/action-plan-metric-sync.test.ts, which fails if they drift. */
+  /** Each metric is mechanically observable in the workspace or by the next
+   * independent reviewer; free-form success claims are not accepted. The set
+   * and the planner instructions are both rendered from the registry, so there
+   * is no second copy to keep in sync. */
   metric: z.enum(ACCEPTANCE_METRICS),
   operator: z.enum(["at_least", "at_most", "equals"]).optional(),
   target: z.number().nonnegative(),
   scope: z.string().min(1).max(160).optional(),
 }).strict().superRefine((criterion, ctx) => {
-  const inverse = ["claim_contradictions", "prose_redundancy", "diagram_connectivity"].includes(criterion.metric);
-  if (inverse && criterion.operator !== "at_most" && criterion.operator !== "equals") {
-    ctx.addIssue({ code: "custom", path: ["operator"], message: `${criterion.metric} requires operator at_most or equals` });
+  // Direction comes from the METRIC REGISTRY, not from a list of metric names
+  // kept here. The two disagreed: this file called diagram_connectivity a
+  // defect count to minimize while the registry and its evaluator define it as
+  // a connectivity ratio to maximize — so a correct criterion was rejected and
+  // an inverted one demanded.
+  const definition = METRIC_REGISTRY.get(metricId(criterion.metric));
+  if (!definition || criterion.operator === undefined) return;
+  if (definition.direction === "minimize" && criterion.operator === "at_least") {
+    ctx.addIssue({ code: "custom", path: ["operator"],
+      message: `${criterion.metric} is minimize; at_least would demand more of a defect count` });
   }
-  if ((criterion.metric === "landmark_coverage_ratio" || criterion.metric === "landmark_citation_coverage_ratio") && criterion.operator !== "at_least") {
-    ctx.addIssue({ code: "custom", path: ["operator"], message: `${criterion.metric} requires operator at_least` });
+  if (definition.direction === "maximize" && criterion.operator === "at_most") {
+    ctx.addIssue({ code: "custom", path: ["operator"],
+      message: `${criterion.metric} is maximize; at_most would cap an objective it should raise` });
   }
 });
 
 /** Normalize plans written before directional criteria were introduced.
- * Direction is unambiguous for the five directional metrics; preserving that
- * meaning here keeps durable in-flight plans resumable without weakening the
- * strict post-normalization contract. */
+ *
+ * The direction is the registry's, so every registered metric gets the right
+ * comparison and a newly registered one needs no edit here. */
 export const AcceptanceCriterion = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const criterion = value as Record<string, unknown>;
   if (criterion.operator !== undefined || typeof criterion.metric !== "string") return value;
-  if (["claim_contradictions", "prose_redundancy", "diagram_connectivity"].includes(criterion.metric)) {
-    return { ...criterion, operator: "at_most" };
-  }
-  if (["landmark_coverage_ratio", "landmark_citation_coverage_ratio"].includes(criterion.metric)) {
-    return { ...criterion, operator: "at_least" };
-  }
-  return value;
+  const definition = METRIC_REGISTRY.get(metricId(criterion.metric));
+  if (!definition) return value;
+  return { ...criterion, operator: definition.direction === "minimize" ? "at_most" : "at_least" };
 }, AcceptanceCriterionObject);
 
-/** The only content an agentic planner may choose. Tool authorization lives in
- * MalaClaw's workflow catalog; this file makes planner output durable,
- * inspectable, and safe to hand to that catalog. */
+/** What an agentic planner may choose: scholarly judgment, never routing.
+ *
+ * v2 takes STRUCTURED findings — the same shape the producers emit — and
+ * actions that name finding ids without naming a tool. The capability is
+ * resolved from each finding's (gate, artifact kind, required effect) triple
+ * by the registry, because letting a planner pick the tool is how a prose
+ * defect reached a figure generator. A prose summary carried no triple to
+ * route on, which is why v1 had to be told. */
 export const AgenticActionPlan = z.object({
-  version: z.literal(1),
-  findings: z.array(z.object({
-    id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-    severity: z.enum(["minor", "major", "critical"]),
-    summary: z.string().min(1).max(8_000),
-  }).strict()).max(100),
+  version: z.literal(2),
+  findings: z.array(FindingSchema).max(100),
   actions: z.array(z.object({
     id: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-    tool: z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
     finding_ids: z.array(z.string().min(1)).min(1).max(30),
     rationale: z.string().min(1).max(8_000),
+    /** What the planner believes should be done. Advisory: the registry
+     * resolves the capability, and this is compared against it rather than
+     * trusted. */
+    proposed_effect: z.string().min(1).optional(),
     acceptance_criteria: z.array(AcceptanceCriterion).min(1).max(5).default([]),
   }).strict()).max(20),
 }).strict().superRefine((plan, ctx) => {
@@ -83,6 +99,19 @@ function criterionText(criterion: z.infer<typeof AcceptanceCriterion>): string {
   return `${criterion.metric}${criterion.scope ? `(${criterion.scope})` : ""} ${symbol} ${criterion.target}`;
 }
 
+/** A criterion whose operator follows the metric's registered direction.
+ *
+ * Written once so no call site can invert a metric by hand. */
+function directional(
+  metric: string, target: number, scope: string,
+): z.infer<typeof AcceptanceCriterion> {
+  const definition = METRIC_REGISTRY.get(metricId(metric));
+  return AcceptanceCriterion.parse({
+    metric, target, scope,
+    operator: definition?.direction === "minimize" ? "at_most" : "at_least",
+  }) as never;
+}
+
 export async function gateAcceptanceCriterion(
   workspaceDir: string,
   gateId: string,
@@ -94,10 +123,19 @@ export async function gateAcceptanceCriterion(
       ? { metric: "landmark_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_coverage_ratio, scope: "evidence-backed A/B landmark corpus" }
       : { metric: "landmark_citation_coverage_ratio", operator: "at_least", target: config.research.corpus_gates.min_landmark_citation_coverage_ratio, scope: "landmark works cited in chapters/*.md" };
   }
-  if (gateId === "claim_contradictions") return { metric: "claim_contradictions", operator: "at_most", target: 0, scope: "cross-chapter affirm/deny groups" };
-  if (gateId === "prose_redundancy") return { metric: "prose_redundancy", operator: "at_most", target: 0, scope: "configured tracked-phrase and repeated-ngram findings" };
-  if (gateId === "diagram_connectivity" || gateId === "publication_figures") return { metric: "diagram_connectivity", operator: "at_most", target: 0, scope: "disconnected loop-captioned diagrams" };
-  if (repairRouteForGate(gateId).preferred === "revise_visual_plan") return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
+  if (gateId === "claim_contradictions") return directional("claim_contradictions", 0, "cross-chapter affirm/deny groups");
+  if (gateId === "prose_redundancy") return directional("prose_redundancy", 0, "configured tracked-phrase and repeated-ngram findings");
+  // A connectivity RATIO the registry declares as maximize. Hardcoding
+  // `at_most 0` here produced a criterion this file's own schema rejects —
+  // the generator could emit a plan its parser refused.
+  if (gateId === "diagram_connectivity" || gateId === "publication_figures") {
+    return directional("diagram_connectivity", 1, "mean connectivity of loop-captioned diagrams");
+  }
+  // An OWNERSHIP question, which the registry answers exactly: does any of
+  // this gate's declared repairs belong to the visual capability? The old
+  // table answered a preference question instead, and its default sent every
+  // unclassified gate to prose.
+  if (gateOwnedByCapability(gateId, "revise_visual_plan")) return { metric: "rendered_visual_review", operator: "equals", target: 1, scope: "fresh rebuilt and rendered PDF review" };
   if (gateId === "claim_support") return { metric: "claim_support", operator: "at_least", target: 0.9, scope: "fresh independently double-reviewed claim sample" };
   if (gateId === "review_target") return { metric: "review_score", operator: "at_least", target: 8, scope: "fresh independent multi-persona review" };
   return { metric: "citation_depth_per_section", operator: "at_least", target: 1, scope: "sections named by the current release assessment" };
@@ -114,31 +152,87 @@ function unwrapFence(raw: string): { content: string; normalized: boolean } {
  * table/visual-plan writer twice would race on the same placement-plan.json.
  * Coalesce duplicates deterministically instead of rejecting an otherwise
  * valid remediation plan and wasting an entire review round. */
+/** The capability that will run an action, resolved from its findings.
+ *
+ * Every finding in one action must resolve to the same capability: an action
+ * mixing a prose repair and a figure repair is two pieces of work sharing an
+ * id, and whichever capability ran it would be acting outside its envelope for
+ * half of them. */
+export function capabilityOf(
+  plan: Pick<AgenticActionPlan, "findings">, action: { id: string; finding_ids: string[] },
+): string {
+  const byId = new Map(plan.findings.map((finding) => [finding.id, finding]));
+  const capabilities = new Set<string>();
+  for (const id of action.finding_ids) {
+    const finding = byId.get(id);
+    if (!finding) continue;
+    capabilities.add(String(REGISTRY.resolveCapability({
+      gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+    })));
+  }
+  if (capabilities.size === 0) {
+    throw new Error(`action ${action.id} names no finding this registry can route`);
+  }
+  if (capabilities.size > 1) {
+    throw new Error(`action ${action.id} mixes capabilities: ${[...capabilities].sort().join(", ")}`);
+  }
+  return [...capabilities][0]!;
+}
+
+/** One dispatch instance per capability, objective, and scope.
+ *
+ * Sharing a capability only says two findings may touch the same artifact; it
+ * does not say they have the same success condition.  Coalescing by tool made
+ * two taxonomy cells into one action that materialization correctly refused,
+ * and worse, made a prose action with distinct metrics enter the attempt
+ * ledger under whichever finding happened to be first.  Split before merging
+ * so the kernel can serialize overlapping envelopes while diagnosis retains a
+ * one-to-one objective lineage. */
 function mergeDuplicateToolActions(plan: AgenticActionPlan): { plan: AgenticActionPlan; merged: string[] } {
-  const byTool = new Map<string, AgenticActionPlan["actions"][number]>();
+  const byId = new Map(plan.findings.map((finding) => [finding.id, finding]));
+  const byObjective = new Map<string, AgenticActionPlan["actions"][number]>();
   const actions: AgenticActionPlan["actions"] = [];
   const merged = new Set<string>();
   for (const action of plan.actions) {
-    const earlier = byTool.get(action.tool);
-    if (!earlier) {
-      const copy = { ...action, finding_ids: [...action.finding_ids] };
-      byTool.set(copy.tool, copy);
-      actions.push(copy);
-      continue;
+    const partitions = new Map<string, string[]>();
+    for (const findingId of action.finding_ids) {
+      const finding = byId.get(findingId);
+      if (!finding) continue;
+      const capability = capabilityOf(plan, { ...action, finding_ids: [findingId] });
+      const objective = finding.acceptance_metric === null
+        ? `gate:${String(finding.gate_id)}` : `metric:${String(finding.acceptance_metric)}`;
+      const key = `${capability}\u0000${objective}\u0000${finding.objective_scope_key}`;
+      partitions.set(key, [...(partitions.get(key) ?? []), findingId]);
     }
-    earlier.finding_ids = [...new Set([...earlier.finding_ids, ...action.finding_ids])];
-    const combined = `${earlier.rationale}\n\nAlso address: ${action.rationale}`;
-    earlier.rationale = combined.length <= 8_000
-      ? combined
-      : `${combined.slice(0, 7_800).trimEnd()}\n\n[Additional rationale truncated by bounded plan repair.]`;
-    // The durable action-plan contract allows at most five criteria. A routed
-    // citation-weaving action can merge into an existing revision action, so
-    // preserve the earliest distinct criteria deterministically instead of
-    // turning an otherwise valid plan into a schema failure.
-    earlier.acceptance_criteria = [...earlier.acceptance_criteria, ...action.acceptance_criteria]
-      .filter((criterion, index, all) => all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(criterion)) === index)
-      .slice(0, 5);
-    merged.add(action.tool);
+    for (const [partitionKey, findingIds] of partitions) {
+      const [capability, objective] = partitionKey.split("\u0000");
+      const earlier = byObjective.get(partitionKey);
+      if (!earlier) {
+        const suffix = partitions.size === 1 ? "" : `-${actions.length + 1}`;
+        const matchingCriteria = objective.startsWith("metric:")
+          ? action.acceptance_criteria.filter((criterion) => criterion.metric === objective.slice("metric:".length))
+          : action.acceptance_criteria;
+        // The planner's criteria are advisory; the materialized contract is
+        // derived from the finding. Preserve one declared criterion when a
+        // legacy plan omitted the finding's metric so normalization remains a
+        // valid migration, while never carrying unrelated criteria into a
+        // split objective when an exact one is present.
+        const copy = { ...action, id: `${action.id}${suffix}`, finding_ids: findingIds,
+          acceptance_criteria: matchingCriteria.length > 0 ? matchingCriteria : [action.acceptance_criteria[0]!] };
+        byObjective.set(partitionKey, copy);
+        actions.push(copy);
+        continue;
+      }
+      earlier.finding_ids = [...new Set([...earlier.finding_ids, ...findingIds])];
+      const combined = `${earlier.rationale}\n\nAlso address: ${action.rationale}`;
+      earlier.rationale = combined.length <= 8_000
+        ? combined
+        : `${combined.slice(0, 7_800).trimEnd()}\n\n[Additional rationale truncated by bounded plan repair.]`;
+      earlier.acceptance_criteria = [...earlier.acceptance_criteria, ...action.acceptance_criteria]
+        .filter((criterion, index, all) => all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(criterion)) === index)
+        .slice(0, 5);
+      merged.add(capability!);
+    }
   }
   return { plan: AgenticActionPlan.parse({ ...plan, actions }), merged: [...merged] };
 }
@@ -278,6 +372,113 @@ async function failedReleaseGateIds(workspaceDir: string): Promise<Set<string>> 
  * configured release target, first ask the editor to weave that evidence.
  * This prevents unnecessary live recall while retaining expansion for a real
  * capacity shortfall. */
+/** Structured findings the deterministic validators emitted for failed checks.
+ *
+ * These already exist in `reports/longwrite-validation.json`; the previous
+ * contract ignored them and synthesized prose summaries keyed by gate id
+ * instead, which is why routing needed a hand-maintained table. A finding
+ * carries its own (gate, artifact kind, required effect) triple, so it routes
+ * itself. */
+export async function structuredFindingsFromValidation(workspaceDir: string): Promise<Finding[]> {
+  // Both reports, because the same validator writes both: the full validation
+  // report and the release-gate summary derived from it. Reading only one made
+  // enrichment depend on which of the two a workspace happened to have.
+  const sources: Array<{ pass?: boolean; findings?: unknown[] }> = [];
+  for (const [rel, key] of [["longwrite-validation.json", "checks"], ["release-gates.json", "gates"]] as const) {
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(workspaceDir, "reports", rel), "utf-8");
+    } catch (error) {
+      // The strict final-release validator gives the actionable error when its
+      // authoritative report is unavailable; enrichment stays conservative.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const entry of (parsed[key] as Array<{ pass?: boolean; findings?: unknown[] }> | undefined) ?? []) {
+      sources.push(entry);
+    }
+  }
+  const findings: Finding[] = [];
+  const seen = new Set<string>();
+  for (const check of sources) {
+    if (check.pass !== false) continue;
+    for (const raw of check.findings ?? []) {
+      const parsed = FindingSchema.safeParse(raw);
+      // A malformed finding is not silently repaired into a routable one: the
+      // producer that emitted it is the thing to fix.
+      if (!parsed.success || seen.has(parsed.data.id)) continue;
+      seen.add(parsed.data.id);
+      findings.push(parsed.data);
+    }
+  }
+  return findings;
+}
+
+/** Groups findings by the capability the registry resolves for each, so a
+ * required repair is synthesized per capability rather than per gate. */
+/** The criterion a finding's own objective implies.
+ *
+ * The finding names the metric it moves; the configured gate supplies the
+ * target. Deriving the criterion from the GATE instead collapsed a compound
+ * gate's several objectives into one — a repair that fixed recency could then
+ * claim to have fixed venue mix. A finding with no metric falls back to the
+ * gate's criterion, which is where verification-style objectives live. */
+export async function criterionForFinding(
+  workspaceDir: string, finding: Finding,
+): Promise<z.infer<typeof AcceptanceCriterion>> {
+  const metric = finding.acceptance_metric === null ? null : String(finding.acceptance_metric);
+  if (metric === null) return gateAcceptanceCriterion(workspaceDir, String(finding.gate_id));
+  const config = await loadProjectConfig(workspaceDir).catch(() => null);
+  const release = config?.research.release_gates;
+  const corpusGates = config?.research.corpus_gates;
+  const scope = finding.objective_scope_key || undefined;
+  const targets: Record<string, number> = {
+    cited_sources: release?.min_cited_sources ?? 1,
+    accepted_cited_ratio: release?.min_accepted_cited_ratio ?? 0,
+    citations_per_page: release?.min_citations_per_page ?? 1,
+    landmark_coverage_ratio: corpusGates?.min_landmark_coverage_ratio ?? 1,
+    landmark_citation_coverage_ratio: corpusGates?.min_landmark_citation_coverage_ratio ?? 1,
+    claim_support: 0.9,
+    review_score: 8,
+    rendered_visual_review: 1,
+    claim_contradictions: 0,
+    prose_redundancy: 0,
+    // A connectivity RATIO, not a defect count: fully connected is 1.
+    diagram_connectivity: 1,
+  };
+  const target = targets[metric];
+  // A metric with no configured target is not given an invented one: the
+  // gate's own criterion is the honest fallback.
+  if (target === undefined) return gateAcceptanceCriterion(workspaceDir, String(finding.gate_id));
+  // The operator follows from the metric's declared DIRECTION, which the
+  // registry knows for every metric. The schema's preprocess fills it in for a
+  // hand-listed few; deriving it means a newly registered metric arrives with
+  // the right comparison instead of none.
+  const definition = METRIC_REGISTRY.get(metricId(metric));
+  const operator = definition?.direction === "minimize" ? "at_most" as const : "at_least" as const;
+  return AcceptanceCriterion.parse({ metric, target, operator, ...(scope ? { scope } : {}) }) as never;
+}
+
+export function byCapability(findings: Finding[]): Map<string, Finding[]> {
+  const grouped = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    let capability: string;
+    try {
+      capability = String(REGISTRY.resolveCapability({
+        gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+      }));
+    } catch {
+      // Unrouted findings go to diagnosis, never to whichever capability
+      // seemed closest. Skipping here leaves the strict validator to report
+      // the uncovered failure.
+      continue;
+    }
+    grouped.set(capability, [...(grouped.get(capability) ?? []), finding]);
+  }
+  return grouped;
+}
+
 async function routeCitationWeavingActions(
   workspaceDir: string,
   plan: AgenticActionPlan,
@@ -294,85 +495,92 @@ async function routeCitationWeavingActions(
   if (!corpusPass) return { plan, rerouted: [], required: [] };
 
   // A planner may carry an operator-authorized ratio stricter than the
-  // project default.  Treat it as a real evidence-capacity constraint: a
+  // project default. Treat it as a real evidence-capacity constraint: a
   // prose-only revision cannot make more cited records accepted.
   const requiredAcceptedRatio = Math.max(0, ...plan.actions.flatMap((action) => action.acceptance_criteria
     .filter((criterion) => criterion.metric === "accepted_cited_ratio")
     .map((criterion) => criterion.target)));
   const capacity = await evidenceCapacity(workspaceDir, requiredAcceptedRatio);
-  const failedGates = await failedReleaseGateIds(workspaceDir);
-  const findings = [...plan.findings];
-  for (const id of ["cited_literature_release_gates", "rendered_visual_review"]) {
-    if (failedGates.has(id) && !findings.some((finding) => finding.id === id)) {
-      findings.push({
-        id,
-        severity: "critical",
-        summary: `Deterministic final-release validation reports ${id} as failing; select its concrete repair action.`,
-      });
-    }
-  }
+
+  // Structured findings the validators actually emitted, added to the plan so
+  // an action can name them. The planner's own findings are kept as-is.
+  const known = new Set(plan.findings.map((finding) => finding.id));
+  const emitted = (await structuredFindingsFromValidation(workspaceDir))
+    .filter((finding) => !known.has(finding.id));
+  const findings = [...plan.findings, ...emitted];
 
   const rerouted: string[] = [];
   const required: string[] = [];
-  const evidenceFindingIds = new Set(["cited_literature_release_gates", "citation_evidence_ledger", "claim_support"]);
-  const citationRepairMetrics = new Set(["cited_sources", "citations_per_page", "citation_depth_per_section", "accepted_cited_ratio", "cited_arxiv_only_ratio"]);
-  const actions = plan.actions.map((action) => {
-    const isCitationWeaving = action.tool === "targeted_research_expansion"
-      && (action.acceptance_criteria.some((criterion) => citationRepairMetrics.has(criterion.metric))
-        || action.finding_ids.some((id) => evidenceFindingIds.has(id)));
-    if (!isCitationWeaving || capacity.requiresExpansion) return action;
-    rerouted.push(action.id);
-    return {
-      ...action,
-      tool: "revise_sections",
-      rationale: `The deterministic corpus gates already pass, so this is a citation-weaving repair rather than a prerequisite retrieval task. Reuse the current packet-backed corpus before requesting new live recall. ${action.rationale}`,
-    };
+
+  // Reclassification, not rerouting. With the corpus gates already passing and
+  // capacity adequate, a citation defect typed as evidence ACQUISITION is
+  // mis-typed: the sources exist and the repair is weaving them into prose.
+  // Under v2 the capability follows the finding, so the honest correction is
+  // to the finding — retyping it is what re-points the work.
+  const reclassified = findings.map((finding) => {
+    if (capacity.requiresExpansion) return finding;
+    const capability = String(REGISTRY.resolveCapability({
+      gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+    }));
+    if (capability !== "targeted_research_expansion") return finding;
+    rerouted.push(finding.id);
+    return FindingSchema.parse({
+      ...finding,
+      gate_id: "cited_literature_release_gates",
+      artifact: { kind: "chapter_prose", path: "chapters/section-01.md" },
+      required_effect: "add_supporting_citation",
+      acceptance_metric: "cited_sources",
+      diagnostic: `${finding.diagnostic} Corpus gates already pass, so this is a citation-weaving repair rather than a prerequisite retrieval task.`.slice(0, 8_000),
+    });
   });
-  const selectedEvidenceFindings = findings
-    .filter((finding) => evidenceFindingIds.has(finding.id))
-    .map((finding) => finding.id);
-  if (capacity.requiresExpansion && selectedEvidenceFindings.length > 0 && !actions.some((action) => action.tool === "targeted_research_expansion")) {
-    required.push("targeted_research_expansion");
+  findings.splice(0, findings.length, ...reclassified);
+
+  // Expansion repairs corpus capacity; it never writes the citation into a
+  // chapter. So an acquisition finding for a citation gate carries a companion
+  // weaving finding: without it a recovery round can retrieve sources, change
+  // no prose, and still claim the round did something.
+  const companions: Finding[] = [];
+  for (const finding of findings) {
+    const capability = String(REGISTRY.resolveCapability({
+      gate: finding.gate_id, kind: finding.artifact.kind, effect: finding.required_effect,
+    }));
+    if (capability !== "targeted_research_expansion") continue;
+    const companionId = `${finding.id}-weave`;
+    if (findings.some((candidate) => candidate.id === companionId)) continue;
+    companions.push(FindingSchema.parse({
+      ...finding,
+      id: companionId,
+      gate_id: "cited_literature_release_gates",
+      artifact: { kind: "chapter_prose", path: "chapters/section-01.md" },
+      required_effect: "add_supporting_citation",
+      acceptance_metric: "cited_sources",
+      diagnostic: `${finding.diagnostic} Once the sources are acquired, the manuscript still has to cite them: expansion alone cannot repair manuscript citations.`.slice(0, 8_000),
+    }));
+  }
+  findings.push(...companions);
+
+  const actions = [...plan.actions];
+  const covered = new Set(actions.flatMap((action) => action.finding_ids));
+
+  // One required action per capability that owns an uncovered failed finding.
+  // No gate-level preference is consulted, because each finding routes itself.
+  for (const [capability, group] of byCapability(findings.filter((finding) => !covered.has(finding.id)))) {
+    required.push(capability);
     actions.push({
-      id: "required-evidence-capacity-expansion",
-      tool: "targeted_research_expansion",
-      finding_ids: selectedEvidenceFindings,
-      rationale: `Current packet-backed evidence cannot meet the configured release target: ${capacity.reasons.join("; ")}. Expand bounded research, then refresh classification, full text, evidence extraction, and section allocation before revising prose.`,
-      acceptance_criteria: [capacity.citedSourceTarget > 0
-        ? { metric: "cited_sources" as const, target: capacity.citedSourceTarget, scope: "configured release-gate capacity" }
-        : { metric: "citation_depth_per_section" as const, target: 1, scope: "configured release-gate depth capacity" }],
+      id: `required-${capability.replace(/_/g, "-")}`,
+      finding_ids: group.map((finding) => finding.id).slice(0, 30),
+      rationale: capability === "targeted_research_expansion"
+        ? `Current packet-backed evidence cannot meet the configured release target: ${capacity.reasons.join("; ")}. Expand bounded research, then refresh classification, full text, evidence extraction, and section allocation before revising prose.`
+        : `These deterministic release failures route to ${capability}. Repair exactly the named findings, preserve every configured release threshold, and use current packet-backed evidence.`,
+      acceptance_criteria: (await Promise.all(
+        group.slice(0, 5).map((finding) => criterionForFinding(workspaceDir, finding)))),
     });
   }
-  // Expansion repairs corpus capacity, never the prose itself.  Whether the
-  // current packets were sufficient or were just refreshed, a failed ledger
-  // or cited-manuscript gate always needs a bounded section revision before a
-  // recovery round may claim progress.
-  if (selectedEvidenceFindings.length > 0 && !actions.some((action) => action.tool === "revise_sections")) {
-    required.push("revise_sections");
-    actions.push({
-      id: "required-corpus-backed-citation-revision",
-      tool: "revise_sections",
-      finding_ids: selectedEvidenceFindings,
-      rationale: capacity.requiresExpansion
-        ? "After the selected evidence expansion and packet refresh, revise every affected chapter using the refreshed packet-backed sources, remove unsupported citations, and record exact locators. Expansion alone cannot repair manuscript citations."
-        : "Corpus gates already pass, so the final-release evidence and citation-depth failures require a chapter revision that weaves existing packet-backed sources, removes unsupported citations, and records locators. Research expansion alone cannot repair manuscript citations.",
-      acceptance_criteria: [{ metric: "citation_depth_per_section", target: 1, scope: "sections named by the current release assessment" }],
-    });
-  }
-  const visualFindingIds = findings.filter((finding) => finding.id === "rendered_visual_review").map((finding) => finding.id);
-  if (visualFindingIds.length > 0 && !actions.some((action) => action.tool === "revise_visual_plan")) {
-    required.push("revise_visual_plan");
-    actions.push({
-      id: "required-rendered-visual-repair",
-      tool: "revise_visual_plan",
-      finding_ids: visualFindingIds,
-      rationale: "A rendered visual-review failure requires a concrete figure/table placement and layout repair, followed by a fresh PDF render and visual review. An outline rewrite cannot alter the placed visual artifact by itself.",
-      acceptance_criteria: [{ metric: "rendered_visual_review", target: 1, scope: "fresh rendered PDF review" }],
-    });
-  }
+
   const merged = mergeDuplicateToolActions(AgenticActionPlan.parse({ ...plan, findings, actions }));
   return { plan: merged.plan, rerouted, required };
 }
+
 
 /** Repair only a full JSON Markdown fence. It never invents actions, drops
  * findings, or loosens the action schema; malformed semantic output remains a
@@ -437,108 +645,53 @@ export async function enrichFinalReleaseActionPlan(workspaceDir: string): Promis
   const plan = AgenticActionPlan.parse(JSON.parse(raw));
   const routed = await routeCitationWeavingActions(workspaceDir, plan);
   let enriched = routed.plan;
-  // Unlike citation-capacity routing, these obligations require no corpus
-  // inference.  Their failed IDs come directly from final validation, so they
-  // must be executable even in a small/partially migrated workspace where a
-  // corpus-gate report is not present.
-  let failedIds = new Set<string>();
-  try {
-    const validation = JSON.parse(await fs.readFile(path.join(workspaceDir, "reports", "longwrite-validation.json"), "utf-8")) as {
-      checks?: Array<{ id?: unknown; pass?: unknown }>;
-    };
-    failedIds = new Set((validation.checks ?? [])
-      .filter((check) => check.pass === false && typeof check.id === "string")
-      .map((check) => check.id as string));
-  } catch {
-    // The strict final-release validator will give the actionable error if
-    // its authoritative report is unavailable or malformed.
-  }
-  const findings = [...enriched.findings];
+
+  // Every failed check's structured findings, whether or not the planner
+  // named them. A planner that ignores a failed gate still gets the executable
+  // repair, and the capability comes from the finding's own triple rather than
+  // from a gate-level preference.
+  const emitted = await structuredFindingsFromValidation(workspaceDir);
+  const known = new Set(enriched.findings.map((finding) => finding.id));
+  const findings = [...enriched.findings, ...emitted.filter((finding) => !known.has(finding.id))];
   const actions = [...enriched.actions];
-  // Do not manufacture a diagnosis a planner never named: strict validation
-  // must still catch a plan that silently ignores a failed release gate.
-  // Once a planner has acknowledged a deterministic prose failure, though,
-  // the executable prose repair is non-discretionary.
-  const namedFindings = new Set(findings.map((finding) => finding.id));
-  // A review-score deficit may be wholly caused by a blocking rendered
-  // visual defect. The deterministic generator records that ownership on the
-  // visual action with both the review_target finding and its exact score
-  // criterion. Preserve that routing here instead of manufacturing a second,
-  // unrelated manuscript rewrite during enrichment.
-  const visuallyOwnedReviewTarget = actions.some((action) =>
-    action.tool === "revise_visual_plan"
-    && action.finding_ids.includes("review_target")
-    && action.acceptance_criteria.some((criterion) => criterion.metric === "review_score" && criterion.target >= 8));
-  const proseIds = [...failedIds].filter((id) => namedFindings.has(id)
-    && repairRouteForGate(id).preferred === "revise_sections"
-    && !(id === "review_target" && visuallyOwnedReviewTarget));
-  const proseMissing = proseIds.filter((id) => !actions.some((action) => action.tool === "revise_sections" && action.finding_ids.includes(id)));
-  if (proseMissing.length > 0) {
-    const criteria = await Promise.all(proseMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
+  const covered = new Set(actions.flatMap((action) => action.finding_ids));
+  const added: string[] = [];
+
+  for (const [capability, group] of byCapability(findings.filter((finding) => !covered.has(finding.id)))) {
+    added.push(capability);
     actions.push({
-      id: "required-final-release-prose-repair",
-      tool: "revise_sections",
-      finding_ids: proseMissing,
-      rationale: "These deterministic release failures require an evidence-backed manuscript revision. Preserve all configured release thresholds, use the current packet-backed evidence, and narrow or remove claims that cannot be supported.",
-      acceptance_criteria: criteria.slice(0, 5),
+      id: `required-final-release-${capability.replace(/_/g, "-")}`,
+      finding_ids: group.map((finding) => finding.id).slice(0, 30),
+      rationale: `These deterministic release failures route to ${capability}. Repair exactly the named findings using current packet-backed evidence, preserve every configured release threshold, and narrow or remove claims that cannot be supported.`,
+      acceptance_criteria: (await Promise.all(
+        group.slice(0, 5).map((finding) => criterionForFinding(workspaceDir, finding)))),
     });
   }
-  const explicitResearchIds = [...failedIds].filter((id) => namedFindings.has(id)
-    && repairRouteForGate(id).preferred === "targeted_research_expansion");
-  const researchMissing = explicitResearchIds.filter((id) => !actions.some((action) =>
-    action.finding_ids.includes(id) && gateOwnedByTool(id, action.tool)));
-  if (researchMissing.length > 0) {
-    const criteria = await Promise.all(researchMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
-    actions.unshift({
-      id: "required-final-release-research-repair",
-      tool: "targeted_research_expansion",
-      finding_ids: researchMissing,
-      rationale: "These deterministic coverage failures require bounded, finding-specific evidence acquisition before any manuscript revision. Target only the missing works or coverage cells named by the release report.",
-      acceptance_criteria: criteria.slice(0, 5),
-    });
-  }
-  // Preserve the validator's actual quantitative contract on the executable
-  // prose action. A generic depth criterion is not a substitute for a failed
-  // distinct-source or review-score target; without this adapter an editor can
-  // complete its declared action while leaving the gate unchanged.
-  const proseAction = actions.find((action) => action.tool === "revise_sections");
-  if (proseAction) {
-    const exact: AgenticActionPlan["actions"][number]["acceptance_criteria"] = [];
-    if (failedIds.has("cited_literature_release_gates")) {
-      const config = await loadProjectConfig(workspaceDir);
-      exact.push({ metric: "cited_sources", target: config.research.release_gates.min_cited_sources, scope: "distinct sources cited in chapters/*.md" });
-      if (config.research.release_gates.min_accepted_cited_ratio > 0) {
-        exact.push({ metric: "accepted_cited_ratio", target: config.research.release_gates.min_accepted_cited_ratio, scope: "distinct sources cited in chapters/*.md" });
-      }
-    }
-    if (failedIds.has("review_target") && !visuallyOwnedReviewTarget) exact.push({ metric: "review_score", target: 8, scope: "fresh independent multi-persona review" });
-    proseAction.acceptance_criteria = [...exact, ...proseAction.acceptance_criteria]
-      .filter((criterion, index, all) => all.findIndex((candidate) => candidate.metric === criterion.metric && candidate.scope === criterion.scope) === index)
+
+  // Every action carries the quantitative contract its own findings imply.
+  // A planner may name a plausible criterion that is not the one the validator
+  // will check; the executable action has to carry the real threshold, or it
+  // can be completed while the gate stays shut.
+  const withCriteria = await Promise.all(actions.map(async (action) => {
+    const own = findings.filter((finding) => action.finding_ids.includes(finding.id));
+    const derived = await Promise.all(own.map((finding) => criterionForFinding(workspaceDir, finding)));
+    const combined = [...derived, ...action.acceptance_criteria]
+      .filter((criterion, index, all) => all.findIndex((candidate) =>
+        candidate.metric === criterion.metric && candidate.scope === criterion.scope) === index)
       .slice(0, 5);
-  }
-  const explicitVisualIds = [...failedIds].filter((id) => namedFindings.has(id)
-    && repairRouteForGate(id).preferred === "revise_visual_plan");
-  const visualMissing = explicitVisualIds.filter((id) => !actions.some((action) =>
-    action.finding_ids.includes(id) && gateOwnedByTool(id, action.tool)));
-  if (visualMissing.length > 0) {
-    const criteria = await Promise.all(visualMissing.map((id) => gateAcceptanceCriterion(workspaceDir, id)));
-    actions.push({
-      id: "required-final-release-visual-repair",
-      tool: "revise_visual_plan",
-      finding_ids: visualMissing,
-      rationale: "A failed rendered visual review requires a durable figure/table placement or layout repair and a fresh rendered-PDF review; it cannot be waived by a planner posture.",
-      acceptance_criteria: criteria.slice(0, 5),
-    });
-  }
-  enriched = mergeDuplicateToolActions(AgenticActionPlan.parse({ ...enriched, findings, actions })).plan;
+    return { ...action, acceptance_criteria: combined };
+  }));
+
+  enriched = mergeDuplicateToolActions(AgenticActionPlan.parse({ ...enriched, findings, actions: withCriteria })).plan;
   const before = JSON.stringify(plan);
   const after = JSON.stringify(enriched);
   if (before !== after) {
     await fs.writeFile(`${target}.pre-final-release-enrichment.json`, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
     await fs.writeFile(target, `${JSON.stringify(enriched, null, 2)}\n`, "utf-8");
   }
-  return { added: [...routed.required, ...(researchMissing.length > 0 ? ["targeted_research_expansion"] : []), ...(proseMissing.length > 0 ? ["revise_sections"] : []), ...(visualMissing.length > 0 ? ["revise_visual_plan"] : [])] };
+  return { added: [...new Set([...routed.required, ...added])] };
 }
+
 
 /** Preserve one LLM decision record while dispatching it in dependency order:
  * research refresh first, then structural rewrite, then prose/visual repair.
@@ -549,17 +702,46 @@ export async function splitAgenticActionPlan(workspaceDir: string, actionPlanPat
   const validated = AgenticActionPlan.parse(JSON.parse(raw));
   const routed = await routeCitationWeavingActions(workspaceDir, validated);
   const plan = routed.plan;
-  const groups: Array<[string, Set<string>]> = [
-    ["research-action-plan.json", new Set(["targeted_research_expansion"])],
-    ["outline-action-plan.json", new Set(["reopen_outline"])],
-    ["revision-action-plan.json", new Set(["revise_sections", "revise_visual_plan", "request_operator_clarification"])],
-  ];
+  // DERIVED from the phase table, never restated here. The splitter choosing
+  // its own filenames and each dispatcher choosing one independently is what
+  // let a capability's actions be written to a file nothing read — and a
+  // capability in no group at all be dropped between validation and dispatch
+  // with nothing reporting it. `registry/phases.ts` refuses at load time to
+  // leave a registered capability unrouted, so the check that used to live here
+  // now runs wherever a capability is added.
+  const groups: Array<[string, Set<string>]> = phaseRoutes().map((route) =>
+    [route.planPath, new Set(capabilitiesOfPhase(route.phase))]);
   const written: string[] = [];
   await fs.mkdir(path.join(workspaceDir, "reviews"), { recursive: true });
+  // Grouped by the capability the registry RESOLVES for each action, so an
+  // action lands in the phase that matches what will actually run it.
+  const capabilityFor = (action: AgenticActionPlan["actions"][number]): string => capabilityOf(plan, action);
   for (const [name, tools] of groups) {
-    const subset = AgenticActionPlan.parse({ ...plan, actions: plan.actions.filter((action) => tools.has(action.tool)) });
-    const rel = `reviews/${name}`;
-    await fs.writeFile(path.join(workspaceDir, rel), `${JSON.stringify(subset, null, 2)}\n`, "utf-8");
+    const selected = plan.actions.filter((action) => tools.has(capabilityFor(action)));
+    // Translated into the KERNEL's dispatch format at the boundary. MrMaLiang's
+    // planner contract is structured findings with registry-resolved routing;
+    // the engine's ActionPlan is a different contract that dispatches on a
+    // tool id and shows an operator a summary. This is the one place the
+    // capability becomes that tool — resolved from the finding, never chosen.
+    const dispatchPlan = {
+      version: 1,
+      findings: plan.findings
+        .filter((finding) => selected.some((action) => action.finding_ids.includes(finding.id)))
+        .map((finding) => ({
+          id: finding.id,
+          severity: finding.severity,
+          summary: finding.diagnostic.slice(0, 8_000),
+        })),
+      actions: selected.map((action) => ({
+        id: action.id,
+        tool: capabilityFor(action),
+        finding_ids: action.finding_ids,
+        rationale: action.rationale,
+        acceptance_criteria: action.acceptance_criteria,
+      })),
+    };
+    const rel = name;
+    await fs.writeFile(path.join(workspaceDir, rel), `${JSON.stringify(dispatchPlan, null, 2)}\n`, "utf-8");
     written.push(rel);
   }
   const reportPath = "reports/action-plan-split.md";
@@ -571,7 +753,7 @@ export async function splitAgenticActionPlan(workspaceDir: string, actionPlanPat
     "- Prose/visual actions run last, using the current section evidence packets.",
     ...(routed.rerouted.length > 0 ? [`- Citation-weaving actions rerouted from live expansion to section revision because corpus gates passed: ${routed.rerouted.join(", ")}.`] : []),
     ...(routed.required.length > 0 ? [`- Required corpus-backed release repairs added: ${routed.required.join(", ")}.`] : []),
-    ...groups.map(([name, tools]) => `- ${name}: ${plan.actions.filter((action) => tools.has(action.tool)).map((action) => action.tool).join(", ") || "none"}`), "",
+    ...groups.map(([name, tools]) => `- ${name}: ${plan.actions.filter((action) => tools.has(capabilityFor(action))).map(capabilityFor).join(", ") || "none"}`), "",
   ].join("\n"), "utf-8");
   return { reportPath, written: [...written, reportPath] };
 }
@@ -583,7 +765,7 @@ export async function splitAgenticActionPlan(workspaceDir: string, actionPlanPat
 export async function writeOperatorClarificationRequest(workspaceDir: string, actionPlanPath = "reviews/action-plan.json"): Promise<string> {
   const raw = await fs.readFile(path.join(workspaceDir, actionPlanPath), "utf-8");
   const plan = AgenticActionPlan.parse(JSON.parse(raw));
-  const selected = plan.actions.filter((action) => action.tool === "request_operator_clarification");
+  const selected = plan.actions.filter((action) => capabilityOf(plan, action) === "request_operator_clarification");
   if (selected.length !== 1 || plan.actions.length !== 1) {
     throw new Error("operator clarification requires exactly one request_operator_clarification action");
   }
@@ -598,7 +780,9 @@ export async function writeOperatorClarificationRequest(workspaceDir: string, ac
     "",
     "## Requested decision", "", action.rationale, "",
     "## Findings requiring a decision", "",
-    ...requested.flatMap((finding) => [`- **${finding.id}** (${finding.severity}): ${finding.summary}`]),
+    // The finding's own diagnostic, which is what the producer wrote for an
+    // operator; a prose summary was the planner's paraphrase of it.
+    ...requested.flatMap((finding) => [`- **${finding.id}** (${finding.severity}): ${finding.diagnostic}`]),
     "",
   ].join("\n"), "utf-8");
   return "reviews/clarification-request.md";

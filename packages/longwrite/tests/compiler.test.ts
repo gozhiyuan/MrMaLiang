@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { metricsOfTier, metricDefinition } from "../src/lib/registry/metrics.js";
 import { parse as parseYaml } from "yaml";
 import { compileModeToManifest, manifestToYaml } from "../src/lib/compiler.js";
 import { loadMode } from "../src/lib/modes.js";
@@ -87,7 +88,13 @@ describe("compileModeToManifest", () => {
       | { type?: string; allowed_actions?: string[] }
       | undefined;
     expect(researchDispatch?.type).toBe("action_dispatch");
-    expect(researchDispatch?.allowed_actions).toEqual(["targeted_research_expansion"]);
+    // Every corpus-side repair the splitter routes into this phase. A narrower
+    // allowlist rejected exactly the actions the split had just put here, and a
+    // capability in no group at all was dropped before dispatch entirely.
+    // Registry order, derived from the phase table rather than restated here.
+    expect(researchDispatch?.allowed_actions?.slice().sort()).toEqual([
+      "repair_bibliography", "repair_citation_plan", "repair_source_metadata", "targeted_research_expansion",
+    ]);
 
     const claimScore = childStage(stages as unknown as Array<Record<string, unknown>>, "improve", "claim_score") as
       | { runtime?: string; command?: { args: string[] } }
@@ -131,7 +138,33 @@ describe("compileModeToManifest", () => {
     expect(finalValidate?.command?.args).toEqual(expect.arrayContaining(["validate", "research", "."]));
 
     const roundTrip = parseYaml(manifestToYaml(manifest));
-    expect(roundTrip.workflow.stages).toHaveLength(mode.workflow.stages.length + 1);
+    // Stages the compiler adds that the mode does not declare: the
+    // final-release recovery loop, the diagnosis subflow the kernel reaches on
+    // a `diagnose` outcome and the packet that stage reads, the reachability
+    // verdict, the two script measurement tiers, the target reconciliation that
+    // populates the ledger every selector reserves against, the disagreement
+    // assessment and the guarded adjudication that resolves it, and one
+    // acquisition stage per model or external metric. Counted from the registry rather
+    // than hardcoded, so registering a non-script metric does not silently make
+    // this assertion wrong.
+    const modelMetrics = [...metricsOfTier("release"), ...metricsOfTier("round")]
+      .filter((metric) => metricDefinition(metric).measurement_kind !== "script");
+    expect(roundTrip.workflow.stages)
+      .toHaveLength(mode.workflow.stages.length + 9 + modelMetrics.length);
+    // The ledger is populated BEFORE the first selector reads it. Declared but
+    // never scheduled, `reconcile-targets` left every selector reserving
+    // against an empty ledger and ranking whatever it happened to see.
+    const stageIds = roundTrip.workflow.stages.map((stage: { id: string }) => stage.id);
+    expect(stageIds).toContain("reconcile_targets");
+    expect(stageIds.indexOf("reconcile_targets")).toBeLessThan(stageIds.indexOf("fulltext"));
+    // The adjudication branch is executable, and it runs BEFORE the acquisition
+    // that refuses an unadjudicated value. Declared without it, the acquisition
+    // made review_score permanently unavailable on any real disagreement.
+    expect(stageIds).toContain("adjudicate_review_score");
+    expect(stageIds.indexOf("assess_review_disagreement"))
+      .toBeLessThan(stageIds.indexOf("adjudicate_review_score"));
+    expect(stageIds.indexOf("adjudicate_review_score"))
+      .toBeLessThan(stageIds.indexOf("acquire_review_score"));
     expect(new Set(roundTrip.workflow.stages.map((stage: { phase?: string }) => stage.phase))).toEqual(
       new Set(["specify", "research", "synthesize", "write", "improve", "release"]),
     );
@@ -476,13 +509,16 @@ describe("compileModeToManifest", () => {
     expect(loop.stages.find((stage) => stage.id === "revise")).toBeUndefined();
     expect(loop.stages.find((stage) => stage.id === "research_action_dispatch")).toMatchObject({
       type: "action_dispatch",
-      max_actions: 1,
-      allowed_actions: ["targeted_research_expansion"],
+      // Objective isolation may split a single capability into multiple
+      // independently verified repairs, so this cap must bound a practical
+      // round rather than the number of catalog entries.
+      max_actions: 20,
+      allowed_actions: ["repair_bibliography", "repair_citation_plan", "repair_source_metadata", "targeted_research_expansion"],
     });
     expect(loop.stages.find((stage) => stage.id === "action_dispatch")).toMatchObject({
       type: "action_dispatch",
-      max_actions: 3,
-      allowed_actions: ["revise_sections", "revise_visual_plan", "request_operator_clarification"],
+      max_actions: 20,
+      allowed_actions: ["request_operator_clarification", "revise_sections", "revise_visual_plan"],
     });
     const expansion = workflow.tool_catalog?.find((action) => action.id === "targeted_research_expansion");
     expect(expansion?.command).toMatchObject({ args: expect.arrayContaining(["research", "expand", ".", "--action-plan", "reviews/action-plan.json"]) });

@@ -86,7 +86,7 @@ export const REQUIRED_EFFECTS = [
   "remove_redundant_prose", "expand_argument",
   "repair_artifact_content", "repair_artifact_placement", "repair_template",
   "acquire_additional_evidence", "upgrade_source_quality", "repair_source_metadata",
-  "repair_bibliography_consistency", "repair_toolchain",
+  "repair_bibliography_consistency", "repair_citation_plan", "repair_toolchain",
 ] as const;
 export type RequiredEffect = (typeof REQUIRED_EFFECTS)[number];
 export const RequiredEffectSchema = z.enum(REQUIRED_EFFECTS);

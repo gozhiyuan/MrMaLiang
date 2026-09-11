@@ -4,6 +4,7 @@ import { ExperimentManifest, TrialRecord } from "@mr-maliang/research-protocol";
 export { ExperimentManifest, TrialRecord } from "@mr-maliang/research-protocol";
 
 const ProjectId = z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "must be a slug-like id");
+const WorkspaceRelativePath = z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/-]*$/, "must be a safe workspace-relative path");
 export const ExperimentProfile = z.enum(["existing_code", "public_benchmark", "from_scratch"]);
 export const ExperimentAuthoringMode = z.enum(["prescribed", "agentic"]);
 
@@ -125,6 +126,9 @@ export const CommandRunner = z.object({
   /** Shell command run inside the experiment workspace. */
   command: z.string().min(1).optional(),
   workdir: z.string().min(1).optional(),
+  /** Every local runner source/config file required at execution time. These
+   * are explicit IR reads so an isolated stage never receives ambient files. */
+  input_files: z.array(WorkspaceRelativePath).max(100).default([]),
 }).strict();
 
 /** AutoScientists remains an independently installed application. The adapter

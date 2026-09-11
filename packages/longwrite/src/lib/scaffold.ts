@@ -460,6 +460,30 @@ export async function scaffoldWorkspace(opts: ScaffoldOptions): Promise<string[]
       }, null, 2),
       "utf-8",
     );
+    // Dry-run fixture: a schema-valid diagnosis, so the corrective path the
+    // kernel takes when an objective comes back unmet can actually complete on
+    // the free pass. Without one the diagnosis stage fails its own validator
+    // and the run stops at the transition it was meant to rehearse.
+    const diagnosisDir = path.join(fixturesRoot, "reviews");
+    await fs.mkdir(diagnosisDir, { recursive: true });
+    await fs.writeFile(
+      path.join(diagnosisDir, "diagnosis.json"),
+      JSON.stringify({
+        version: 1,
+        objective: "dry-run objective",
+        // `operator_required`, because it is the one decision that is
+        // applicable to WHATEVER objective a dry run happens to fail on. A
+        // fixture naming a fixed next_effect is a strategy for one gate and an
+        // unroutable triple for every other, so the rehearsal failed on the
+        // corrective step it exists to rehearse. The kernel still consumes this
+        // decision — it raises an operator block and stops — which is exactly
+        // what a dry run should demonstrate.
+        decision: "operator_required",
+        operator_question: "Dry-run fixture: which strategy should this objective be retried with?",
+        detail: "dry-run fixture: no automated strategy remains for this objective.",
+      }, null, 2),
+      "utf-8",
+    );
     await fs.writeFile(
       path.join(fixturesRoot, "outline.json"),
       JSON.stringify({

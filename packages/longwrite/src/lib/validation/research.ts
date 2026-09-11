@@ -406,7 +406,9 @@ function checkCitationMarkers(
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string, chapterPath?: string) => findings.push(rFinding({
     gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status"),
+    // Marker presence is a structural property, not the dangling-marker
+    // metric. Its exact owning gate must run again after prose changes.
+    acceptance_metric: null,
     ...(chapterPath === undefined ? {} : { path: chapterPath }) }));
   if (chapters.length === 0) {
     fail("chapters", "citation_markers_present: no chapter Markdown files found in chapters/");
@@ -436,13 +438,6 @@ function checkSourceCoverage(
     gate: GATE, kind: "corpus", effect: "acquire_additional_evidence", subject, diagnostic,
     acceptance_metric: metricId("cited_sources") }));
   const planBySection = new Map(citationPlan.map((entry) => [entry.section_id, entry]));
-  for (const entry of citationPlan) {
-    for (const sourceId of entry.source_ids) {
-      if (!sourceIds.has(sourceId)) {
-        fail(sourceId, `source_coverage: citation plan references unknown source id "${sourceId}"`);
-      }
-    }
-  }
   for (const chapter of chapters) {
     const sectionId = sectionIdFromChapter(chapter.rel);
     const plan = planBySection.get(sectionId);
@@ -455,6 +450,39 @@ function checkSourceCoverage(
   return checkOf(GATE, findings);
 }
 
+/** The citation plan is an allocation contract, with its own repair path. It
+ * is neither bibliography data nor source metadata: an unknown source id here
+ * is fixed by regenerating the allocation from the current outline/corpus. */
+async function checkCitationPlan(
+  workspaceDir: string, citationPlan: CitationPlanEntry[], sourceIds: Set<string>,
+): Promise<ValidationCheck> {
+  const outline = await jsonIfExists(path.join(workspaceDir, "outline.json"));
+  if (!outline || !Array.isArray(outline.sections)) {
+    return note("citation_plan_consistent", true, "outline.json is not available; citation-plan allocation has not begun");
+  }
+  const sectionIds = outline.sections.flatMap((section) =>
+    section && typeof section === "object" && typeof (section as Record<string, unknown>).id === "string"
+      ? [(section as Record<string, unknown>).id as string] : []);
+  const expected = new Set(sectionIds);
+  const seen = new Set<string>();
+  const findings: Finding[] = [];
+  const fail = (subject: string, diagnostic: string) => findings.push(rFinding({
+    gate: "citation_plan_consistent", kind: "corpus", effect: "repair_citation_plan", subject,
+    path: "sources/citation_plan.jsonl", diagnostic, acceptance_metric: null,
+  }));
+  for (const entry of citationPlan) {
+    if (seen.has(entry.section_id)) fail(`duplicate-${entry.section_id}`, `citation_plan_consistent: duplicate allocation for outline section "${entry.section_id}"`);
+    seen.add(entry.section_id);
+    if (!expected.has(entry.section_id)) fail(`extra-${entry.section_id}`, `citation_plan_consistent: allocation names no outline section "${entry.section_id}"`);
+    if (entry.source_ids.length === 0) fail(`empty-${entry.section_id}`, `citation_plan_consistent: section "${entry.section_id}" has no allocated source`);
+    for (const sourceId of entry.source_ids) {
+      if (!sourceIds.has(sourceId)) fail(`unknown-${entry.section_id}-${sourceId}`, `citation_plan_consistent: section "${entry.section_id}" references unknown source id "${sourceId}"`);
+    }
+  }
+  for (const id of expected) if (!seen.has(id)) fail(`missing-${id}`, `citation_plan_consistent: outline section "${id}" has no allocation`);
+  return checkOf("citation_plan_consistent", findings);
+}
+
 function checkBibliography(
   bibliography: string | null,
   sources: ClassifiedSource[],
@@ -463,7 +491,7 @@ function checkBibliography(
   const findings: Finding[] = [];
   const fail = (subject: string, diagnostic: string) => findings.push(rFinding({
     gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status") }));
+    acceptance_metric: null }));
   if (bibliography === null || bibliography.trim().length === 0) {
     fail("bibliography", "bibliography_consistent: sources/bibliography.bib is missing or empty");
     return checkOf(GATE, findings);
@@ -531,51 +559,13 @@ function checkCitationVerification(
 ): ValidationCheck {
   const GATE = "citation_verification";
   const verification = computeCitationVerification(sources, citationPlan, chapters, bibliography);
-  // Classified from the same inputs the report was computed from, never by
-  // parsing its sentences. Three different defects hide behind one gate and
-  // each has a different owner: prose that cites wrongly, a source record that
-  // does not exist, and a bibliography that does not resolve.
+  // Diagnostic only.  Marker resolution, planned-source coverage, bibliography
+  // consistency, source identity, URL liveness, and evidence-ledger support
+  // have dedicated gates with exact verifiers.  Emitting a second routable
+  // finding from this aggregate would bind a metadata or bibliography repair
+  // to marker-only `citation_verification_status` and let it claim success
+  // without repairing its own defect.
   const findings: Finding[] = [];
-  const sourceIds = new Set(sources.map((source) => source.id));
-  const cited = new Set<string>();
-  const prose = (subject: string, diagnostic: string, chapterPath?: string) => findings.push(rFinding({
-    gate: GATE, kind: "chapter_prose", effect: "repair_citation_marker", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status"),
-    ...(chapterPath === undefined ? {} : { path: chapterPath }) }));
-  if (chapters.length === 0) prose("chapters", "citation_verification: no chapter Markdown files found in chapters/");
-  for (const chapter of chapters) {
-    const ids = markers(chapter.content);
-    const section = sectionIdFromChapter(chapter.rel);
-    if (ids.length === 0) prose(section, `citation_verification: ${chapter.rel} has no [source:<id>] markers`, chapter.rel);
-    for (const id of ids) {
-      cited.add(id);
-      if (!sourceIds.has(id)) prose(`${section}-${id}`, `citation_verification: ${chapter.rel} cites unknown source id "${id}"`, chapter.rel);
-    }
-    const planned = citationPlan.find((entry) => entry.section_id === section);
-    if (planned && !planned.source_ids.some((id) => ids.includes(id))) {
-      prose(`${section}-planned`, `citation_verification: ${chapter.rel} cites none of its planned sources (${planned.source_ids.join(", ")})`, chapter.rel);
-    }
-  }
-  for (const id of new Set(citationPlan.flatMap((entry) => entry.source_ids))) {
-    // A planned id with no record behind it is a metadata defect: the prose
-    // cannot cite a source that was never classified.
-    if (!sourceIds.has(id)) findings.push(rFinding({
-      gate: GATE, kind: "source_record", effect: "repair_source_metadata", subject: id,
-      acceptance_metric: metricId("citation_verification_status"),
-      diagnostic: `citation_verification: citation plan references unknown source id "${id}"` }));
-    else if (!cited.has(id)) prose(`planned-${id}`, `citation_verification: planned source "${id}" is not cited in any chapter`);
-  }
-  const bib = (subject: string, diagnostic: string) => findings.push(rFinding({
-    gate: GATE, kind: "bibliography", effect: "repair_bibliography_consistency", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status") }));
-  if (bibliography === null || bibliography.trim().length === 0) {
-    bib("bibliography", "citation_verification: sources/bibliography.bib is missing or empty");
-  } else {
-    const keys = bibtexKeys(bibliography);
-    for (const source of sources) {
-      if (!keys.has(bibtexKey(source))) bib(source.id, `citation_verification: bibliography is missing source id "${source.id}"`);
-    }
-  }
   return {
     id: gateId(GATE), pass: verification.pass && findings.length === 0, findings,
     measurements: [], requires_diagnosis: false,
@@ -622,7 +612,7 @@ async function checkCitationUrlLiveness(
   // that cites it: the citation is correct and the metadata behind it is not.
   const fail = (subject: string, diagnostic: string): Finding => rFinding({
     gate: GATE, kind: "source_record", effect: "repair_source_metadata", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status") });
+    acceptance_metric: null });
   if (result.error) {
     return requireLiveUrls
       ? checkOf(GATE, [fail("verification-log", "citation_url_liveness: sources/citation-verification.jsonl is required when source_policy.require_live_urls is true")])
@@ -918,7 +908,7 @@ async function checkFullResearchContracts(workspaceDir: string): Promise<Validat
   const identity = await readJsonlFile<Record<string, unknown>>(workspaceDir, "sources/source-identities.jsonl");
   const identityFail = (subject: string, diagnostic: string): Finding => rFinding({
     gate: "full_source_identity", kind: "source_record", effect: "repair_source_metadata", subject, diagnostic,
-    acceptance_metric: metricId("citation_verification_status") });
+    acceptance_metric: null });
   const identityFailures = identity.error
     ? [identityFail("identities", identity.error)]
     : identity.rows
@@ -997,7 +987,7 @@ export async function validateResearchWorkspace(
           return checkOf("citation_evidence_ledger", ledger.findings.map((diagnostic, index) => rFinding({
             gate: "citation_evidence_ledger", kind: "chapter_prose", effect: "repair_citation_marker",
             subject: `entry-${index + 1}`, diagnostic,
-            acceptance_metric: metricId("citation_verification_status") })));
+            acceptance_metric: null })));
         })(),
       ]
     : [];
@@ -1009,6 +999,7 @@ export async function validateResearchWorkspace(
       subject: `artifact-${index + 1}`, severity: "critical", diagnostic,
       acceptance_metric: metricId("candidate_count") }))),
     checkCitationMarkers(chapters, sourceIds),
+    await checkCitationPlan(workspaceDir, planResult.rows, sourceIds),
     evidenceEnabled
       ? note("source_coverage", true, "outline-specific evidence packets supersede the legacy generic citation plan")
       : checkSourceCoverage(chapters, planResult.rows, sourceIds),
@@ -1018,9 +1009,9 @@ export async function validateResearchWorkspace(
       : checkLiteratureQuality(sources),
     config === null ? note("prose_redundancy", true, "longwrite.yaml unavailable; redundancy gate skipped")
       : checkProseRedundancy(chapters, config.research.quality_control),
-    evidenceEnabled
-      ? checkEvidenceCitationIntegrity(chapters, sourceIds)
-      : checkCitationVerification(sources, planResult.rows, chapters, bibliography),
+    // Citation marker, bibliography, identity, URL and evidence-ledger gates
+    // are deliberately independent above. A dangling-marker metric must never
+    // certify an unrelated bibliography or locator repair.
     await checkResearchPolicy(workspaceDir, sources),
     await checkCitedLiteratureReleaseGates(workspaceDir, chapters, sources, asOfDate),
     await checkCitationUrlLiveness(workspaceDir, requireLiveUrls),
@@ -1037,6 +1028,23 @@ export async function validateResearchWorkspace(
     ...(await checkPublicationArtifacts(workspaceDir)),
     await checkManuscriptBuild(workspaceDir),
   ];
+  const aggregateCitation = checkCitationVerification(sources, planResult.rows, chapters, bibliography);
+  // This aggregate must remain in the release report even though it emits no
+  // broad routable finding.  A failure with every decomposed component green
+  // is evidence the decomposition is incomplete, so force diagnosis instead
+  // of silently letting a dashboard report an absent/unknown gate.
+  const citationComponents = new Set([
+    "citation_markers_present", "citation_plan_consistent", "source_coverage",
+    "bibliography_consistent", "citation_url_liveness", "citation_evidence_ledger",
+    "full_source_identity",
+  ]);
+  // Diagnosis is the aggregate's escape hatch only when every exact component
+  // has already passed.  If (say) URL liveness or bibliography consistency
+  // emitted a finding, that finding is the actionable explanation; adding a
+  // second aggregate diagnosis would pre-empt ordinary dispatch.
+  aggregateCitation.requires_diagnosis = !aggregateCitation.pass
+    && checks.filter((check) => citationComponents.has(String(check.id))).every((check) => check.pass);
+  checks.push(aggregateCitation);
   return { pass: checks.every((check) => check.pass), checks };
 }
 
@@ -1103,8 +1111,6 @@ export const PRODUCER = defineProducer({
     { id: "taxonomy_direct_evidence", class: "manuscript", findings: [
       { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
         acceptance_metric: "taxonomy_cell_ab_sources" },
-      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
-        acceptance_metric: "taxonomy_cell_ab_sources" },
     ] },
     { id: "research_artifacts_present", class: "manuscript", findings: [
       { kind: "evidence_packet", effect: "acquire_additional_evidence", capability: "targeted_research_expansion",
@@ -1112,15 +1118,19 @@ export const PRODUCER = defineProducer({
     ] },
     { id: "citation_url_liveness", class: "manuscript", findings: [
       { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
-        acceptance_metric: "citation_verification_status" },
+        acceptance_metric: null },
     ] },
     { id: "full_source_identity", class: "manuscript", findings: [
       { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
-        acceptance_metric: "citation_verification_status" },
+        acceptance_metric: null },
     ] },
     { id: "bibliography_consistent", class: "manuscript", findings: [
       { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
-        acceptance_metric: "citation_verification_status" },
+        acceptance_metric: null },
+    ] },
+    { id: "citation_plan_consistent", class: "manuscript", findings: [
+      { kind: "corpus", effect: "repair_citation_plan", capability: "repair_citation_plan",
+        acceptance_metric: null },
     ] },
     { id: "landmark_citation_coverage", class: "manuscript", observes: ["landmark_citation_coverage_ratio"], findings: [
       { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
@@ -1167,28 +1177,29 @@ export const PRODUCER = defineProducer({
     ] },
     { id: "citation_markers_present", class: "manuscript", findings: [
       { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
-        acceptance_metric: "citation_verification_status" },
+        acceptance_metric: null },
+      // The second strategy for the same defect, and the reason diagnosis has
+      // anything to choose between here. A marker that resolves to nothing is
+      // repaired either by fixing the marker or — when the claim it decorates
+      // has no support to point at — by citing something that does. Declaring
+      // only the first left `retry_with_different_effect` with no effect it
+      // could name for the most common manuscript failure in this pipeline.
+      { kind: "chapter_prose", effect: "add_supporting_citation", capability: "revise_sections",
+        acceptance_metric: null },
     ] },
     { id: "citation_evidence_ledger", class: "manuscript", findings: [
       { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
-        acceptance_metric: "citation_verification_status" },
+        acceptance_metric: null },
     ] },
-    { id: "citation_verification", class: "manuscript", observes: ["citation_verification_status"], findings: [
-      { kind: "chapter_prose", effect: "repair_citation_marker", capability: "revise_sections",
-        acceptance_metric: "citation_verification_status" },
-      { kind: "source_record", effect: "repair_source_metadata", capability: "repair_source_metadata",
-        acceptance_metric: "citation_verification_status" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
-        acceptance_metric: "citation_verification_status" },
-    ] },
+    // Aggregate diagnostic only; its component citation gates emit the
+    // routable findings and each is accepted by its own exact verifier.
+    { id: "citation_verification", class: "measurement", observes: ["citation_verification_status"], findings: [] },
     { id: "claim_support", class: "manuscript", observes: ["claim_support"], findings: [
       { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
         acceptance_metric: "claim_support" },
     ] },
     { id: "claim_contradictions", class: "manuscript", observes: ["claim_contradictions"], findings: [
       { kind: "chapter_prose", effect: "resolve_contradiction", capability: "revise_sections",
-        acceptance_metric: "claim_contradictions" },
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
         acceptance_metric: "claim_contradictions" },
     ] },
     { id: "prose_redundancy", class: "manuscript", observes: ["prose_redundancy"], findings: [
@@ -1203,10 +1214,6 @@ export const PRODUCER = defineProducer({
     ] },
     { id: "review_target", class: "manuscript", observes: ["review_score"], findings: [
       { kind: "chapter_prose", effect: "remove_unsupported_claim", capability: "revise_sections",
-        acceptance_metric: "review_score" },
-      { kind: "figure_spec", effect: "repair_artifact_content", capability: "revise_visual_plan",
-        acceptance_metric: "review_score" },
-      { kind: "outline", effect: "replace_organizing_claim", capability: "reopen_outline",
         acceptance_metric: "review_score" },
     ] },
     { id: "full_research_contracts", class: "manuscript", findings: [
@@ -1227,8 +1234,6 @@ export const PRODUCER = defineProducer({
     ] },
     { id: "manuscript_build", class: "manuscript", findings: [
       { kind: "figure_spec", effect: "repair_artifact_placement", capability: "revise_visual_plan",
-        acceptance_metric: "latex_build_status" },
-      { kind: "bibliography", effect: "repair_bibliography_consistency", capability: "repair_bibliography",
         acceptance_metric: "latex_build_status" },
       { kind: "toolchain", effect: "repair_toolchain", capability: "request_operator_clarification",
         acceptance_metric: "latex_build_status" },

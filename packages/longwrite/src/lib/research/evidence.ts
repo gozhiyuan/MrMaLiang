@@ -3,6 +3,9 @@ import path from "node:path";
 import { bibtexKey } from "./bibtex.js";
 import { citationMarkers } from "./citation-markers.js";
 import { parseJsonl } from "./jsonl.js";
+import {
+  allocateTargetsToSections, eligibleTargets, reserveForSelector, settleSelectorReservation,
+} from "./reservation.js";
 import type { ClassifiedSource } from "./types.js";
 import type { EmbeddingClient } from "./embeddings.js";
 import { sourceMatchesTaxonomy } from "./taxonomy.js";
@@ -78,7 +81,12 @@ async function readJsonl<T>(workspaceDir: string, rel: string): Promise<T[]> {
   return parseJsonl<T>(raw);
 }
 
-function safeFileStem(value: string): string {
+/** A filesystem-safe stem for an id.
+ *
+ * Exported because every path derived from a finding, action or source id must
+ * pass through the SAME sanitizer: a second copy is a second thing to get
+ * wrong, and this one is what the ids in this repository were checked against. */
+export function safeFileStem(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
@@ -288,11 +296,27 @@ function isAcceptedSource(source: ClassifiedSource): boolean {
   return Boolean(source.identifiers?.doi) && !/(arxiv|preprint|unknown)/i.test(source.venue);
 }
 
+/** Sources a single section packet may name. Reserved targets are seeded ahead
+ * of retrieval, so a landmark cannot be truncated out of a packet by
+ * generically retrieved material. */
+const PACKET_SOURCE_CAPACITY = 12;
+
 export async function allocateSectionEvidence(workspaceDir: string, taxonomy: string[] = [], opts: { embeddingClient?: EmbeddingClient } = {}): Promise<{
   sections: number;
   packets: string[];
   coveragePath: string;
+  /** Additive: every caller of the previous shape keeps working. */
+  selected: string[];
 }> {
+  // Per SECTION, not globally. A landmark allocated to section 3 must not
+  // consume section 6's packet capacity, and must not be proposed there at
+  // all: reserving globally made one section's packet infeasible because of
+  // another section's landmarks.
+  const { excluded } = await reserveForSelector(
+    workspaceDir, "section_allocation", PACKET_SOURCE_CAPACITY);
+  const excludedIds = new Set(excluded.map((entry) => entry.source_id));
+  const allocatedIds = new Set<string>();
+  const reservedEverywhere: string[] = [];
   const [sections, sources, config] = await Promise.all([
     outlineSections(workspaceDir),
     readJsonl<ClassifiedSource>(workspaceDir, "sources/classified_sources.jsonl"),
@@ -305,6 +329,10 @@ export async function allocateSectionEvidence(workspaceDir: string, taxonomy: st
   // be far from the wording used in a source. Keep a local chunk catalogue so
   // an already-selected attributable source can supply a bounded fallback
   // instead of producing an empty evidence packet.
+  // Assign before reserving: a target with no section is reserved nowhere and
+  // would sit evidence_validated forever while every packet fills with
+  // generically retrieved material.
+  const { targets: ledger } = await allocateTargetsToSections(workspaceDir, sections);
   const allChunks = await readJsonl<EvidenceChunk>(workspaceDir, CHUNKS_PATH).catch(() => []);
   const evidenceDir = path.join(workspaceDir, EVIDENCE_DIR);
   await fs.mkdir(evidenceDir, { recursive: true });
@@ -339,13 +367,21 @@ export async function allocateSectionEvidence(workspaceDir: string, taxonomy: st
       .map((source) => source.id);
     const acceptedStart = sectionIndex * acceptedPerSection;
     const allocatedAcceptedIds = acceptedCore.slice(acceptedStart, acceptedStart + acceptedPerSection).map((source) => source.id);
+    // Only the targets allocated to THIS section, and reserved ahead of
+    // retrieval so the ranking spends what is left of the packet.
+    const sectionReserved = eligibleTargets(ledger, "section_allocation", section.id)
+      .map((record) => record.source_id!)
+      .filter((id) => !excludedIds.has(id));
+    reservedEverywhere.push(...sectionReserved);
     const sourceIds = [...new Set([
+      ...sectionReserved,
       ...section.sourceIds,
       ...allocatedAcceptedIds,
       ...chunkSourceIds,
       ...fallbackSourceIds,
       ...core.map((source) => source.id),
-    ])].slice(0, 12);
+    ])].filter((id) => !excludedIds.has(id)).slice(0, PACKET_SOURCE_CAPACITY);
+    for (const id of sourceIds) allocatedIds.add(id);
     const seen = new Set<string>();
     const availableChunks = [...retrieved, ...allChunks.filter((chunk) => sourceIds.includes(chunk.source_id))]
       .filter((chunk) => {
@@ -395,7 +431,10 @@ export async function allocateSectionEvidence(workspaceDir: string, taxonomy: st
     packets,
   };
   await fs.writeFile(path.join(workspaceDir, COVERAGE_PATH), `${JSON.stringify(coverage, null, 2)}\n`, "utf-8");
-  return { sections: packets.length, packets, coveragePath: COVERAGE_PATH };
+  const selected = [...allocatedIds];
+  await settleSelectorReservation(workspaceDir, "section_allocation", selected,
+    [...new Set(reservedEverywhere)], excluded);
+  return { sections: packets.length, packets, coveragePath: COVERAGE_PATH, selected };
 }
 
 export async function consolidateCitationLedger(workspaceDir: string): Promise<{ entries: number; path: string }> {

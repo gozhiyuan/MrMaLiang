@@ -125,6 +125,8 @@ async function checkManifest(workspaceDir: string): Promise<{ check: StructuredC
 function blockedOnManifest(gate: string): StructuredCheck {
   return {
     id: gateId(gate), pass: false, measurements: [], requires_diagnosis: false,
+    // Not a verdict about the artifact: the gate never ran.
+    blocked: true,
     findings: [finding({
       gate, kind: "figure_spec", effect: "repair_artifact_content", subject: "manifest",
       severity: "critical", acceptance_metric: "figures",

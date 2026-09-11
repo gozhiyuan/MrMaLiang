@@ -6,13 +6,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
+/** A synchronous child blocks this worker's event loop, so vitest's own
+ * timeout cannot interrupt it. Without a timeout of its own, a child that
+ * never exits hangs the entire run instead of failing one test. */
+const SUBPROCESS_TIMEOUT_MS = 300_000;
+
 const monorepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const cli = path.join(monorepoRoot, "apps", "maliang", "dist", "cli.js");
 const temporaryRoot = path.join(os.tmpdir(), `maliang-e2e-${Date.now()}`);
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 function invoke(args: string[]): void {
-  execFileSync(process.execPath, [cli, ...args], { cwd: monorepoRoot, stdio: "pipe" });
+  execFileSync(process.execPath, [cli, ...args], { cwd: monorepoRoot, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
 }
 
 afterAll(async () => { await fs.rm(temporaryRoot, { recursive: true, force: true }); });
@@ -21,13 +26,13 @@ describe("empirical handoff", () => {
   it("imports only a complete audited manifest and creates bounded writing evidence", async () => {
     const repository = path.join(temporaryRoot, "audited-repository");
     await fs.mkdir(repository, { recursive: true });
-    execFileSync("git", ["init"], { cwd: repository, stdio: "pipe" });
-    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository, stdio: "pipe" });
-    execFileSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository, stdio: "pipe" });
+    execFileSync("git", ["init"], { cwd: repository, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: repository, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
+    execFileSync("git", ["config", "user.name", "MrMaLiang Test"], { cwd: repository, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
     await fs.writeFile(path.join(repository, "README.md"), "# Audited repository\n", "utf8");
-    execFileSync("git", ["add", "README.md"], { cwd: repository, stdio: "pipe" });
-    execFileSync("git", ["commit", "-m", "fixture"], { cwd: repository, stdio: "pipe" });
-    const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+    execFileSync("git", ["add", "README.md"], { cwd: repository, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
+    execFileSync("git", ["commit", "-m", "fixture"], { cwd: repository, stdio: "pipe", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" });
+    const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8", timeout: SUBPROCESS_TIMEOUT_MS, killSignal: "SIGKILL" }).trim();
     const workspace = path.join(temporaryRoot, "paper");
     invoke(["init", workspace, "--template", "paper.empirical-import", "--topic", "Audited handoff", "--repository", repository]);
     const writingConfig = await fs.readFile(path.join(workspace, "writing", "longwrite.yaml"), "utf8");
