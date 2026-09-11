@@ -182,7 +182,11 @@ describe("corrupt PDF attribution", () => {
     // same symptom; naming the placement plan asserts a cause nobody measured.
     expect(check.findings.some((f) => f.artifact.kind === "figure_spec")).toBe(false);
     expect(check.pass).toBe(false);
-    expect(check.requires_diagnosis).toBe(true);
+    // With Poppler, pdfinfo proves the PDF itself is unreadable and the gate
+    // asks for diagnosis. Minimal CI images may not ship pdfinfo; then the
+    // exact, actionable toolchain finding correctly replaces diagnosis.
+    const hasToolchainFinding = check.findings.some((f) => f.artifact.kind === "toolchain");
+    expect(check.requires_diagnosis).toBe(!hasToolchainFinding);
   });
 });
 

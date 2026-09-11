@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 — 2026-09-11
+
+- Make corrupt-PDF diagnosis coverage portable across machines with and without the Poppler `pdfinfo` executable.
+
 ## 0.5.1 — 2026-09-10
 
 - Fix unified preflight parsing for Contract IR v2 structured checks, so a valid flagship workspace can enter its paid runtime only after its real component checks pass.
